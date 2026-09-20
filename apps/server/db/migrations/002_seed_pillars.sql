@@ -1,4 +1,4 @@
--- 002: seed pilar konten default (5 pilar dari PRD)
+-- 002: seed default content pillars (5 pillars from PRD) — content intentionally Indonesian
 insert into pillars (name, description, is_news, sort_order) values
   ('Drama keseharian developer',
    'Cerita dan drama sehari-hari developer: debugging berjam-jam, code review yang bikin mood naik-turun, estimasi yang meleset, permintaan klien yang berubah-ubah, meeting yang bisa jadi email.',
@@ -20,4 +20,4 @@ on conflict (name) do nothing;
 insert into rotation_state (id, last_platform, last_ig_format, last_li_format, last_pillar_id)
 values (true, 'linkedin', 'reels', 'text', null)
 on conflict (id) do nothing;
--- Seed: run berikutnya = instagram carousel, pilar sort_order 1.
+-- Seed: next run = instagram carousel, pillar sort_order 1.

@@ -1,5 +1,5 @@
-// Orkestrasi satu run: slot → ideation → writer → critic → (render/send dipanggil dari luar).
-// Semua query scope group; LLM pakai GroupCfg (group ?? env).
+// Orchestrates one run: slot → ideation → writer → critic → (render/send called from outside).
+// All queries group-scoped; LLM uses GroupCfg (group ?? env).
 import { sql } from './db.ts';
 import { getRotation, getActivePillars, commitSent } from './db.ts';
 import { nextSlot, forcedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
@@ -35,14 +35,14 @@ async function getHistory(pillarId: string): Promise<string[]> {
 
 async function getPillar(id: string): Promise<PillarFull> {
   const r = (await sql`select id, name, description, is_news from pillars where id = ${id}`)[0] as any;
-  if (!r) throw new Error(`pillar ${id} tidak ditemukan`);
+  if (!r) throw new Error(`pillar ${id} not found`);
   return r;
 }
 
-// RSS context: null → skip (pilar non-news ATAU feed gagal → fallback non-news).
-// Step build order 9; sekarang stub null agar pipeline jalan dulu.
+// RSS context: null → skip (non-news pillar OR feed failure → non-news fallback).
+// Build step order 9; null stub for now so the pipeline runs first.
 async function getNewsContext(): Promise<string | null> {
-  return null; // ponytail: diisi di build step rss.ts
+  return null; // ponytail: filled in build step rss.ts
 }
 
 export async function resolveSlot(
@@ -54,21 +54,21 @@ export async function resolveSlot(
   return nextSlot(state, pillars, true);
 }
 
-// Fase LLM penuh: ideation → writer → critic. Tanpa render, tanpa kirim.
+// Full LLM phase: ideation → writer → critic. No render, no send.
 export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): Promise<RunResult> {
   const groupId = cfg.id;
   const pillar = await getPillar(slot.pillar_id);
   const usage: UsageAcc = {};
 
-  // slot untuk pilar berita tapi RSS belum ada → cari pilar non-news terdekat
+  // slot picked a news pillar but RSS isn't available → find the nearest non-news pillar
   let effPillar = pillar;
   if (pillar.is_news) {
     const news = await getNewsContext();
     if (!news) {
       const nonNews = (await sql`select id, name, description, is_news from pillars
         where group_id = ${groupId} and active and not is_news order by id limit 1`)[0] as any;
-      if (!nonNews) throw new Error('pilar berita tanpa RSS dan tidak ada pilar non-news');
-      console.log(`[pipeline] pilar berita tanpa RSS → fallback: ${nonNews.name}`);
+      if (!nonNews) throw new Error('news pillar without RSS and no non-news pillar available');
+      console.log(`[pipeline] news pillar without RSS → fallback: ${nonNews.name}`);
       effPillar = nonNews;
       slot = { ...slot, pillar_id: nonNews.id };
     }
@@ -101,7 +101,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   addUsage(usage, 'writer', w.usage);
   console.log(`[writer] ok format=${slot.format} tokens=${w.usage.completion}`);
 
-  // 3. critic (model terpisah) — guard sama, struktur harus tetap
+  // 3. critic (separate model) — same guard, structure must stay intact
   const c = await chatJson(
     cfg,
     criticModel(cfg),
@@ -118,8 +118,8 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${id.data.topic},
       ${captionOf(c.data)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(usage)})
     returning id`;
-  if (!post) throw new Error('insert post gagal');
-  console.log(`[pipeline] post #${post.id} draft tersimpan (group ${cfg.slug})`);
+  if (!post) throw new Error('insert post failed');
+  console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
   return { postId: post.id, slot, topic: id.data.topic, draft: c.data };
 }
@@ -131,11 +131,11 @@ function bodyOf(d: Draft): string {
   return JSON.stringify(d);
 }
 
-// Dipanggil SETELAH post terkirim — update status + rotasi atomik (spec #11).
+// Called AFTER the post is sent — status + rotation update atomically (spec #11).
 export async function markSent(groupId: string, postId: string, slot: Slot): Promise<void> {
   const next = nextState(await getRotation(groupId), slot);
   await commitSent(groupId, postId, slot, next);
-  console.log(`[pipeline] post #${postId} sent — rotasi maju: ${next.last_platform}`);
+  console.log(`[pipeline] post #${postId} sent — rotation advanced: ${next.last_platform}`);
 }
 
 export async function markFailed(postId: string, err: unknown): Promise<void> {
@@ -148,6 +148,6 @@ export async function createQueuedPost(groupId: string, slot: Slot, source: stri
     (group_id, platform, format, pillar_id, topic, caption, body, status, source)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${slot.pillar_id}, '', '', null, 'queued', ${source})
     returning id`;
-  if (!post) throw new Error('insert post gagal');
+  if (!post) throw new Error('insert post failed');
   return post.id;
 }

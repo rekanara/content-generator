@@ -1,5 +1,5 @@
--- 003_groups: multi-akun. 1 group = 1 akun/brand. Config LLM/TTS/Telegram
--- nullable → fallback ke env. Cron per group. Slug dipakai sebagai prefix MinIO.
+-- 003_groups: multi-account. 1 group = 1 account/brand. LLM/TTS/Telegram config
+-- nullable → fall back to env. Cron per group. Slug used as the MinIO prefix.
 begin;
 
 create table groups (
@@ -8,7 +8,7 @@ create table groups (
   name text not null,
   cron_expr text not null default '0 7 * * *',
   cron_enabled boolean not null default true,
-  -- config override; null = pakai env
+  -- config override; null = use env
   llm_base_url text, llm_api_key text, llm_model text, llm_model_critic text,
   tts_provider text, tts_voice text, tts_base_url text, tts_api_key text, tts_model text,
   telegram_bot_token text, telegram_chat_id text,
@@ -20,7 +20,7 @@ select 'default', 'Default', s.cron_expr, s.cron_enabled
 from settings s
 on conflict (slug) do nothing;
 
--- backfill sebelum set not null
+-- backfill before setting not null
 alter table pillars add column group_id uuid references groups(id);
 alter table pillars drop constraint pillars_name_key;
 alter table pillars add constraint pillars_name_unique unique (group_id, name);
@@ -41,7 +41,7 @@ alter table rotation_state add primary key (group_id);
 alter table posts add column group_id uuid references groups(id);
 update posts set group_id = (select id from groups where slug = 'default');
 
--- not null setelah backfill
+-- not null after backfill
 alter table pillars alter column group_id set not null;
 alter table templates alter column group_id set not null;
 alter table style_samples alter column group_id set not null;
@@ -53,7 +53,7 @@ create index templates_group_idx on templates (group_id, format, is_active);
 create index posts_group_idx on posts (group_id, created_at desc);
 create index style_samples_group_idx on style_samples (group_id, platform);
 
--- cron pindah ke groups
+-- cron moved to groups table
 drop table settings;
 
 commit;

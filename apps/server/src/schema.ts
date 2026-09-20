@@ -1,4 +1,4 @@
-// Type guard output LLM — trust boundary: apa pun dari LLM lewat sini dulu.
+// Type guards for LLM output — trust boundary: anything from the LLM goes through here first.
 import type { Format } from './state.ts';
 
 export type IdeationOut = { topic: string; angle: string };
@@ -45,14 +45,14 @@ export function isReelsOut(x: unknown): x is ReelsOut {
 }
 
 export function isTextOut(x: unknown): x is TextOut {
-  return obj(x) && str(x.body) && x.body.length >= 100; // post LinkedIn layak minimal segini
+  return obj(x) && str(x.body) && x.body.length >= 100; // minimum for a decent LinkedIn post
 }
 
-// Guard sesuai format slot.
+// Guard matching the slot format.
 export function writerGuard(format: Format): (x: unknown) => boolean {
   if (format === 'reels') return isReelsOut;
   if (format === 'text') return isTextOut;
-  return isCarouselOut; // carousel (IG) + pdf (LinkedIn) sama struktur slide
+  return isCarouselOut; // carousel (IG) + pdf (LinkedIn) share the slide structure
 }
 
 export function writerGuardName(format: Format): string {

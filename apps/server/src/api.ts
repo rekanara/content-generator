@@ -1,5 +1,5 @@
-// JSON API untuk FE SPA — zod-validated via @workspace/shared.
-// Dua bagian: /groups (CRUD multi-akun) + /g/:slug/... (semua resource scope group).
+// JSON API for the SPA frontend — zod-validated via @workspace/shared.
+// Two parts: /groups (multi-account CRUD) + /g/:slug/... (all resources scoped to a group).
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
@@ -36,7 +36,7 @@ const UserInput = z.object({
 const PassInput = z.object({ password: z.string().min(8) });
 api.post('/auth/login', async (c) => {
   const parsed = LoginBody.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid' }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input' }, 400);
   try {
     const user = await login(c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ?? 'local', parsed.data.username, parsed.data.password);
     const { token, expiresAt } = await createSession(user.id);
@@ -47,7 +47,7 @@ api.post('/auth/login', async (c) => {
     return c.json({ ok: true, user: { username: user.username, role: user.role } });
   } catch (e) {
     if (e instanceof LoginError) return c.json({ error: e.message }, e.status === 429 ? 429 : 401);
-    return c.json({ error: 'gagal login' }, 500);
+    return c.json({ error: 'login failed' }, 500);
   }
 });
 
@@ -57,12 +57,12 @@ api.post('/auth/logout', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- auth middleware: semua /api/* (kecuali login) wajib session ----------
+// ---------- auth middleware: every /api/* (except login) requires a session ----------
 api.use('*', async (c, next) => {
-  if (c.req.path === '/auth/login') return next(); // mount di /api → path relatif
+  if (c.req.path === '/auth/login') return next(); // mounted at /api → relative path
   const token = getCookie(c, SESSION_COOKIE);
   const user = await getSessionUser(token);
-  if (!user) return c.json({ error: 'belum login' }, 401);
+  if (!user) return c.json({ error: 'not logged in' }, 401);
   c.set('user', user);
   const newExp = await touchSession(token!, user);
   if (newExp) {
@@ -79,59 +79,59 @@ api.get('/auth/me', (c) => {
   return c.json({ username: user.username, role: user.role });
 });
 
-// ownership: admin lihat semua, user cuma miliknya (user_id null = orphan → cuma admin).
+// ownership: admins see everything, users only their own (user_id null = orphan → admin only).
 function canSee(user: AuthUser, groupUserId: string | null): boolean {
   return user.role === 'admin' || groupUserId === user.id;
 }
 
 // ---------- users (admin-only) ----------
 api.get('/users', async (c) => {
-  if (c.get('user').role !== 'admin') return c.json({ error: 'khusus admin' }, 403);
+  if (c.get('user').role !== 'admin') return c.json({ error: 'admin only' }, 403);
   return c.json(await listUsers());
 });
 
 api.post('/users', async (c) => {
   const me = c.get('user');
-  if (me.role !== 'admin') return c.json({ error: 'khusus admin' }, 403);
+  if (me.role !== 'admin') return c.json({ error: 'admin only' }, 403);
   const body = await c.req.json().catch(() => null);
   const parsed = UserInput.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const { username, password, role } = parsed.data;
   try {
     const u = await createUser(username, password, role);
     return c.json(u, 201);
   } catch (e) {
-    return c.json({ error: `gagal buat user: ${(e as Error).message}` }, 400);
+    return c.json({ error: `failed to create user: ${(e as Error).message}` }, 400);
   }
 });
 
 api.post('/users/:id/reset-password', async (c) => {
-  if (c.get('user').role !== 'admin') return c.json({ error: 'khusus admin' }, 403);
+  if (c.get('user').role !== 'admin') return c.json({ error: 'admin only' }, 403);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const body = await c.req.json().catch(() => null);
   const parsed = PassInput.safeParse(body);
-  if (!parsed.success) return c.json({ error: 'password minimal 8 karakter' }, 400);
+  if (!parsed.success) return c.json({ error: 'password must be at least 8 characters' }, 400);
   const target = await getUser(id);
-  if (!target) return c.json({ error: 'user tidak ada' }, 404);
+  if (!target) return c.json({ error: 'user not found' }, 404);
   await resetPassword(target.username, parsed.data.password);
-  // revoke semua session user tsb — password baru = login ulang
+  // revoke all of that user's sessions — new password means logging in again
   await sql`delete from sessions where user_id = ${id}`;
   return c.json({ ok: true });
 });
 
 api.delete('/users/:id', async (c) => {
   const me = c.get('user');
-  if (me.role !== 'admin') return c.json({ error: 'khusus admin' }, 403);
+  if (me.role !== 'admin') return c.json({ error: 'admin only' }, 403);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
-  if (id === me.id) return c.json({ error: 'tidak boleh hapus akun sendiri' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  if (id === me.id) return c.json({ error: 'cannot delete your own account' }, 400);
   const r = await deleteUser(id);
   if (!r.ok) return c.json({ error: r.reason }, 400);
   return c.json({ ok: true });
 });
 
-// ---------- groups (multi-akun) ----------
+// ---------- groups (multi-account) ----------
 api.get('/groups', async (c) => {
   const user = c.get('user');
   const rows = user.role === 'admin' ? await listGroups() : await listGroupsForUser(user.id);
@@ -140,52 +140,52 @@ api.get('/groups', async (c) => {
 
 api.post('/groups', async (c) => {
   const parsed = GroupInput.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const d = parsed.data;
   try {
     const row = await createGroup({ ...d, user_id: c.get('user').id });
     return c.json(groupOut(row), 201);
   } catch (e) {
-    return c.json({ error: `gagal buat group: ${(e as Error).message}` }, 400);
+    return c.json({ error: `failed to create group: ${(e as Error).message}` }, 400);
   }
 });
 
 api.get('/groups/:slug', async (c) => {
   const row = await getGroupRow(c.req.param('slug'));
-  if (!row || !canSee(c.get('user'), row.user_id)) return c.json({ error: 'group tidak ada' }, 404);
+  if (!row || !canSee(c.get('user'), row.user_id)) return c.json({ error: 'group not found' }, 404);
   return c.json(groupOut(row));
 });
 
 api.patch('/groups/:slug', async (c) => {
   const slug = c.req.param('slug');
   const existing = await getGroupRow(slug);
-  if (!existing || !canSee(c.get('user'), existing.user_id)) return c.json({ error: 'group tidak ada' }, 404);
+  if (!existing || !canSee(c.get('user'), existing.user_id)) return c.json({ error: 'group not found' }, 404);
   const raw = await c.req.json().catch(() => null);
   const parsed = GroupPatch.safeParse(raw);
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const row = await patchGroup(slug, parsed.data);
-  if (!row) return c.json({ error: 'group tidak ada' }, 404);
-  await refreshCron(row.id); // cron_expr/enabled bisa berubah
+  if (!row) return c.json({ error: 'group not found' }, 404);
+  await refreshCron(row.id); // cron_expr/enabled may have changed
   return c.json(groupOut(row));
 });
 
 api.delete('/groups/:slug', async (c) => {
   const slug = c.req.param('slug');
   const [row] = await sql`select id, user_id from groups where slug = ${slug}`;
-  if (!row || !canSee(c.get('user'), row.user_id as string | null)) return c.json({ error: 'group tidak ada' }, 404);
+  if (!row || !canSee(c.get('user'), row.user_id as string | null)) return c.json({ error: 'group not found' }, 404);
   await deleteGroup(slug);
-  await refreshCron(row.id as string); // stop job
+  await refreshCron(row.id as string); // stop the job
   return c.json({ ok: true });
 });
 
-// ---------- scope group: /g/:slug/... ----------
-// catatan: api.route('/g', g) WAJIB di akhir file — Hono snapshot routes sub-app saat mount.
+// ---------- group scope: /g/:slug/... ----------
+// note: api.route('/g', g) MUST stay at the end of the file — Hono snapshots sub-app routes at mount time.
 type GroupRow = Awaited<ReturnType<typeof getGroupRow>>;
 const g = new Hono<{ Variables: { user: AuthUser; group: NonNullable<GroupRow> } }>();
 
 g.use('/:slug/*', async (c, next) => {
   const row = await getGroupRow(c.req.param('slug')!);
-  if (!row || !canSee(c.get('user'), row.user_id)) return c.json({ error: 'group tidak ada' }, 404);
+  if (!row || !canSee(c.get('user'), row.user_id)) return c.json({ error: 'group not found' }, 404);
   c.set('group', row);
   await next();
 });
@@ -256,7 +256,7 @@ g.get('/:slug/pillars', async (c) => {
 g.post('/:slug/pillars', async (c) => {
   const group = gr(c);
   const parsed = PillarInput.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const { name, description, is_news, sort_order } = parsed.data;
   await sql`insert into pillars (group_id, name, description, is_news, sort_order)
     values (${group.id}, ${name}, ${description}, ${is_news}, ${sort_order})`;
@@ -266,7 +266,7 @@ g.post('/:slug/pillars', async (c) => {
 g.post('/:slug/pillars/:id/toggle', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await sql`update pillars set active = not active where id = ${id} and group_id = ${group.id}`;
   return c.json({ ok: true });
 });
@@ -274,7 +274,7 @@ g.post('/:slug/pillars/:id/toggle', async (c) => {
 g.delete('/:slug/pillars/:id', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await sql`delete from pillars where id = ${id} and group_id = ${group.id}`;
   return c.json({ ok: true });
 });
@@ -285,7 +285,7 @@ g.get('/:slug/cron', (c) => c.json(cronStatus(gr(c).id)));
 g.post('/:slug/cron', async (c) => {
   const group = gr(c);
   const parsed = CronInput.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const { expr, enabled } = parsed.data;
   const { validateCronExpression } = await import('cron');
   let valid = false;
@@ -294,7 +294,7 @@ g.post('/:slug/cron', async (c) => {
     valid = typeof res === 'boolean' ? res : res?.valid === true;
   } catch { valid = false; }
   if (!valid) {
-    return c.json({ error: 'ekspresi cron tak valid (butuh 5/6 field, cth "0 7 * * *")' }, 400);
+    return c.json({ error: 'invalid cron expression (needs 5/6 fields, e.g. "0 7 * * *")' }, 400);
   }
   await sql`update groups set cron_expr = ${expr}, cron_enabled = ${enabled} where id = ${group.id}`;
   await refreshCron(group.id);
@@ -318,10 +318,10 @@ g.get('/:slug/posts', async (c) => {
 g.get('/:slug/posts/:id', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const [p] = await sql`select id, platform, format, topic, caption, body, status, error, source, created_at, pillar_id
     from posts where id = ${id} and group_id = ${group.id}`;
-  if (!p) return c.json({ error: 'post tidak ada' }, 404);
+  if (!p) return c.json({ error: 'post not found' }, 404);
   const body = JSON.parse(p.body ?? 'null');
   const bodyText = body.body ? body.body
     : body.slides ? body.slides.map((s: { headline: string; body: string }, i: number) => `${i + 1}. ${s.headline}\n${s.body}`).join('\n\n')
@@ -342,17 +342,17 @@ g.get('/:slug/posts/:id', async (c) => {
 g.post('/:slug/posts/:id/resend', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   enqueue({ kind: 'resend', slug: group.slug, postId: id });
   return c.json({ ok: true, queued: queueStatus() });
 });
 
-// ---------- gen manual ----------
+// ---------- manual generate ----------
 g.post('/:slug/gen', async (c) => {
   const group = gr(c);
   const raw = await c.req.json().catch(() => ({}));
   const parsed = GenerateInput.safeParse(raw);
-  if (!parsed.success) return c.json({ error: 'platform/format tak valid' }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid platform/format' }, 400);
   const { platform, format } = parsed.data;
   enqueue({
     kind: 'generate',
@@ -379,7 +379,7 @@ g.get('/:slug/styles', async (c) => {
 g.post('/:slug/styles', async (c) => {
   const group = gr(c);
   const parsed = StyleInput.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const { title, body, platform } = parsed.data;
   await sql`insert into style_samples (group_id, title, body, platform)
     values (${group.id}, ${title}, ${body}, ${platform})`;
@@ -389,7 +389,7 @@ g.post('/:slug/styles', async (c) => {
 g.delete('/:slug/styles/:id', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await sql`delete from style_samples where id = ${id} and group_id = ${group.id}`;
   return c.json({ ok: true });
 });
@@ -409,7 +409,7 @@ g.get('/:slug/templates', async (c) => {
 g.post('/:slug/templates', async (c) => {
   const group = gr(c);
   const parsed = TemplateInput.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: 'input tak valid', issues: parsed.error.issues }, 400);
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const { name, format, html, is_active } = parsed.data;
   if (is_active) {
     await sql`update templates set is_active = false where format = ${format} and group_id = ${group.id}`;
@@ -422,7 +422,7 @@ g.post('/:slug/templates', async (c) => {
 g.post('/:slug/templates/:id/activate', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const [t] = await sql`select format from templates where id = ${id} and group_id = ${group.id}`;
   if (t) {
     await sql`update templates set is_active = false where format = ${t.format} and group_id = ${group.id}`;
@@ -434,9 +434,9 @@ g.post('/:slug/templates/:id/activate', async (c) => {
 g.delete('/:slug/templates/:id', async (c) => {
   const group = gr(c);
   const id = c.req.param('id');
-  if (!isUuid(id)) return c.json({ error: 'id tak valid' }, 400);
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await sql`delete from templates where id = ${id} and group_id = ${group.id}`;
   return c.json({ ok: true });
 });
 
-api.route('/g', g); // mount di akhir — lihat catatan di atas
+api.route('/g', g); // mount at the end — see note above

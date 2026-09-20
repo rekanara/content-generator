@@ -1,6 +1,6 @@
 // Telegram Bot API via fetch: sendMessage, sendMediaGroup, sendDocument, sendVideo.
-// Artefak di-stream dari MinIO → buffer → Blob (file kecil, <1MB total).
-// Config per-group (GroupCfg) — token/chatId dari group ?? env.
+// Artifacts streamed from MinIO → buffer → Blob (small files, <1MB total).
+// Per-group config (GroupCfg) — token/chatId from group ?? env.
 import { getArtifactStream } from './storage.ts';
 import type { GroupCfg } from './groups.ts';
 
@@ -16,7 +16,7 @@ async function tg(cfg: GroupCfg, method: string, body: Record<string, unknown>):
   return mustOk(res, method);
 }
 
-// Long-poll utk bot global (env token) — dipakai bot.ts. Token env, bukan per-group.
+// Long-poll for the global bot (env token) — used by bot.ts. Env token, not per-group.
 export async function getUpdates(token: string, offset: number): Promise<any[]> {
   const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}`, {
     signal: AbortSignal.timeout(30_000),
@@ -52,7 +52,7 @@ export async function sendMessage(cfg: GroupCfg, text: string): Promise<void> {
   await tg(cfg, 'sendMessage', { chat_id: cfg.telegram.chatId, text });
 }
 
-// Balas chat spesifik via token env (dipakai bot polling utk reply ke chat asal command).
+// Reply to a specific chat via env token (used by bot polling to reply to the chat the command came from).
 export async function replyGlobal(chatId: string, text: string): Promise<void> {
   const token = (await import('./config.ts')).config.telegram.botToken;
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
@@ -64,7 +64,7 @@ export async function replyGlobal(chatId: string, text: string): Promise<void> {
   await mustOk(res, 'sendMessage');
 }
 
-// Album photo max 10 (telegram limit). Caption menempel di foto pertama, max 1024 char.
+// Photo album max 10 (telegram limit). Caption attaches to the first photo, max 1024 chars.
 export async function sendMediaGroupPhoto(cfg: GroupCfg, keys: string[], caption: string): Promise<void> {
   const chatId = cfg.telegram.chatId;
   const use = keys.slice(0, 10);
@@ -80,7 +80,7 @@ export async function sendMediaGroupPhoto(cfg: GroupCfg, keys: string[], caption
   await postForm(cfg, 'sendMediaGroup', fd);
 }
 
-// sendDocument utk PDF (LinkedIn). Input file bisa >10MB — telegram batas 50MB, aman.
+// sendDocument for PDF (LinkedIn). Input file can be >10MB — telegram limit is 50MB, safe.
 export async function sendDocument(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
   const fd = new FormData();
   fd.set('chat_id', cfg.telegram.chatId);
@@ -89,7 +89,7 @@ export async function sendDocument(cfg: GroupCfg, key: string, filename: string,
   await postForm(cfg, 'sendDocument', fd);
 }
 
-// sendVideo utk reels MP4 — supports_streaming biar preview di Telegram.
+// sendVideo for reels MP4 — supports_streaming so Telegram shows a preview.
 export async function sendVideo(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
   const stream = await getArtifactStream(key);
   const chunks: Uint8Array[] = [];

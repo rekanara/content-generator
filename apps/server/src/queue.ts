@@ -1,5 +1,5 @@
-// FIFO in-process, satu run aktif. Cron, bot, FE → enqueue yang sama.
-// Job bawa group slug — cfg di-resolve saat run (edit config tidak menunggu job lama).
+// In-process FIFO, one active run. Cron, bot, FE → same enqueue.
+// Job carries group slug — cfg resolved at run time (config edits don't wait for old jobs).
 import { sql } from './db.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
 import type { Slot, Platform, Format } from './state.ts';
@@ -37,7 +37,7 @@ async function drain(): Promise<void> {
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
         else await runResend(cfg, job.postId);
       } catch (e) {
-        console.error(`[queue] job gagal (${job.slug}): ${(e as Error).message}`);
+        console.error(`[queue] job failed (${job.slug}): ${(e as Error).message}`);
       }
     }
   } finally {
@@ -45,7 +45,7 @@ async function drain(): Promise<void> {
   }
 }
 
-// Satu run penuh: resolve slot → draft → render → kirim → markSent.
+// One full run: resolve slot → draft → render → send → markSent.
 async function runGenerate(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   forced?: { platform: Platform; format?: Format },
@@ -58,7 +58,7 @@ async function runGenerate(
   await deliver(cfg, r.postId, slot, notifyChat);
 }
 
-// Kirim post yang sudah dirender (dipakai runGenerate + resend).
+// Send a rendered post (used by runGenerate + resend).
 async function deliver(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   postId: string,
@@ -67,16 +67,16 @@ async function deliver(
 ): Promise<void> {
   const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
     from posts where id = ${postId} and group_id = ${cfg.id}`;
-  if (!post) throw new Error(`post ${postId} tidak ada`);
+  if (!post) throw new Error(`post ${postId} not found`);
 
   if (post.status !== 'rendered') {
     if (slot.format === 'text') {
-      // format text: langsung kirim body, tak perlu render
+      // text format: send body directly, no render needed
       if (notifyChat) await sendMessage(cfg, `${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`);
       await markSent(cfg.id, postId, slot);
       return;
     }
-    // belum dirender → render dulu per format
+    // not rendered yet → render first per format
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
@@ -88,7 +88,7 @@ async function deliver(
   const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
   if (post.format === 'carousel') {
     const keys: string[] = [];
-    // slide count dari body
+    // slide count from body
     const slides = (JSON.parse(post.body) as CarouselOut).slides.length;
     for (let i = 1; i <= slides; i++) keys.push(`${prefix}slide-${String(i).padStart(2, '0')}.png`);
     if (notifyChat) await sendMediaGroupPhoto(cfg, keys, post.caption || post.topic);
@@ -98,15 +98,15 @@ async function deliver(
     if (notifyChat) await sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic);
   }
   await markSent(cfg.id, postId, slot);
-  console.log(`[queue] post #${postId} delivered + rotasi maju (${cfg.slug})`);
+  console.log(`[queue] post #${postId} delivered + rotation advanced (${cfg.slug})`);
 }
 
 async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
   const [post] = await sql`select platform, format, artifact_prefix, body, status, caption, topic
     from posts where id = ${postId} and group_id = ${cfg.id}`;
-  if (!post) throw new Error(`post ${postId} tidak ada`);
+  if (!post) throw new Error(`post ${postId} not found`);
   if (post.status !== 'rendered' && post.status !== 'sent') {
-    throw new Error(`post ${postId} status ${post.status} — tidak bisa resend`);
+    throw new Error(`post ${postId} status ${post.status} — cannot resend`);
   }
   const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
   if (post.format === 'carousel') {
@@ -124,9 +124,9 @@ async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: s
   console.log(`[queue] post #${postId} resent (${cfg.slug})`);
 }
 
-// Boot cleanup: orphan queued/draft/rendered saat daemon start → failed (crash sebelumnya).
+// Boot cleanup: orphan queued/draft/rendered at daemon start → failed (previous crash).
 export async function bootCleanup(): Promise<void> {
-  const r = await sql`update posts set status = 'failed', error = 'orphan saat boot'
+  const r = await sql`update posts set status = 'failed', error = 'orphaned at boot'
     where status in ('queued','draft','rendered') returning id`;
   for (const row of r) console.log(`[boot] post #${row.id} orphan → failed`);
 }

@@ -1,5 +1,5 @@
--- 001_init: schema inti content-generator — semua PK uuid v7 (time-ordered).
--- PG16: belum ada uuidv7 native → fungsi SQL (naikkan ke PG18 uuidv7() builtin saat upgrade).
+-- 001_init: content-generator core schema — all PKs are uuid v7 (time-ordered).
+-- PG16: no native uuidv7 yet → SQL function (switch to PG18's builtin uuidv7() on upgrade).
 
 create or replace function uuidv7() returns uuid as $$
 declare

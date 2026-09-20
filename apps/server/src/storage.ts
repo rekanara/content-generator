@@ -1,5 +1,5 @@
-// MinIO: upload artefak <slug>/posts/<id>/, ambil stream untuk kirim Telegram.
-// Prefix slug = isolasi antar group (spec multi-akun).
+// MinIO: upload artifacts to <slug>/posts/<id>/, fetch stream for Telegram sending.
+// Slug prefix = isolation between groups (multi-account spec).
 import * as Minio from 'minio';
 import { createReadStream, statSync } from 'node:fs';
 import { config } from './config.ts';
@@ -20,7 +20,7 @@ async function ensureBucket(): Promise<void> {
   bucketReady = true;
 }
 
-// Upload file lokal → <slug>/posts/<id>/<filename>. Return object key.
+// Upload local file → <slug>/posts/<id>/<filename>. Returns the object key.
 export async function uploadPostArtifact(slug: string, postId: string, localPath: string, filename: string): Promise<string> {
   await ensureBucket();
   const key = `${slug}/posts/${postId}/${filename}`;
@@ -29,7 +29,7 @@ export async function uploadPostArtifact(slug: string, postId: string, localPath
   return key;
 }
 
-// Stream object utk dikirim (telegram butuh stream/size).
+// Stream object for sending (telegram needs stream/size).
 export async function getArtifactStream(key: string): Promise<NodeJS.ReadableStream> {
   await ensureBucket();
   return client.getObject(config.minio.bucket, key);

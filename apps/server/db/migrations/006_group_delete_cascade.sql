@@ -1,5 +1,5 @@
--- 006: hapus group → semua resource miliknya ikut terhapus (cascade).
--- Tanpa ini delete group kena FK violation dari rotation_state (dan group berkonten).
+-- 006: delete group → all its resources are deleted too (cascade).
+-- Without this, group delete hits FK violation from rotation_state (and groups with content).
 begin;
 alter table rotation_state drop constraint if exists rotation_state_group_id_fkey;
 alter table rotation_state add constraint rotation_state_group_id_fkey

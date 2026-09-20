@@ -1,5 +1,5 @@
-// Auth: scrypt password + server-side session (DB sha256(token)) + rate limit login.
-// Semua stdlib node:crypto. Token 32-byte random di cookie, DB simpan hash-nya saja.
+// Auth: scrypt password + server-side session (DB sha256(token)) + login rate limiting.
+// All stdlib node:crypto. 32-byte random token in the cookie, DB stores only its hash.
 import { randomBytes, scrypt, timingSafeEqual, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { sql } from './db.ts';
@@ -30,8 +30,8 @@ export async function verifyPassword(password: string, stored: string): Promise<
 }
 
 // ---------- session ----------
-const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;   // 30 hari
-const SLIDING_WINDOW_MS = 24 * 3600 * 1000;     // re-issue cookie max 1x/hari
+const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;   // 30 days
+const SLIDING_WINDOW_MS = 24 * 3600 * 1000;     // re-issue cookie at most once a day
 export const SESSION_COOKIE = 'cg_session';
 
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -58,8 +58,8 @@ export async function getSessionUser(token: string | undefined): Promise<AuthUse
   return { id: row.id as string, username: row.username as string, role: row.role as 'admin' | 'user' };
 }
 
-// Sliding: perpanjang session + re-issue cookie kalau sudah > 1 hari sejak last_seen.
-// return expires_at baru utk set cookie, atau null = tidak perlu re-issue.
+// Sliding: extend session + re-issue cookie if > 1 day since last_seen.
+// Returns new expires_at for the cookie, or null = no re-issue needed.
 export async function touchSession(token: string, user: AuthUser): Promise<Date | null> {
   const [row] = await sql`select id, last_seen_at, expires_at from sessions where token_hash = ${sha256(token)}`;
   if (!row) return null;
@@ -75,13 +75,13 @@ export async function destroySession(token: string | undefined): Promise<void> {
   await sql`delete from sessions where token_hash = ${sha256(token)}`;
 }
 
-// cleanup session kadaluarsa — dipanggil login (piggyback, no cron).
+// purge expired sessions — called from login (piggyback, no cron).
 export async function purgeExpiredSessions(): Promise<void> {
   await sql`delete from sessions where expires_at < now()`;
 }
 
-// ---------- rate limit login (in-memory, per IP) ----------
-// 5 kegagalan / 15 menit / IP → lockout 15 menit. Reset kalau login sukses.
+// ---------- login rate limit (in-memory, per IP) ----------
+// 5 failures / 15 min / IP → 15 min lockout. Resets on successful login.
 const MAX_FAILS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
 type Bucket = { fails: number; windowStart: number; lockedUntil: number };
@@ -113,13 +113,13 @@ export class LoginError extends Error {
 
 export async function login(ip: string, username: string, password: string): Promise<AuthUser> {
   const wait = loginBlocked(ip);
-  if (wait > 0) throw new LoginError(`terlalu banyak percobaan — coba lagi dalam ${wait} detik`, 429);
+  if (wait > 0) throw new LoginError(`too many attempts — try again in ${wait}s`, 429);
   const [row] = await sql`select id, username, password_hash, role from users where username = ${username}`;
-  // anti-enumeration: selalu hash-compare (dummy kalau user tidak ada), waktu ~konstan
+  // anti-enumeration: always hash-compare (dummy if user missing), ~constant time
   const ok = await verifyPassword(password, row?.password_hash ?? DUMMY_HASH);
   if (!row || !ok) {
     loginFail(ip);
-    throw new LoginError('username atau password salah');
+    throw new LoginError('wrong username or password');
   }
   buckets.delete(ip);
   await purgeExpiredSessions();
@@ -147,15 +147,15 @@ export async function listUsers(): Promise<UserRow[]> {
 
 export async function deleteUser(id: string): Promise<{ ok: boolean; reason?: string }> {
   const [row] = await sql`select id, role from users where id = ${id}`;
-  if (!row) return { ok: false, reason: 'user tidak ada' };
+  if (!row) return { ok: false, reason: 'user not found' };
   const admins = await sql<{ n: number }[]>`select count(*)::int as n from users where role = 'admin'`;
-  if (row.role === 'admin' && (admins[0]?.n ?? 0) <= 1) return { ok: false, reason: 'tidak boleh hapus admin terakhir' };
+  if (row.role === 'admin' && (admins[0]?.n ?? 0) <= 1) return { ok: false, reason: 'cannot delete the last admin' };
   await sql`delete from sessions where user_id = ${id}`;
   await sql`delete from users where id = ${id}`;
   return { ok: true };
 }
 
-// setelah deleteUser: group-user orphan (user_id null) — kelola via admin.
+// after deleteUser: group-user orphan (user_id null) — managed by admin.
 
 export async function getUser(id: string): Promise<UserRow | null> {
   const [row] = await sql`select id, username, role from users where id = ${id}`;

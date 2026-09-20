@@ -1,6 +1,6 @@
-// TTS: msedge-tts default (gratis) atau openai-compatible /v1/audio/speech.
-// Interface tunggal ttsToFile(cfg, text, path) — config per-group.
-// ponytail: ElevenLabs nanti di sini juga.
+// TTS: msedge-tts default (free) or openai-compatible /v1/audio/speech.
+// Single interface ttsToFile(cfg, text, path) — per-group config.
+// ponytail: ElevenLabs goes here later too.
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { MsEdgeTTS, OUTPUT_FORMAT } from 'msedge-tts';
@@ -15,7 +15,7 @@ async function edgeTts(cfg: GroupCfg, text: string, path: string): Promise<void>
   const tts = new MsEdgeTTS();
   try {
     await tts.setMetadata(cfg.tts.voice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
-    // v2 API: toStream(input) → Readable; toFile kini minta dir, bukan file path.
+    // v2 API: toStream(input) → Readable; toFile now expects a dir, not a file path.
     const { audioStream } = tts.toStream(text);
     await pipeline(audioStream, createWriteStream(path));
   } finally {

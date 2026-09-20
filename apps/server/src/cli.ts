@@ -23,25 +23,25 @@ async function userCli(cmd: string): Promise<void> {
     if (!username || !/^[a-z0-9_-]{2,32}$/.test(username)) {
       throw new Error('username: 2-32 char [a-z0-9_-]');
     }
-    // password dari arg ke-3 atau prompt stdin (non-tty-safe: read stdin sekali)
+    // password from 3rd arg or stdin prompt (non-tty-safe: read stdin once)
     const readPass = async (): Promise<string> => {
       if (args[2]) return args[2];
-      process.stdout.write(`password utk ${username}: `);
+      process.stdout.write(`password for ${username}: `);
       const chunks: Buffer[] = [];
       for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
       return Buffer.concat(chunks).toString().trim();
     };
     const pass = await readPass();
-    if (pass.length < 8) throw new Error('password minimal 8 karakter');
+    if (pass.length < 8) throw new Error('password must be at least 8 characters');
     if (cmd === 'add') {
       const u = await createUser(username, pass, flag('admin') ? 'admin' : 'user');
-      console.log(`[user] dibuat: ${u.username} (${u.role})`);
+      console.log(`[user] created: ${u.username} (${u.role})`);
     } else if (cmd === 'pass') {
       const ok = await resetPassword(username, pass);
-      console.log(ok ? `[user] password ${username} diganti` : `[user] ${username} tidak ada`);
+      console.log(ok ? `[user] password for ${username} changed` : `[user] ${username} not found`);
       if (!ok) process.exitCode = 1;
     } else {
-      throw new Error(`subcommand tak dikenal: ${cmd}`);
+      throw new Error(`unknown subcommand: ${cmd}`);
     }
   }
   await sql.end();
@@ -69,29 +69,29 @@ async function main() {
   console.log('--- end preview ---');
 
   if (flag('no-render')) {
-    console.log('[cli] no-render: berhenti di draft, tidak update rotasi.');
+    console.log('[cli] no-render: stopping at draft, not updating rotation.');
     await sql.end();
     return;
   }
 
-  // --dry: render + upload artefak, tapi tidak kirim telegram + tidak update rotasi
+  // --dry: render + upload artifacts, but no telegram send + no rotation update
   if (flag('dry')) {
     if (slot.format === 'carousel' || slot.format === 'pdf') {
       const { renderAndSave } = await import('./render/carousel.ts');
       const a = await renderAndSave(r.postId, slot.platform, r.draft as CarouselOut, cfg.slug, cfg.id);
-      console.log(`[cli] dry: ${a.files.length} artefak di ${a.prefix} (MinIO) + lokal out/${r.postId}/`);
+      console.log(`[cli] dry: ${a.files.length} artifacts at ${a.prefix} (MinIO) + local out/${r.postId}/`);
     } else if (slot.format === 'reels') {
       const { renderReelsAndSave } = await import('./render/reels.ts');
       const a = await renderReelsAndSave(r.postId, r.draft as import('./schema.ts').ReelsOut, cfg);
-      console.log(`[cli] dry: reel ${a.durationSec.toFixed(1)}s di ${a.prefix}`);
+      console.log(`[cli] dry: reel ${a.durationSec.toFixed(1)}s at ${a.prefix}`);
     } else {
-      console.log('[cli] dry: format text tidak butuh render.');
+      console.log('[cli] dry: text format needs no render.');
     }
-    console.log('[cli] dry: tidak kirim, tidak update rotasi.');
+    console.log('[cli] dry: no send, no rotation update.');
     await sql.end();
     return;
   }
-  console.log('[cli] kirim via queue daemon / telegram — CLI berhenti di draft.');
+  console.log('[cli] send happens via queue daemon / telegram — CLI stops at draft.');
   await sql.end();
 }
 

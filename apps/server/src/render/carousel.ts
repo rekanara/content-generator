@@ -1,5 +1,5 @@
 // Carousel: HTML per slide → Puppeteer → PNG 1080x1350 (IG) / PDF (LinkedIn).
-// Staging lokal out/<id>/ → upload MinIO posts/<id>/.
+// Local staging out/<id>/ → upload to MinIO posts/<id>/.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import puppeteer from 'puppeteer';
 import { sql } from '../db.ts';
@@ -12,7 +12,7 @@ const IG_W = 1080, IG_H = 1350;
 
 export type CarouselArtifacts = { files: string[]; prefix: string };
 
-// Render + upload. Return object keys ter-upload.
+// Render + upload. Returns the uploaded object keys.
 export async function renderCarousel(
   postId: string,
   platform: Platform,
@@ -40,8 +40,8 @@ export async function renderCarousel(
       files.push(file);
     }
 
-    // PDF utk LinkedIn: gabung slide jadi dokumen — screenshot per halaman sudah ada,
-    // cara paling kecil: render ulang semua html ke satu page.pdf multi halaman.
+    // PDF for LinkedIn: join slides into one document — per-page screenshots already exist,
+    // smallest approach: re-render all html into a single multi-page page.pdf.
     let pdfPath: string | null = null;
     if (platform === 'linkedin') {
       pdfPath = `${outDir}/carousel.pdf`;
@@ -49,7 +49,7 @@ export async function renderCarousel(
         .map((h) => h.replace('</body></html>', ''))
         .join('<div style="page-break-after: always"></div>')
         .replace('<html><head>', '<html><head>');
-      // page.pdf butuh satu dokumen: setContent combined, ukuran halaman 1080x1350pt
+      // page.pdf needs one document: setContent combined, page size 1080x1350pt
       const pdfPage = await browser.newPage();
       try {
         await pdfPage.setContent(combined, { waitUntil: 'load' });
@@ -66,7 +66,7 @@ export async function renderCarousel(
       }
     }
 
-    // upload MinIO
+    // upload to MinIO
     const keys: string[] = [];
     for (let i = 0; i < files.length; i++) {
       keys.push(await uploadPostArtifact(slug, postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
@@ -79,11 +79,11 @@ export async function renderCarousel(
   }
 }
 
-// Render + persist status + artifact_prefix. Bagian "persist" dipisah biar testable.
+// Render + persist status + artifact_prefix. "Persist" split out to keep it testable.
 export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, slug: string, groupId: string): Promise<CarouselArtifacts> {
   const { files, prefix } = await renderCarousel(postId, platform, draft, slug, groupId);
   await sql`update posts set status = 'rendered', artifact_prefix = ${prefix}
     where id = ${postId}`;
-  console.log(`[render] post #${postId}: ${files.length} artefak → ${prefix}`);
+  console.log(`[render] post #${postId}: ${files.length} artifacts → ${prefix}`);
   return { files, prefix };
 }

@@ -1,6 +1,6 @@
-// Bot Telegram: long-polling + command parse. Regex-based, no framework.
-// Polling pakai bot token env (global). Command menerima slug group opsional:
-//   /gen <slug> <platform> <format> — tanpa slug = group pertama.
+// Telegram bot: long-polling + command parsing. Regex-based, no framework.
+// Polling uses the bot token env (global). Commands accept an optional group slug:
+//   /gen <slug> <platform> <format> — without a slug = first group.
 import { getUpdates, replyGlobal } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
 import { getRotation, getActivePillars, sql } from './db.ts';
@@ -28,16 +28,16 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
   }
   if (s.startsWith('/gen')) {
     const parts = s.split(/\s+/).slice(1);
-    // arg pertama slug group dikenal? → milik group, sisanya platform/format
+    // is the first arg a known group slug? → belongs to group, rest is platform/format
     let slug: string | undefined;
     if (parts[0] && slugs.includes(parts[0])) {
       slug = parts.shift();
     }
     const platform = parts[0] as Platform | undefined;
     const format = parts[1] as Format | undefined;
-    if (platform && !PLATFORMS.includes(platform)) return { t: 'unknown', raw: `platform tak dikenal: ${platform}` };
-    if (format && !FORMATS.includes(format)) return { t: 'unknown', raw: `format tak dikenal: ${format}` };
-    if (format && !platform) return { t: 'unknown', raw: 'format butuh platform: /gen [group] <platform> <format>' };
+    if (platform && !PLATFORMS.includes(platform)) return { t: 'unknown', raw: `unknown platform: ${platform}` };
+    if (format && !FORMATS.includes(format)) return { t: 'unknown', raw: `unknown format: ${format}` };
+    if (format && !platform) return { t: 'unknown', raw: 'format needs a platform: /gen [group] <platform> <format>' };
     return { t: 'gen', slug, platform, format };
   }
   return { t: 'unknown', raw: s };
@@ -53,7 +53,7 @@ async function defaultSlug(): Promise<string> {
 async function handleStatus(slug?: string): Promise<string> {
   const s = slug ?? (await defaultSlug());
   const cfg = await getGroupCfg(s).catch(() => null);
-  if (!cfg) return `group "${s}" tidak ada`;
+  if (!cfg) return `group "${s}" not found`;
   const [state, pillars, q] = await Promise.all([getRotation(cfg.id), getActivePillars(cfg.id), Promise.resolve(queueStatus())]);
   const [grp] = await sql`select cron_expr, cron_enabled from groups where id = ${cfg.id}`;
   const [last] = await sql`select id, platform, format, topic, status, created_at
@@ -61,9 +61,9 @@ async function handleStatus(slug?: string): Promise<string> {
   const next = nextSlot(state, pillars, true);
   const lines = [
     `Group: ${s}`,
-    `Jadwal: \`${grp?.cron_expr ?? '-'}\` ${grp?.cron_enabled ? 'AKTIF' : 'MATI'}`,
-    `Rotasi: last=${state.last_platform ?? '-'} → next **${next.platform} ${next.format}** (pilar ${next.pillar_id})`,
-    `Queue: ${q.running ? 'run jalan' : 'idle'}${q.pending > 0 ? `, ${q.pending} menunggu` : ''}`,
+    `Schedule: \`${grp?.cron_expr ?? '-'}\` ${grp?.cron_enabled ? 'ON' : 'OFF'}`,
+    `Rotation: last=${state.last_platform ?? '-'} → next **${next.platform} ${next.format}** (pillar ${next.pillar_id})`,
+    `Queue: ${q.running ? 'running' : 'idle'}${q.pending > 0 ? `, ${q.pending} pending` : ''}`,
   ];
   if (last) {
     lines.push(
@@ -79,11 +79,11 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       const groups = await listGroups();
       const slugs = groups.map((x) => x.slug).join(', ');
       return [
-        '/gen — generate berikutnya (group pertama, rotasi natural)',
-        '/gen <group> — paksa group',
-        '/gen <group> <platform> <format> — paksa group+platform+format',
-        '/status [group] — jadwal, rotasi, post terakhir',
-        `Group tersedia: ${slugs}`,
+        '/gen — generate the next post (first group, natural rotation)',
+        '/gen <group> — force a group',
+        '/gen <group> <platform> <format> — force group+platform+format',
+        '/status [group] — schedule, rotation, latest post',
+        `Available groups: ${slugs}`,
       ].join('\n');
     }
     case 'status':
@@ -91,7 +91,7 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
     case 'gen': {
       const slug = cmd.slug ?? (await defaultSlug());
       const cfg = await getGroupCfg(slug).catch(() => null);
-      if (!cfg) return `group "${slug}" tidak ada`;
+      if (!cfg) return `group "${slug}" not found`;
       enqueue({
         kind: 'generate',
         slug,
@@ -99,10 +99,10 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
         notifyChat: true,
         source: 'telegram',
       });
-      return `queued (${slug}) — hasil dikirim saat selesai.`;
+      return `queued (${slug}) — result will be sent when done.`;
     }
     default:
-      return `Perintah tak dikenal. ${cmd.raw}\nKetik /help`;
+      return `Unknown command. ${cmd.raw}\nType /help`;
   }
 }
 
@@ -118,10 +118,10 @@ export async function startBot(): Promise<void> {
   await bootCleanup();
   let offset = 0;
   if (!config.telegram.botToken) {
-    console.log('[bot] TELEGRAM_BOT_TOKEN kosong — polling dilewati');
+    console.log('[bot] TELEGRAM_BOT_TOKEN empty — skipping polling');
     return;
   }
-  console.log('[bot] polling mulai');
+  console.log('[bot] polling started');
   while (!stopped) {
     try {
       const updates = await getUpdates(config.telegram.botToken, offset);
@@ -132,13 +132,13 @@ export async function startBot(): Promise<void> {
         if (!text) continue;
         const cmd = parseCmd(text, slugs);
         const reply = await handleCmd(cmd);
-        // balasan via bot global (env token) ke chat asal command
+        // reply via the global bot (env token) to the chat the command came from
         await replyGlobal(String(u.message?.chat?.id ?? config.telegram.chatId), reply);
       }
     } catch (e) {
       console.error(`[bot] polling error: ${(e as Error).message}`);
-      await new Promise((r) => setTimeout(r, 5000)); // backoff 5s
+      await new Promise((r) => setTimeout(r, 5000)); // 5s backoff
     }
   }
-  console.log('[bot] polling berhenti');
+  console.log('[bot] polling stopped');
 }

@@ -12,14 +12,14 @@ create table users (
 create table sessions (
   id uuid primary key default uuidv7(),
   user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null unique,       -- sha256(token) — DB bocor ≠ session kecuri
+  token_hash text not null unique,       -- sha256(token) — DB leak ≠ session stolen
   created_at timestamptz not null default now(),
   expires_at timestamptz not null,
   last_seen_at timestamptz not null default now()
 );
 create index sessions_user_idx on sessions (user_id);
 
--- ownership: group milik satu user. existing groups → admin pertama (di-seed via CLI).
+-- ownership: each group belongs to one user. existing groups → first admin (seeded via CLI).
 alter table groups add column user_id uuid references users(id) on delete cascade;
 
 commit;

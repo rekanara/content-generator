@@ -1,4 +1,4 @@
-// PURE rotation logic — zero import, zero I/O. Unit-test di tests/state.test.ts.
+// PURE rotation logic — zero imports, zero I/O. Unit-tested in tests/state.test.ts.
 
 export type Platform = 'instagram' | 'linkedin';
 export type IgFormat = 'carousel' | 'reels';
@@ -17,12 +17,12 @@ export type RotationState = {
 export type Slot = {
   platform: Platform;
   format: Format;
-  pillar_id: string; // sudah termasuk fallback non-news
+  pillar_id: string; // non-news fallback already applied
 };
 
 const OTHER: Record<Platform, Platform> = { instagram: 'linkedin', linkedin: 'instagram' };
 
-// Format berikutnya untuk platform yg diberikan, dari state terakhir.
+// Next format for the given platform, based on the last state.
 function nextFormat(state: RotationState, platform: Platform): Format {
   if (platform === 'instagram') {
     return state.last_ig_format === 'carousel' ? 'reels' : 'carousel';
@@ -30,11 +30,11 @@ function nextFormat(state: RotationState, platform: Platform): Format {
   return state.last_li_format === 'pdf' ? 'text' : 'pdf';
 }
 
-// Pilar aktif berikutnya (urut sort_order), melewati pilar berita jika tanpa RSS.
-// Pilar berita hanya dipilih bila allowNews=true. Kalau sampai satu putaran penuh
-// tidak ada kandidat non-news, fallback ke pilar berita itu juga.
+// Next active pillar (sorted by id), skipping news pillars when RSS is unavailable.
+// News pillars are only picked when allowNews=true. If a full pass yields no
+// non-news candidate, fall back to a news pillar anyway.
 function nextPillar(pillars: PillarLite[], lastId: string | null, allowNews: boolean): string {
-  const sorted = [...pillars].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0); // uuid v7 time-ordered = urut waktu
+  const sorted = [...pillars].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0); // uuid v7 time-ordered = chronological
   const eligible = (p: PillarLite) => allowNews || !p.is_news;
   if (sorted.length === 0) throw new Error('no active pillars');
 
@@ -43,11 +43,11 @@ function nextPillar(pillars: PillarLite[], lastId: string | null, allowNews: boo
     const cand = sorted[(start + i + sorted.length) % sorted.length]!;
     if (eligible(cand)) return cand.id;
   }
-  // seluruh pilar adalah berita dan allowNews=false — kondisi aneh, pilih apa saja
+  // every pillar is news and allowNews=false — odd condition, pick any
   return sorted[0]!.id;
 }
 
-// Slot berikutnya dari state. Pillars harus sudah difilter active-only oleh caller.
+// Next slot from state. Pillars must already be filtered active-only by the caller.
 export function nextSlot(
   state: RotationState,
   pillars: PillarLite[],
@@ -59,7 +59,7 @@ export function nextSlot(
   return { platform, format, pillar_id };
 }
 
-// Slot manual dari /gen atau FE: platform wajib, format opsional (ikuti rotasi).
+// Manual slot from /gen or the frontend: platform required, format optional (follows rotation).
 export function forcedSlot(
   state: RotationState,
   pillars: PillarLite[],
@@ -74,7 +74,7 @@ export function forcedSlot(
   return { platform, format: chosen, pillar_id };
 }
 
-// State baru setelah slot ini sukses terkirim.
+// New state after this slot is successfully sent.
 export function nextState(state: RotationState, slot: Slot): RotationState {
   return {
     last_platform: slot.platform,

@@ -1,11 +1,11 @@
-// Load template aktif dari DB (per format), fallback default. Isi token + escape HTML.
+// Load active template from DB (per format), fall back to default. Fill tokens + escape HTML.
 import { sql } from '../db.ts';
 import type { Platform, Format } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 
-export type SlideHtml = string; // html satu slide, siap dikirim ke puppeteer
+export type SlideHtml = string; // single-slide html, ready for puppeteer
 
-// Token: {{headline}} {{body}} {{index}} {{total}} — semua di-escape.
+// Tokens: {{headline}} {{body}} {{index}} {{total}} — all escaped.
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
@@ -13,7 +13,7 @@ function fill(html: string, vars: Record<string, string>): string {
   return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) => vars[k] ?? '');
 }
 
-// Default template — dark dev theme, 1080x1350, font system. ponytail: user upload template custom via FE (step 8).
+// Default template — dark dev theme, 1080x1350, system font. ponytail: user-uploaded custom template via FE (step 8).
 const DEFAULT_IG = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   * { margin: 0; box-sizing: border-box; }
@@ -27,12 +27,12 @@ const DEFAULT_IG = `<!doctype html>
 </style></head>
 <body><div class="accent"></div><div class="idx">{{index}}/{{total}}</div><h1>{{headline}}</h1><p>{{body}}</p></body></html>`;
 
-// LinkedIn PDF: A4 landscape-ish 1080x1350 juga ok — spec bilang carousel LI = PDF 6-10 halaman.
-// Sama visual, beda konteks. Simpel: pakai template sama.
+// LinkedIn PDF: A4 landscape-ish 1080x1350 works too — spec says LI carousel = 6-10 page PDF.
+// Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
 
 export async function getTemplateHtml(format: Format, platform: Platform, groupId: string): Promise<string> {
-  // format db: ig-carousel | li-carousel | reel — pdf (LI) pakai li-carousel
+  // db format: ig-carousel | li-carousel | reel — pdf (LI) uses li-carousel
   const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
   const rows = await sql`select html from templates
     where format = ${dbFormat} and is_active and group_id = ${groupId}
@@ -41,7 +41,7 @@ export async function getTemplateHtml(format: Format, platform: Platform, groupI
   return platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;
 }
 
-// Build HTML per slide. Struktur CarouselOut → array html siap screenshot.
+// Build HTML per slide. CarouselOut structure → array of screenshot-ready html.
 export function slidesToHtml(template: string, c: CarouselOut): SlideHtml[] {
   const total = c.slides.length;
   return c.slides.map((s, i) =>

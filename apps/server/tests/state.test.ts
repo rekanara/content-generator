@@ -10,70 +10,70 @@ const S = (o: Partial<RotationState>): RotationState => ({
   last_platform: 'linkedin', last_ig_format: null, last_li_format: null, last_pillar_id: null, ...o,
 });
 
-test('platform selalu bergantian', () => {
+test('platform always alternates', () => {
   const st = S({ last_platform: 'instagram' });
   assert.equal(nextSlot(st, [P("1")], true).platform, 'linkedin');
   assert.equal(nextSlot(S({ last_platform: 'linkedin' }), [P("1")], true).platform, 'instagram');
 });
 
-test('format IG: carousel <-> reels', () => {
+test('IG format: carousel <-> reels', () => {
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_ig_format: 'carousel' }), [P("1")], true).format, 'reels');
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_ig_format: 'reels' }), [P("1")], true).format, 'carousel');
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_ig_format: null }), [P("1")], true).format, 'carousel');
 });
 
-test('format LI: text <-> pdf', () => {
+test('LI format: text <-> pdf', () => {
   assert.equal(nextSlot(S({ last_platform: 'instagram', last_li_format: 'pdf' }), [P("1")], true).format, 'text');
   assert.equal(nextSlot(S({ last_platform: 'instagram', last_li_format: 'text' }), [P("1")], true).format, 'pdf');
   assert.equal(nextSlot(S({ last_platform: 'instagram', last_li_format: null }), [P("1")], true).format, 'pdf');
 });
 
-test('pilar bergilir mengikuti urutan, wrap ke awal', () => {
+test('pillars rotate in order, wrap to start', () => {
   const ps = [P("1"), P("2"), P("3")];
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_pillar_id: "1" }), ps, true).pillar_id, "2");
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_pillar_id: "3" }), ps, true).pillar_id, "1");
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_pillar_id: null }), ps, true).pillar_id, "1");
 });
 
-test('pilar berita dilewati saat allowNews=false, non-news tetap wrap', () => {
+test('news pillar skipped when allowNews=false, non-news still wraps', () => {
   const ps = [P("1"), P("2", true), P("3")]; // id 2 = news
   const st = S({ last_platform: 'linkedin', last_pillar_id: "1" });
   assert.equal(nextSlot(st, ps, false).pillar_id, "3");
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_pillar_id: "3" }), ps, false).pillar_id, "1");
 });
 
-test('pilar berita dipilih saat gilirannya dan allowNews=true', () => {
+test('news pillar picked when its turn comes and allowNews=true', () => {
   const ps = [P("1"), P("2", true)];
   assert.equal(nextSlot(S({ last_platform: 'linkedin', last_pillar_id: "1" }), ps, true).pillar_id, "2");
 });
 
-test('semua pilar news + allowNews=false → fallback pilar pertama (tidak throw)', () => {
+test('all pillars news + allowNews=false → fall back to first pillar (no throw)', () => {
   const ps = [P("1", true), P("2", true)];
   assert.equal(nextSlot(S({ last_platform: 'linkedin' }), ps, false).pillar_id, "1");
 });
 
-test('tanpa pilar aktif → throw', () => {
+test('no active pillars → throw', () => {
   assert.throws(() => nextSlot(S({}), [], true), /no active pillars/);
 });
 
-test('forcedSlot: platform sama dgn rotasi natural → format natural', () => {
-  // natural dr linkedin-last = instagram carousel
+test('forcedSlot: platform same as natural rotation → natural format', () => {
+  // natural from linkedin-last = instagram carousel
   const slot = forcedSlot(S({ last_platform: 'linkedin', last_ig_format: 'reels' }), [P("1")], true, 'instagram');
   assert.deepEqual(slot, { platform: 'instagram', format: 'carousel', pillar_id: '1' });
 });
 
-test('forcedSlot: platform beda dgn natural → format dibalik dr terakhir platform itu', () => {
-  // natural = instagram, tapi paksa linkedin; last_li_format=null → pdf
+test("forcedSlot: platform different from natural → format flipped from that platform's last", () => {
+  // natural = instagram, but force linkedin; last_li_format=null → pdf
   const slot = forcedSlot(S({ last_platform: 'linkedin', last_li_format: null }), [P("1")], true, 'linkedin');
   assert.deepEqual(slot, { platform: 'linkedin', format: 'pdf', pillar_id: '1' });
 });
 
-test('forcedSlot: format eksplisit menang, pilar tetap rotasi natural', () => {
+test('forcedSlot: explicit format wins, pillar still natural rotation', () => {
   const slot = forcedSlot(S({ last_platform: 'linkedin', last_pillar_id: "1" }), [P("1"), P("2")], true, 'instagram', 'reels');
   assert.deepEqual(slot, { platform: 'instagram', format: 'reels', pillar_id: '2' });
 });
 
-test('nextState: hanya format platform terkait yg berubah', () => {
+test('nextState: only the relevant platform format changes', () => {
   const st = S({ last_platform: 'linkedin', last_ig_format: 'carousel', last_li_format: 'text', last_pillar_id: "1" });
   const nx = nextState(st, { platform: 'instagram', format: 'reels', pillar_id: "3" });
   assert.deepEqual(nx, {
@@ -81,7 +81,7 @@ test('nextState: hanya format platform terkait yg berubah', () => {
   });
 });
 
-test('nextState lalu nextSlot: siklus penuh konsisten dgn PRD (LI text → IG carousel → LI pdf → IG reels)', () => {
+test('nextState then nextSlot: full cycle consistent with PRD (LI text → IG carousel → LI pdf → IG reels)', () => {
   const ps = [P("1")];
   let st = S({ last_platform: 'linkedin', last_ig_format: 'reels', last_li_format: 'text' });
   const seq: string[] = [];
@@ -95,8 +95,8 @@ test('nextState lalu nextSlot: siklus penuh konsisten dgn PRD (LI text → IG ca
   ]);
 });
 
-test('hari terlewat tidak merusak apa pun — rotasi murni dari state', () => {
-  // tidak ada input tanggal sama sekali; run 2x berturut setelah skip 5 hari = sama dgn tanpa skip
+test('skipped days break nothing — rotation purely from state', () => {
+  // no date input at all; running 2x in a row after a 5-day skip = same as without skip
   const ps = [P("1"), P("2")];
   const run2 = (st0: RotationState) => {
     let st = st0;
@@ -109,6 +109,6 @@ test('hari terlewat tidak merusak apa pun — rotasi murni dari state', () => {
     return out;
   };
   const st0 = S({ last_platform: 'linkedin', last_ig_format: 'carousel', last_li_format: 'pdf', last_pillar_id: "2" });
-  assert.deepEqual(run2(st0), run2(st0)); // deterministik
+  assert.deepEqual(run2(st0), run2(st0)); // deterministic
   assert.deepEqual(run2(st0), ['instagram:reels:1', 'linkedin:text:2']);
 });

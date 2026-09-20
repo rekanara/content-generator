@@ -1,5 +1,5 @@
--- 004: fix 003 bug — unique (group_id, format) membatasi 1 template per format TOTAL.
--- Intent: 1 template AKTIF per format. Ganti constraint dengan partial unique index.
+-- 004: fix 003 bug — unique (group_id, format) allowed only 1 template per format TOTAL.
+-- Intent: 1 ACTIVE template per format. Replace constraint with a partial unique index.
 begin;
 
 alter table templates drop constraint templates_one_active;

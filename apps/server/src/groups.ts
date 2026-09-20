@@ -1,4 +1,4 @@
-// Group resolver + CRUD. 1 group = 1 akun/brand. Config row null → fallback env.
+// Group resolver + CRUD. 1 group = 1 account/brand. Null config row → env fallback.
 import { sql } from './db.ts';
 import { config } from './config.ts';
 
@@ -10,7 +10,7 @@ export type GroupRow = {
   telegram_bot_token: string | null; telegram_chat_id: string | null;
 };
 
-// Config efektif untuk satu run: merge row.groups di atas env.
+// Effective config for one run: groups row merged over env.
 export type GroupCfg = {
   id: string; slug: string;
   llm: { baseUrl: string; apiKey: string; model: string; criticModel: string };
@@ -47,7 +47,7 @@ const COLS = sql`select id, slug, name, user_id, cron_expr, cron_enabled, create
   tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
   telegram_bot_token, telegram_chat_id from groups`;
 
-// returning-list utk sql.unsafe (patch dinamis) — identik dengan COLS.
+// returning-list for sql.unsafe (dynamic patch) — identical to COLS.
 const RET = 'id, slug, name, user_id, cron_expr, cron_enabled, created_at, llm_base_url, llm_api_key, llm_model, llm_model_critic, tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model, telegram_bot_token, telegram_chat_id';
 
 export async function listGroups(): Promise<GroupRow[]> {
@@ -65,17 +65,17 @@ export async function getGroupRow(slug: string): Promise<GroupRow | null> {
 
 export async function getGroupCfg(slug: string): Promise<GroupCfg> {
   const row = await getGroupRow(slug);
-  if (!row) throw new Error(`group "${slug}" tidak ada`);
+  if (!row) throw new Error(`group "${slug}" not found`);
   return toGroupCfg(row);
 }
 
 export async function getGroupCfgById(id: string): Promise<GroupCfg> {
   const [row] = await sql<GroupRow[]>`${COLS} where id = ${id}`;
-  if (!row) throw new Error(`group ${id} tidak ada`);
+  if (!row) throw new Error(`group ${id} not found`);
   return toGroupCfg(row);
 }
 
-// reserved: bentrok dengan route FE /app/users, /login
+// reserved: conflicts with FE routes /app/users, /login
 const RESERVED_SLUGS = new Set(['users', 'login']);
 
 export async function createGroup(d: {
@@ -97,14 +97,14 @@ export async function createGroup(d: {
       llm_base_url, llm_api_key, llm_model, llm_model_critic,
       tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
       telegram_bot_token, telegram_chat_id`;
-  // setiap group wajib punya rotation_state (005: PK group_id)
+  // every group must have a rotation_state (005: PK group_id)
   await sql`insert into rotation_state (group_id, last_platform) values (${row!.id}, 'linkedin')
     on conflict (group_id) do nothing`;
   return row!;
 }
 
-// Patch dinamis: field hadir → update (null = hapus override). Field absen → skip.
-// Identifier dari whitelist MAP, value parameterized — aman dari injection.
+// Dynamic patch: field present → update (null = clear override). Field absent → skip.
+// Identifiers from the MAP whitelist, values parameterized — injection-safe.
 export async function patchGroup(slug: string, d: Record<string, unknown>): Promise<GroupRow | null> {
   const MAP: Record<string, string> = {
     name: 'name', cron_expr: 'cron_expr', cron_enabled: 'cron_enabled',
@@ -128,7 +128,7 @@ export async function deleteGroup(slug: string): Promise<boolean> {
   return r.length > 0;
 }
 
-// Serialize ke schema Group (@workspace/shared): secret jadi flag *_set.
+// Serialize to the Group schema (@workspace/shared): secrets become *_set flags.
 export function groupOut(row: GroupRow) {
   return {
     id: row.id, slug: row.slug, name: row.name,

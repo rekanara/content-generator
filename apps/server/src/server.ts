@@ -12,7 +12,7 @@ import { api } from './api.ts';
 
 const app = new Hono();
 app.route('/api', api);
-app.all('/api/*', (c) => c.json({ error: 'endpoint tidak ada' }, 404));
+app.all('/api/*', (c) => c.json({ error: 'endpoint not found' }, 404));
 
 app.get('/', (c) => c.text('content-generator daemon v2 — OK'));
 app.get('/health', async (c) => {
@@ -20,18 +20,18 @@ app.get('/health', async (c) => {
   return c.json({ ok: true, queue: queueStatus() });
 });
 
-// SPA build output (apps/web/dist) — asset statis + fallback index.html utk client router.
+// SPA build output (apps/web/dist) — static assets + index.html fallback for the client router.
 const webDist = new URL('../../web/dist/', import.meta.url).pathname;
 app.use('/*', serveStatic({ root: webDist }));
 app.get('/*', (c) => {
   try {
     return c.html(readFileSync(`${webDist}index.html`, 'utf8'));
   } catch {
-    return c.text('FE belum dibuild — jalankan build di apps/web lalu restart', 503);
+    return c.text('frontend not built yet — run the build in apps/web and restart', 503);
   }
 });
 
 serve({ fetch: app.fetch, port: config.port });
-console.log(`[server] daemon v2 jalan di :${config.port}`);
+console.log(`[server] daemon v2 running on :${config.port}`);
 await startCron();
 await startBot();
