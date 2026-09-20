@@ -12,6 +12,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@workspace/shared": "*",
     "@workspace/ui": "*",
     "lucide-react": "^1.47.0",
     "react": "^19.2.8",

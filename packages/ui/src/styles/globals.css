@@ -131,3 +131,17 @@
     cursor: pointer;
     }
 }
+
+.input {
+  width: 100%;
+  border-radius: calc(var(--radius) * 0.6);
+  border: 1px solid var(--border);
+  background: transparent;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  color: inherit;
+}
+.input:focus {
+  outline: 2px solid color-mix(in oklab, var(--ring) 50%, transparent);
+  outline-offset: 1px;
+}

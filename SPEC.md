@@ -1,10 +1,10 @@
-# SPEC — Content Generator (content-generator)
+# SPEC v4 — Content Generator (content-generator)
 
-Sumber kebutuhan: `content-generator.md` + feedback Jack (revisi v2). Belum diimplementasi.
+Sumber kebutuhan: `content-generator.md` + feedback Jack (v2→v4). **Status: diimplementasi** — monorepo, JSON API + React SPA, daemon live di Mac mini.
 
 ## 1. Objective
 
-Daemon tunggal di Mac mini yang otomatis menghasilkan satu konten developer-audiens (bahasa Indonesia) per hari untuk Instagram atau LinkedIn (bergantian), dengan kontrol penuh lewat: (a) web admin FE — atur pilar topik, jadwal cron on/off, upload template visual & style samples, (b) bot Telegram — minta generate manual lewat chat. Hasil dikirim ke Telegram untuk di-upload manual oleh Jack.
+Daemon tunggal di Mac mini yang otomatis menghasilkan satu konten developer-audiens (bahasa Indonesia) per hari untuk Instagram atau LinkedIn (bergantian), dengan kontrol penuh lewat: (a) web admin SPA (React, Vite) — atur pilar topik, jadwal cron on/off, upload template visual & style samples, (b) bot Telegram — minta generate manual lewat chat. Hasil dikirim ke Telegram untuk di-upload manual oleh Jack.
 
 Bukan multi-agen: satu pipeline dengan peran (ideation → writer → critic → render → send). Satu process: server + scheduler + bot + queue.
 
@@ -19,7 +19,7 @@ Bukan multi-agen: satu pipeline dengan peran (ideation → writer → critic →
    - LinkedIn teks: body post saja.
 4. Hasil + caption dikirim ke chat Telegram (sendMediaGroup / sendDocument / sendMessage).
 5. Telegram command `/gen <platform> [format]` menjalankan generate manual via antrean; `/status` menampilkan jadwal, posisi rotasi, post terakhir.
-6. FE admin: CRUD pilar, atur cron (waktu + aktif/nonaktif), daftar post + preview + kirim ulang, tombol generate manual, upload template HTML per format dengan live preview, kelola style samples (teks).
+6. FE admin SPA: CRUD pilar, atur cron (waktu + aktif/nonaktif), daftar post + preview + kirim ulang, tombol generate manual, upload template HTML per format, kelola style samples (teks).
 7. Dedup topik: 30 topik terakhir per pilar disuntik ke prompt ideation; topik tersimpan di DB.
 8. Pilar berita tech pakai RSS segar; RSS gagal → fallback pilar lain, run tetap jalan.
 9. Setiap konten lewat critic + revisi (model critic terpisah via `LLM_MODEL_CRITIC`) sebelum render.
@@ -30,19 +30,30 @@ Bukan multi-agen: satu pipeline dengan peran (ideation → writer → critic →
 ## 3. Arsitektur
 
 ```
-daemon (src/server.ts)
-  ├─ Hono app: API + FE (server-rendered HTML + HTMX, auto-escape)
+daemon (apps/server/src/server.ts)
+  ├─ Hono app: JSON API (/api/*) + serveStatic apps/web/dist (SPA fallback)
   ├─ node-cron: jadwal dari settings DB, re-schedule saat setting berubah
   ├─ Telegram bot: polling getUpdates (no webhook, no public URL)
   ├─ queue: FIFO, satu run aktif
   └─ pipeline (lib bersama):
         slot → ideation (pilar gilir + riwayat + RSS?) → writer → critic
         → render (Puppeteer PNG/PDF, TTS+ffmpeg MP4) → upload MinIO → telegram (stream dari MinIO) → update state
+
+apps/web (React SPA — Vite, TypeScript strict, react 19)
+  ├─ src/lib/api.ts       # typed fetch client → /api/*
+  ├─ src/lib/hooks.ts     # useApi/useDashboard/usePosts/... (useEffect + fetch, no react-query)
+  ├─ src/components/nav.tsx
+  └─ src/views/           # dashboard, pillars (+cron), posts (+detail modal), styles, templates
+
+packages/shared (zod v4 — single contract FE↔BE)
+  └─ src/index.ts         # schema + types: Pillar, Post, Style, Template, Dashboard, Cron, input schemas
+
+packages/ui              # shadcn-style components + globals.css (tailwind v4) — dipakai apps/web
 ```
 
-Rotasi = pure function `(state) => nextSlot` di `src/state.ts`, unit-test terpisah dari DB.
+Rotasi = pure function `(state) => nextSlot` di `apps/server/src/state.ts`, unit-test terpisah dari DB.
 
-Reels + voiceover, scene-based sync (durasi frame mengikuti durasi audio — tidak perlu alignment rumit):
+Reels + voiceover, scene-based sync (durasi frame mengikuti durasi audio):
 ```
 scenes (writer output, 4–6 scene): {overlay_text, narration}
   → TTS per scene (msedge-tts, voice id-ID) → audio clip + ffprobe duration
@@ -52,7 +63,7 @@ scenes (writer output, 4–6 scene): {overlay_text, narration}
 
 ## 4. Data Model (PostgreSQL)
 
-Driver `postgres` (postgres.js). Migrasi SQL plain di `db/migrations/`, runner sendiri (~40 baris), tabel `schema_migrations`. Tanpa ORM.
+Driver `postgres` (postgres.js). Migrasi SQL plain di `apps/server/db/migrations/`, runner sendiri, tabel `schema_migrations`. Tanpa ORM.
 
 ```sql
 create table settings (
@@ -70,7 +81,7 @@ create table pillars (
   active boolean not null default true,
   sort_order int not null default 0,
   created_at timestamptz not null default now()
-  -- soft delete: active=false, tidak dihapus fisik (FK dari posts/rotation)
+  -- soft delete via active=false (FK dari posts/rotation)
 );
 
 create table rotation_state (
@@ -103,7 +114,7 @@ create table templates (
   id serial primary key,
   name text not null,
   format text not null check (format in ('ig-carousel','li-carousel','reel')),
-  html text not null,               -- token {{TITLE}}, {{SLIDES}}, dst.
+  html text not null,               -- token {{headline}}, {{body}}, {{index}}, {{total}}, {{overlay}}
   is_active boolean not null default false,  -- satu aktif per format
   updated_at timestamptz not null default now()
 );
@@ -129,10 +140,12 @@ Boot cleanup: post berstatus `queued`/`draft`/`rendered` saat daemon start → t
 
 | Command | Fungsi |
 |---|---|
-| `pnpm migrate` | Terapkan migrasi SQL pending |
-| `pnpm serve` | Jalankan daemon (server + cron + bot + queue) |
-| `pnpm daily [--dry\|--no-render]` | CLI: satu run pipeline (debug, tanpa bot/FE/cron) |
-| `pnpm send --post <id>` / `pnpm render --post <id>` | Kirim/render ulang |
+| `npm run migrate` (apps/server) | Terapkan migrasi SQL pending |
+| `npm run serve` (apps/server) | Jalankan daemon (server + cron + bot + queue) |
+| `npm run daily [--dry\|--no-render]` (apps/server) | CLI: satu run pipeline (debug) |
+| `npm run build` (apps/web) | Build SPA → `apps/web/dist` (server serveStatic dari sini) |
+| `npm run dev` (apps/web) | Vite dev server (proxy /api ke :8787) |
+| `npm test` (root) | Workspace test (27 test, node:test) |
 
 Bot Telegram (polling):
 - `/gen instagram|linkedin [carousel|reels|pdf|text]` — tanpa arg format → ikut rotasi format.
@@ -144,55 +157,95 @@ Process management: launchd plist atau pm2 — ops, di luar scope kode.
 ## 6. Project Structure
 
 ```
-content-generator/
+content-generator/          # npm workspaces
   SPEC.md
-  package.json        # tsx, typescript, puppeteer, postgres, rss-parser, hono, cron, msedge-tts, minio, @types/*
-  .env.example
-  db/migrations/001_init.sql, 002_seed_pillars.sql
-  src/
-    config.ts         # env: DB_*, MINIO_*, LLM, TTS, Telegram, PORT
-    db.ts             # pool postgres.js + migrasi runner + get/set rotation & pillars
-    state.ts          # PURE: nextSlot/forcedSlot/nextState (zero import, unit-test)
-    storage.ts        # MinIO: upload artefak posts/<id>/, stream untuk kirim Telegram
-    llm.ts            # openai-compatible chat (JSON mode + retry)
-    tts.ts            # text-to-speech: msedge-tts default, opsi openai-compatible
-    schema.ts         # type guard output LLM (ideation/writer/critic)
-    prompts.ts        # builder per peran + style samples dari DB
-    rss.ts            # fetch feed → cache feeds_cache → pilih item segar
-    pipeline.ts       # orkestrasi satu run
-    queue.ts          # FIFO in-process, satu run aktif
-    cron.ts           # scheduler dari settings, re-schedule on change
-    bot.ts            # telegram polling + command parse (regex, no framework)
-    server.ts         # hono app: API + FE, entry daemon
-    telegram.ts       # Bot API via fetch: sendMessage, sendMediaGroup, sendDocument
-    render/
-      carousel.ts     # HTML → PNG 1080×1350 / PDF
-      reels.ts        # TTS per scene + ffprobe + frame PNG + ffmpeg concat
-      ffmpeg.ts       # pure: arg builder (unit-test)
-      template.ts     # load template aktif dari DB, isi token, escape
-    views/            # hono/jsx atau html`` — halaman admin + partial HTMX
-  out/                # artefak per post, gitignored
-  tests/              # node:test
+  package.json              # workspace root
+  apps/
+    server/                 # @workspace/server — daemon
+      package.json          # tsx, typescript, puppeteer, postgres, rss-parser, hono, cron, msedge-tts, minio
+      db/migrations/001_init.sql, 002_seed_pillars.sql
+      src/
+        config.ts           # env: DB_*, MINIO_*, LLM, TTS, Telegram, PORT
+        db.ts               # pool postgres.js + migrasi runner + get/set rotation & pillars
+        state.ts            # PURE: nextSlot/forcedSlot/nextState (zero import, unit-test)
+        storage.ts          # MinIO: upload artefak posts/<id>/, stream untuk kirim Telegram
+        llm.ts              # openai-compatible chat (JSON mode + retry)
+        tts.ts              # text-to-speech: msedge-tts default, opsi openai-compatible
+        schema.ts           # type guard output LLM (ideation/writer/critic)
+        prompts.ts          # builder per peran + style samples dari DB
+        rss.ts              # fetch feed → cache feeds_cache → pilih item segar
+        pipeline.ts         # orkestrasi satu run
+        queue.ts            # FIFO in-process, satu run aktif
+        cron.ts             # scheduler dari settings, re-schedule on change
+        bot.ts              # telegram polling + command parse (regex, no framework)
+        server.ts           # hono: route /api/* + serveStatic web/dist + SPA fallback
+        api.ts              # JSON API (zod-validated via @workspace/shared)
+        telegram.ts         # Bot API via fetch: sendMessage, sendMediaGroup, sendDocument
+        render/
+          carousel.ts       # HTML → PNG 1080×1350 / PDF
+          reels.ts          # TTS per scene + ffprobe + frame PNG + ffmpeg concat
+          ffmpeg.ts         # pure: arg builder (unit-test)
+          template.ts       # load template aktif dari DB, isi token, escape
+      tests/                # node:test (27)
+    web/                    # @workspace/web — SPA
+      src/
+        main.tsx
+        App.tsx             # view switcher (state-based, no router)
+        lib/api.ts          # typed fetch client
+        lib/hooks.ts        # useApi + per-resource hooks
+        components/         # nav.tsx, theme-provider.tsx
+        views/              # dashboard, pillars, posts, styles, templates
+  packages/
+    shared/                 # @workspace/shared — zod schema kontrak FE↔BE
+      src/index.ts
+    ui/                     # @workspace/ui — tailwind v4 + shadcn-style components
+      src/{components,hooks,lib,styles}
+  out/                      # artefak per post, gitignored (server side)
 ```
 
-## 7. Code Style
+## 7. JSON API Contract
 
-- TypeScript strict, ESM, Node 22+, `tsx` tanpa build step.
+Semua route zod-validated (input) via `@workspace/shared`. Response = typed schema yang sama (type-only di FE).
+
+| Method | Route | Fungsi |
+|---|---|---|
+| GET | /api/dashboard | cron + queue + rotation + next_slot + 10 post terakhir |
+| GET/POST | /api/pillars | list / tambah (PillarInput) |
+| POST | /api/pillars/:id/toggle | aktif/off |
+| DELETE | /api/pillars/:id | hapus fisik |
+| GET/POST | /api/cron | status / simpan expr+enabled (validasi cron pkg) |
+| GET | /api/posts | 100 post terakhir |
+| GET | /api/posts/:id | detail + body_text (slides/scenes dirapikan) |
+| POST | /api/posts/:id/resend | antrean kirim ulang |
+| POST | /api/gen | generate manual (platform/format optional) |
+| GET/POST | /api/styles | list / tambah (StyleInput) |
+| DELETE | /api/styles/:id | hapus |
+| GET/POST | /api/templates | list / tambah (TemplateInput) |
+| POST | /api/templates/:id/activate | set aktif per format |
+| DELETE | /api/templates/:id | hapus |
+
+Error contract: 400 `{error, issues?}` (zod), 404 `{error}` (unknown post / unknown /api route), 500 default Hono. `:id` param di-guard `Number.isInteger` → 400 `{"error":"id tak valid"}`.
+
+SPA fallback: route non-/api tak dikenal → `apps/web/dist/index.html` (client view switcher, state-based). `/api/*` tak dikenal → 404 JSON, tidak jatuh ke SPA.
+
+## 8. Code Style
+
+- TypeScript strict, ESM, Node 22+. Server: `tsx` tanpa build step. Web: Vite build.
+- Monorepo npm workspaces: `@workspace/server`, `@workspace/web`, `@workspace/shared`, `@workspace/ui`.
+- Zod v4 sebagai kontrak tunggal: BE parse input, FE type-only (upgrade path: FE runtime parse saat BE tak terpercaya).
 - Fungsi murni untuk logika testable: rotasi, prompt builder, ffmpeg args, type guard, command parser.
-- Deps final: `tsx`, `typescript`, `puppeteer`, `postgres`, `rss-parser`, `hono`, `cron`, `msedge-tts`, `minio` + `@types/*`. Tambahan = ask first.
-- FE: server-rendered HTML + HTMX (CDN) + CSS kecil. Auto-escape semua konten user (hono html helper) — XSS boundary.
+- FE React: function components, hooks, no react-query (useApi hook kecil cukup), lucide-react icons, @workspace/ui Button.
 - Komentar `ponytail:` untuk penyederhanaan disengaja (ceiling + jalur upgrade).
 - Log terstruktur satu baris per langkah (`[ideation] topic=... tokens=...`).
 
-## 8. Testing Strategy
+## 9. Testing Strategy
 
-- Runner `node:test` (zero dep).
-- Unit (pure, wajib): rotasi platform+format+pilar; type guard; ffmpeg arg builder; prompt builder (muat riwayat + style samples); bot command parser.
-- Integration manual: `pnpm migrate` → tabel + seed masuk; `pnpm daily --dry` → artefak ada di MinIO `posts/<id>/` (object > 0 byte), MP4 durasi 10–30 detik, audio terdengar; FE buka di browser, bot command dari HP.
+- Runner `node:test` (zero dep). 27 test, all pass.
+- Unit (pure, wajib): rotasi platform+format+pilar; type guard; ffmpeg arg builder; prompt builder; bot command parser; zod schema kontrak.
+- Integration manual: `npm run migrate` → tabel + seed; `npm run daily --dry` → artefak di MinIO; SPA buka di browser (dashboard/pillars/posts/styles/templates), bot command dari HP.
 - LLM tidak di-mock; kualitas = review manusia.
-- Template upload: preview render dengan dummy data (iframe sandbox).
 
-## 9. Config & Secrets
+## 10. Config & Secrets
 
 ```
 DB_HOST=localhost DB_PORT=5432 DB_USER=... DB_PASSWORD=... DB_NAME=content_generator
@@ -207,15 +260,16 @@ TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
 PORT=8787
 ```
 
-Postgres & MinIO = service eksternal (config terpisah dari app). Render staging lokal `out/<id>/` → upload ke MinIO → kirim Telegram streaming dari MinIO → staging boleh dibersihkan.
+Postgres & MinIO = service eksternal. Render staging lokal `out/<id>/` → upload ke MinIO → kirim Telegram streaming → staging boleh dibersihkan.
 
 Log tidak pernah mencetak secret. Key hanya dibaca di `config.ts`.
 
-## 10. Boundaries
+## 11. Boundaries
 
 **Selalu:**
 - Validasi output LLM sebelum dipakai (trust boundary).
-- Auto-escape semua render FE; preview template di iframe sandbox.
+- Zod-parse semua input API (trust boundary); `:id` integer guard.
+- Query SQL selalu parameterized (template tag postgres.js).
 - Fail-safe RSS; fail-loud lainnya (`failed`, log error).
 - Semua state di PostgreSQL. Queue in-process + boot cleanup.
 
@@ -229,28 +283,28 @@ Log tidak pernah mencetak secret. Key hanya dibaca di `config.ts`.
 - Render reels paralel (CPU-bound, satu per waktu — queue menjamin).
 - Webhook Telegram (polling saja, Mac mini lokal tanpa public URL).
 
-## 11. Build Order
+## 12. Keputusan (locked)
 
-1. `db.ts` + migrasi + seed pilar + `state.ts` rotasi (+ test).
-2. `llm.ts` + `schema.ts` + `prompts.ts` + `pipeline.ts` sampai critic → `pnpm daily --no-render` jalan.
-3. `render/template.ts` + `carousel.ts` (PNG + PDF) → `--dry` jalan untuk slot non-reels.
-4. `telegram.ts` + `bot.ts` → daemon v1 (bot polling + queue + `/gen` `/status`) — generate manual sudah bisa dari HP.
-5. `cron.ts` + daemon penuh → cron otomatis jalan.
-6. `tts.ts` + `render/reels.ts` + ffmpeg → reels voiceover jalan.
-7. `server.ts` + `views/` FE admin: pilar, cron, history + preview + resend, generate manual.
-8. FE upload template + preview; kelola style samples.
-9. `rss.ts` + pilar berita.
-10. Polish: launchd/pm2, seed 5+ style samples.
-
-## 12. Keputusan (locked 2026-09-19)
-
-1. **Generate manual (bot/FE/CLI) memajukan rotasi** — sama seperti cron. Satu sumber kebenaran, tidak ada flag one-off sampai diminta.
-2. **Upload style = upload template HTML visual** per format + live preview dummy data (iframe sandbox).
-3. **TTS default `msedge-tts`** — gratis, tanpa API key, voice neural Indonesia (`id-ID-ArdiNeural` / `id-ID-GadisNeural`). Opsi `TTS_PROVIDER=openai` untuk `/v1/audio/speech` via 9router — hanya kalau ada provider yang benar-benar serve audio (cek sekali via curl). `ponytail:` upgrade ElevenLabs di belakang interface `tts.ts` yang sama.
-4. **Bukan monorepo, tanpa React** — satu package, FE server-rendered HTMX. FE = CRUD + toggle + upload + preview; monorepo menambah 2 build pipeline + workspace setup untuk kebutuhan yang belum ada. Upgrade path murah: API hono sudah JSON; saat FE butuh interaksi kompleks (editor slide drag-drop), tambah `web/` Vite React di repo yang sama — struktur server tidak berubah.
-
-Asumsi tersisa (kecil, jalan tanpa konfirmasi):
+1. **Generate manual (bot/FE/CLI) memajukan rotasi** — sama seperti cron. Satu sumber kebenaran.
+2. **Upload style = upload template HTML visual** per format.
+3. **TTS default `msedge-tts`** — gratis, voice neural Indonesia. Opsi openai-compatible di belakang interface `tts.ts` yang sama. `ponytail:` upgrade ElevenLabs.
+4. ~~Bukan monorepo, tanpa React~~ → **SUPERSEDED (2026-09-20): monorepo npm workspaces + React SPA.** Keputusan v2 (HTMX SSR) sudah terlampaui: API hono JSON-first memudahkan migrasi; SPA React memberi editor-interaksi kompleks (template upload, preview) tanpa HTMX acrobatics. Struktur: apps/server (daemon) + apps/web (SPA) + packages/shared (kontrak) + packages/ui (komponen). SSR admin (admin.ts, views.ts) dihapus — JSON API + SPA menggantikan sepenuhnya.
 5. Bot Telegram command-based (`/gen`, `/status`), bukan natural language.
 6. Reels 15–30 detik, 4–6 scene, narasi ~50–70 kata, tanpa musik.
 7. Style samples selalu masuk prompt writer + critic (8 terbaru).
-8. Cron in-app (node-cron) karena toggle FE; `pnpm daily` CLI tetap untuk debug.
+8. Cron in-app (node-cron) karena toggle FE; CLI `daily` tetap untuk debug.
+9. **(2026-09-20) FE view-switcher state-based, bukan URL router** — admin single-user, 5 view, tidak perlu history/routing. `ponytail:` tambah react-router kalau FE publik/ multi-halaman.
+
+## 13. Upgrade Paths (ponytail ceilings)
+
+- FE runtime zod-parse response (saat ini type-only) — kalau BE jadi multi-client.
+- react-router — kalau perlu URL per view (share link, back button).
+- ElevenLabs TTS — di belakang interface `tts.ts` yang sama.
+- Launchd/pm2 process management — ops, di luar kode.
+
+## 14. Verification (2026-09-20)
+
+- `npm test` workspace root: 27/27 pass.
+- Typecheck: server, shared, ui, web — semua clean.
+- Live daemon :8787: /api/* full CRUD verified; SPA fallback verified; /api 404 JSON verified; NaN id → 400 verified.
+- Adversarial: parameterized SQL all routes; zod 400 malformed; orphan id → idempotent no-op.

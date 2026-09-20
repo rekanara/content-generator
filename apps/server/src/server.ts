@@ -1,42 +1,34 @@
-// Daemon entry: hono server + telegram bot polling. Cron menyusul (step 5).
+// Daemon entry: hono server + telegram bot polling + SPA + JSON API.
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
+import { readFileSync } from 'node:fs';
 import { config } from './config.ts';
 import { sql } from './db.ts';
 import { startBot } from './bot.ts';
-import { queueStatus, enqueue } from './queue.ts';
+import { queueStatus } from './queue.ts';
 import { startCron, cronStatus } from './cron.ts';
-import { admin } from './admin.ts';
+import { api } from './api.ts';
 
 const app = new Hono();
-app.route('/admin', admin);
+app.route('/api', api);
+app.all('/api/*', (c) => c.json({ error: 'endpoint tidak ada' }, 404));
 
-app.get('/', (c) => c.text('content-generator daemon v1 — OK'));
+app.get('/', (c) => c.text('content-generator daemon v2 — OK'));
 app.get('/health', async (c) => {
   await sql`select 1`;
   return c.json({ ok: true, queue: queueStatus(), cron: cronStatus() });
 });
 
-// Manual generate via HTTP — fondasi FE (step 7). Body: {platform?, format?}
-app.post('/gen', async (c) => {
-  const body = await c.req.json().catch(() => ({}));
-  const platform = body.platform as string | undefined;
-  const format = body.format as string | undefined;
-  if (platform && platform !== 'instagram' && platform !== 'linkedin') {
-    return c.json({ error: 'platform harus instagram|linkedin' }, 400);
+// SPA build output (apps/web/dist) — asset statis + fallback index.html utk client router.
+const webDist = new URL('../../web/dist/', import.meta.url).pathname;
+app.use('/*', serveStatic({ root: webDist }));
+app.get('/*', (c) => {
+  try {
+    return c.html(readFileSync(`${webDist}index.html`, 'utf8'));
+  } catch {
+    return c.text('FE belum dibuild — jalankan build di apps/web lalu restart', 503);
   }
-  if (format && !['carousel', 'reels', 'pdf', 'text'].includes(format)) {
-    return c.json({ error: 'format harus carousel|reels|pdf|text' }, 400);
-  }
-  enqueue({
-    kind: 'generate',
-    forced: platform
-      ? { platform: platform as 'instagram' | 'linkedin', format: format as 'carousel' | 'reels' | 'pdf' | 'text' | undefined }
-      : undefined,
-    notifyChat: true,
-    source: 'web',
-  });
-  return c.json({ ok: true, queued: queueStatus() });
 });
 
 serve({ fetch: app.fetch, port: config.port });

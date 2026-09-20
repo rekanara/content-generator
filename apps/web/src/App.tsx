@@ -1,19 +1,28 @@
-import { Button } from "@workspace/ui/components/button"
+import { useState } from "react"
+import { ThemeProvider } from "@/components/theme-provider.tsx"
+import { DashboardView } from "@/views/dashboard.tsx"
+import { PillarsView } from "@/views/pillars.tsx"
+import { PostsView } from "@/views/posts.tsx"
+import { StylesView } from "@/views/styles.tsx"
+import { TemplatesView } from "@/views/templates.tsx"
+import { Nav } from "@/components/nav.tsx"
+
+type View = "dashboard" | "pillars" | "posts" | "styles" | "templates"
 
 export function App() {
+  const [view, setView] = useState<View>("dashboard")
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="text-muted-foreground font-mono text-xs">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
+    <ThemeProvider>
+      <div className="min-h-svh bg-background text-foreground">
+        <Nav view={view} onNavigate={setView} />
+        <main className="mx-auto max-w-4xl p-4 md:p-6">
+          {view === "dashboard" && <DashboardView />}
+          {view === "pillars" && <PillarsView />}
+          {view === "posts" && <PostsView />}
+          {view === "styles" && <StylesView />}
+          {view === "templates" && <TemplatesView />}
+        </main>
       </div>
-    </div>
+    </ThemeProvider>
   )
 }
