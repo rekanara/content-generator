@@ -1,8 +1,8 @@
-// Shared kontrak API FE↔BE — zod = single source of truth.
+// Shared API contract FE↔BE — zod = single source of truth.
 // BE: parse request/response. FE: parse fetch result + form validation.
 import { z } from 'zod';
 
-// ---------- enums domain (mirror state.ts; state.ts TIDAK import zod — pure) ----------
+// ---------- domain enums (mirror state.ts; state.ts does NOT import zod — pure) ----------
 export const Platform = z.enum(['instagram', 'linkedin']);
 export type Platform = z.infer<typeof Platform>;
 
@@ -11,15 +11,15 @@ export const LiFormat = z.enum(['text', 'pdf']);
 export const Format = z.enum(['carousel', 'reels', 'pdf', 'text']);
 export type Format = z.infer<typeof Format>;
 
-// Template format (DB check constraint) — beda domain dari Format.
+// Template format (DB check constraint) — different domain from Format.
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'sent', 'failed']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
-// ---------- groups (multi-akun) ----------
-// Secret (api_key, bot_token) TIDAK pernah keluar penuh dari API — hanya flag "ter-set".
+// ---------- groups (multi-account) ----------
+// Secrets (api_key, bot_token) NEVER leave the API in full — only a "set" flag.
 const GROUP_CONFIG_FIELDS = {
   llm_base_url: z.string().nullable(),
   llm_model: z.string().nullable(),
@@ -46,7 +46,7 @@ export const Group = z.object({
 export type Group = z.infer<typeof Group>;
 
 export const GroupInput = z.object({
-  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'slug: huruf kecil, angka, strip'),
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'slug: lowercase letters, digits, dashes'),
   name: z.string().min(1),
   cron_expr: z.string().min(1).default('0 7 * * *'),
   cron_enabled: z.boolean().default(true),
@@ -63,7 +63,7 @@ export const GroupInput = z.object({
   telegram_chat_id: z.string().nullable().default(null),
 });
 export type GroupInput = z.infer<typeof GroupInput>;
-// Versi input (field ber-default jadi optional) — untuk body request dari FE.
+// Input version (fields with defaults become optional) — for request bodies from the FE.
 export type GroupInputBody = z.input<typeof GroupInput>;
 
 export const GroupPatch = z.object({
@@ -71,7 +71,7 @@ export const GroupPatch = z.object({
   cron_expr: z.string().min(1).optional(),
   cron_enabled: z.boolean().optional(),
   llm_base_url: z.string().nullable().optional(),
-  llm_api_key: z.string().nullable().optional(), // null = hapus override, balik ke env
+  llm_api_key: z.string().nullable().optional(), // null = remove override, fall back to env
   llm_model: z.string().nullable().optional(),
   llm_model_critic: z.string().nullable().optional(),
   tts_provider: z.string().nullable().optional(),
@@ -111,7 +111,7 @@ export const CronSettings = z.object({
 export type CronSettings = z.infer<typeof CronSettings>;
 
 export const CronInput = z.object({
-  expr: z.string().min(1), // validasi expr via cron pkg di BE
+  expr: z.string().min(1), // expr validated via cron pkg on the BE
   enabled: z.boolean().default(false),
 });
 export type CronInput = z.infer<typeof CronInput>;
@@ -131,7 +131,7 @@ export type PostSummary = z.infer<typeof PostSummary>;
 export const PostDetail = PostSummary.extend({
   caption: z.string(),
   error: z.string().nullable(),
-  body_text: z.string(), // body sudah dirapikan (slides/scenes → teks)
+  body_text: z.string(), // body flattened to text (slides/scenes → text)
 });
 export type PostDetail = z.infer<typeof PostDetail>;
 
@@ -185,8 +185,8 @@ export const NextSlot = z.object({
 export type NextSlot = z.infer<typeof NextSlot>;
 
 export const Dashboard = z.object({
-  cron: CronSettings, // cron milik group aktif
-  queue: z.object({ running: z.boolean(), pending: z.number() }), // queue milik group aktif
+  cron: CronSettings, // active group's cron
+  queue: z.object({ running: z.boolean(), pending: z.number() }), // active group's queue
   rotation: RotationView,
   next_slot: NextSlot,
   last_posts: z.array(PostSummary),
@@ -199,7 +199,7 @@ export const GenerateInput = z.object({
 });
 export type GenerateInput = z.infer<typeof GenerateInput>;
 
-// Token template per format — utk hint UI + validasi FE.
+// Template tokens per format — for UI hints + FE validation.
 export const TEMPLATE_TOKENS: Record<TemplateFormat, string[]> = {
   'ig-carousel': ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   'li-carousel': ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
