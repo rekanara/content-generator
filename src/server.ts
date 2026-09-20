@@ -6,8 +6,10 @@ import { sql } from './db.ts';
 import { startBot } from './bot.ts';
 import { queueStatus, enqueue } from './queue.ts';
 import { startCron, cronStatus } from './cron.ts';
+import { admin } from './admin.ts';
 
 const app = new Hono();
+app.route('/admin', admin);
 
 app.get('/', (c) => c.text('content-generator daemon v1 — OK'));
 app.get('/health', async (c) => {
