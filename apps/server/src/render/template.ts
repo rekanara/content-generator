@@ -31,11 +31,11 @@ const DEFAULT_IG = `<!doctype html>
 // Sama visual, beda konteks. Simpel: pakai template sama.
 const DEFAULT_LI = DEFAULT_IG;
 
-export async function getTemplateHtml(format: Format, platform: Platform): Promise<string> {
+export async function getTemplateHtml(format: Format, platform: Platform, groupId: string): Promise<string> {
   // format db: ig-carousel | li-carousel | reel — pdf (LI) pakai li-carousel
   const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
   const rows = await sql`select html from templates
-    where format = ${dbFormat} and is_active
+    where format = ${dbFormat} and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
   if (rows.length > 0) return rows[0]!.html as string;
   return platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;

@@ -9,9 +9,9 @@ import { Checkbox } from "@workspace/ui/components/checkbox"
 import { api, ApiError } from "@/lib/api"
 import { usePillars, useCron } from "@/lib/hooks"
 
-export function PillarsView() {
-  const { data: pillars, error, loading, reload } = usePillars()
-  const { data: cron } = useCron()
+export function PillarsView({ slug }: { slug: string }) {
+  const { data: pillars, error, loading, reload } = usePillars(slug)
+  const { data: cron } = useCron(slug)
   const [form, setForm] = useState({ name: "", description: "", is_news: false, sort_order: 0 })
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -20,7 +20,7 @@ export function PillarsView() {
     e.preventDefault()
     setBusy(true); setMsg(null)
     try {
-      await api.addPillar(form)
+      await api.addPillar(slug, form)
       setForm({ name: "", description: "", is_news: false, sort_order: 0 })
       reload()
     } catch (err) {
@@ -32,7 +32,7 @@ export function PillarsView() {
 
   const saveCron = async (expr: string, enabled: boolean) => {
     try {
-      await api.saveCron(expr, enabled)
+      await api.saveCron(slug, expr, enabled)
       setMsg(null)
     } catch (err) {
       setMsg(err instanceof ApiError ? err.message : "gagal simpan cron")
@@ -78,7 +78,7 @@ export function PillarsView() {
       <div className="divide-y rounded-lg border">
         {(pillars ?? []).map((p) => (
           <div key={p.id} className="flex items-center gap-3 p-3 text-sm">
-            <button onClick={() => api.togglePillar(p.id).then(reload)}>
+            <button onClick={() => api.togglePillar(slug, p.id).then(reload)}>
               <Badge variant="secondary" className={p.active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
                 {p.active ? "aktif" : "off"}
               </Badge>
@@ -88,7 +88,7 @@ export function PillarsView() {
               <p className="truncate text-xs text-muted-foreground">{p.description}</p>
             </div>
             <span className="text-xs text-muted-foreground">#{p.sort_order}</span>
-            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delPillar(p.id).then(reload)}>
+            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delPillar(slug, p.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
           </div>

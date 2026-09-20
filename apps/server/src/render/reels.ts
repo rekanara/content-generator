@@ -9,6 +9,7 @@ import puppeteer from 'puppeteer';
 import { sql } from '../db.ts';
 import type { ReelsOut } from '../schema.ts';
 import { ttsToFile } from '../tts.ts';
+import type { GroupCfg } from '../groups.ts';
 import { ffprobeDurationArgs, segmentArgs, concatArgs } from './ffmpeg.ts';
 import { uploadPostArtifact } from '../storage.ts';
 
@@ -32,8 +33,8 @@ const DEFAULT_REEL = `<!doctype html>
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-async function getReelTemplate(): Promise<string> {
-  const rows = await sql`select html from templates where format = 'reel' and is_active
+async function getReelTemplate(groupId: string): Promise<string> {
+  const rows = await sql`select html from templates where format = 'reel' and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
   return rows.length > 0 ? (rows[0]!.html as string) : DEFAULT_REEL;
 }
@@ -47,9 +48,9 @@ async function ffprobeDuration(file: string): Promise<number> {
 
 export type ReelsArtifacts = { video: string; prefix: string; durationSec: number };
 
-export async function renderReels(postId: number, draft: ReelsOut): Promise<ReelsArtifacts> {
+export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
   const total = draft.scenes.length;
-  const template = await getReelTemplate();
+  const template = await getReelTemplate(cfg.id);
   const outDir = `out/${postId}`;
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
@@ -58,7 +59,7 @@ export async function renderReels(postId: number, draft: ReelsOut): Promise<Reel
   const audios: { mp3: string; dur: number }[] = [];
   for (let i = 0; i < total; i++) {
     const mp3 = `${outDir}/audio-${String(i + 1).padStart(2, '0')}.mp3`;
-    await ttsToFile(draft.scenes[i]!.narration, mp3);
+    await ttsToFile(cfg, draft.scenes[i]!.narration, mp3);
     const dur = await ffprobeDuration(mp3);
     audios.push({ mp3, dur });
     console.log(`[reels] scene ${i + 1}/${total}: TTS ${dur.toFixed(1)}s`);
@@ -104,13 +105,13 @@ export async function renderReels(postId: number, draft: ReelsOut): Promise<Reel
   await exec('ffmpeg', concatArgs(listFile, finalMp4));
 
   // 5. Upload
-  const key = await uploadPostArtifact(postId, finalMp4, 'reel.mp4');
+  const key = await uploadPostArtifact(cfg.slug, postId, finalMp4, 'reel.mp4');
   console.log(`[reels] post #${postId}: MP4 ${totalDur.toFixed(1)}s → ${key}`);
-  return { video: key, prefix: `posts/${postId}/`, durationSec: totalDur };
+  return { video: key, prefix: `${cfg.slug}/posts/${postId}/`, durationSec: totalDur };
 }
 
-export async function renderReelsAndSave(postId: number, draft: ReelsOut): Promise<ReelsArtifacts> {
-  const r = await renderReels(postId, draft);
+export async function renderReelsAndSave(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
+  const r = await renderReels(postId, draft, cfg);
   await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix} where id = ${postId}`;
   return r;
 }

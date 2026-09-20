@@ -5,7 +5,7 @@ import type { Slide, Scene } from './schema.ts';
 type Msg = { role: 'system' | 'user'; content: string };
 
 export type StyleSample = { title: string; body: string; platform: string | null };
-export type PillarFull = { id: number; name: string; description: string; is_news: boolean };
+export type PillarFull = { id: string; name: string; description: string; is_news: boolean };
 
 const R = 'Balas HANYA dengan JSON valid tanpa penjelasan apa pun di luar JSON.';
 

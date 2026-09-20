@@ -5,19 +5,19 @@ export type IgFormat = 'carousel' | 'reels';
 export type LiFormat = 'text' | 'pdf';
 export type Format = IgFormat | LiFormat;
 
-export type PillarLite = { id: number; is_news: boolean };
+export type PillarLite = { id: string; is_news: boolean };
 
 export type RotationState = {
   last_platform: Platform;
   last_ig_format: IgFormat | null;
   last_li_format: LiFormat | null;
-  last_pillar_id: number | null;
+  last_pillar_id: string | null;
 };
 
 export type Slot = {
   platform: Platform;
   format: Format;
-  pillar_id: number; // sudah termasuk fallback non-news
+  pillar_id: string; // sudah termasuk fallback non-news
 };
 
 const OTHER: Record<Platform, Platform> = { instagram: 'linkedin', linkedin: 'instagram' };
@@ -33,8 +33,8 @@ function nextFormat(state: RotationState, platform: Platform): Format {
 // Pilar aktif berikutnya (urut sort_order), melewati pilar berita jika tanpa RSS.
 // Pilar berita hanya dipilih bila allowNews=true. Kalau sampai satu putaran penuh
 // tidak ada kandidat non-news, fallback ke pilar berita itu juga.
-function nextPillar(pillars: PillarLite[], lastId: number | null, allowNews: boolean): number {
-  const sorted = [...pillars].sort((a, b) => a.id - b.id); // ponytail: sort by id, anggap seed urut; upgrade: kolom sort_order di query
+function nextPillar(pillars: PillarLite[], lastId: string | null, allowNews: boolean): string {
+  const sorted = [...pillars].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0); // uuid v7 time-ordered = urut waktu
   const eligible = (p: PillarLite) => allowNews || !p.is_news;
   if (sorted.length === 0) throw new Error('no active pillars');
 

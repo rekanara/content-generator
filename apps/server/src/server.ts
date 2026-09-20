@@ -7,7 +7,7 @@ import { config } from './config.ts';
 import { sql } from './db.ts';
 import { startBot } from './bot.ts';
 import { queueStatus } from './queue.ts';
-import { startCron, cronStatus } from './cron.ts';
+import { startCron } from './cron.ts';
 import { api } from './api.ts';
 
 const app = new Hono();
@@ -17,7 +17,7 @@ app.all('/api/*', (c) => c.json({ error: 'endpoint tidak ada' }, 404));
 app.get('/', (c) => c.text('content-generator daemon v2 — OK'));
 app.get('/health', async (c) => {
   await sql`select 1`;
-  return c.json({ ok: true, queue: queueStatus(), cron: cronStatus() });
+  return c.json({ ok: true, queue: queueStatus() });
 });
 
 // SPA build output (apps/web/dist) — asset statis + fallback index.html utk client router.

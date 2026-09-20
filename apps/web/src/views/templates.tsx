@@ -20,15 +20,15 @@ import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
 
 const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
 
-export function TemplatesView() {
-  const { data, error, loading, reload } = useTemplates()
+export function TemplatesView({ slug }: { slug: string }) {
+  const { data, error, loading, reload } = useTemplates(slug)
   const [form, setForm] = useState({ name: "", format: "ig-carousel" as TemplateFormat, html: "", is_active: false })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addTemplate(form)
+      await api.addTemplate(slug, form)
       setForm({ name: "", format: "ig-carousel", html: "", is_active: false })
       setMsg(null)
       reload()
@@ -87,14 +87,14 @@ export function TemplatesView() {
       <div className="divide-y rounded-lg border">
         {(data ?? []).map((t) => (
           <div key={t.id} className="flex items-center gap-3 p-3 text-sm">
-            <button onClick={() => api.activateTemplate(t.id).then(reload)}>
+            <button onClick={() => api.activateTemplate(slug, t.id).then(reload)}>
               <Badge variant="secondary" className={t.is_active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
                 {t.is_active ? "aktif" : "off"}
               </Badge>
             </button>
             <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
             <span className="text-xs text-muted-foreground">{t.format}</span>
-            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delTemplate(t.id).then(reload)}>
+            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
           </div>

@@ -7,6 +7,9 @@
     "migrate": "tsx src/db.ts migrate",
     "daily": "tsx src/cli.ts daily",
     "serve": "tsx src/server.ts",
+    "user:add": "tsx src/cli.ts user:add",
+    "user:pass": "tsx src/cli.ts user:pass",
+    "user:list": "tsx src/cli.ts user:list",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts"
   },

@@ -19,9 +19,9 @@ const STATUS_BADGE: Record<string, string> = {
   failed: "bg-red-500/15 text-red-500 border-transparent",
 }
 
-export function PostsView() {
-  const { data, error, loading, reload } = usePosts()
-  const [selected, setSelected] = useState<number | null>(null)
+export function PostsView({ slug }: { slug: string }) {
+  const { data, error, loading, reload } = usePosts(slug)
+  const [selected, setSelected] = useState<string | null>(null)
 
   if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
@@ -39,7 +39,7 @@ export function PostsView() {
             </button>
             <span className="hidden w-24 shrink-0 text-xs text-muted-foreground md:inline">{p.platform}/{p.format}</span>
             {p.status === "failed" && (
-              <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(p.id).then(reload)}>
+              <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(slug, p.id).then(reload)}>
                 <Send className="size-4" />
               </Button>
             )}
@@ -47,13 +47,13 @@ export function PostsView() {
         ))}
         {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">belum ada post</p>}
       </div>
-      <PostDetailModal id={selected} onClose={() => setSelected(null)} />
+      <PostDetailModal slug={slug} id={selected} onClose={() => setSelected(null)} />
     </div>
   )
 }
 
-function PostDetailModal({ id, onClose }: { id: number | null; onClose: () => void }) {
-  const { data, error, loading } = usePost(id)
+function PostDetailModal({ slug, id, onClose }: { slug: string; id: string | null; onClose: () => void }) {
+  const { data, error, loading } = usePost(slug, id)
   return (
     <Dialog open={id !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">

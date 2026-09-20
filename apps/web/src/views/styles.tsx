@@ -16,15 +16,15 @@ import {
 import { api, ApiError } from "@/lib/api"
 import { useStyles } from "@/lib/hooks"
 
-export function StylesView() {
-  const { data, error, loading, reload } = useStyles()
+export function StylesView({ slug }: { slug: string }) {
+  const { data, error, loading, reload } = useStyles(slug)
   const [form, setForm] = useState({ title: "", body: "", platform: "all" })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addStyle({ ...form, platform: form.platform === "all" ? null : form.platform })
+      await api.addStyle(slug, { ...form, platform: form.platform === "all" ? null : form.platform })
       setForm({ title: "", body: "", platform: "all" })
       setMsg(null)
       reload()
@@ -81,7 +81,7 @@ export function StylesView() {
               <div className="mb-2 flex items-center gap-2">
                 <h3 className="flex-1 text-sm font-medium">{s.title}</h3>
                 {s.platform && <Badge variant="secondary">{s.platform}</Badge>}
-                <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delStyle(s.id).then(reload)}>
+                <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delStyle(slug, s.id).then(reload)}>
                   <Trash2 className="size-4" />
                 </Button>
               </div>

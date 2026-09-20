@@ -13,15 +13,15 @@ const STATUS_BADGE: Record<string, string> = {
   failed: "bg-red-500/15 text-red-500 border-transparent",
 }
 
-export function DashboardView() {
-  const { data, error, loading, reload } = useDashboard()
+export function DashboardView({ slug }: { slug: string }) {
+  const { data, error, loading, reload } = useDashboard(slug)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
   const gen = async (opts?: { platform?: string; format?: string }) => {
     setBusy(true); setMsg(null)
     try {
-      await api.gen(opts)
+      await api.gen(slug, opts)
       setMsg("generate diantrikan — cek tab Posts")
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : "gagal")

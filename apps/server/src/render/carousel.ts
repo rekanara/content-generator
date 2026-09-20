@@ -14,11 +14,13 @@ export type CarouselArtifacts = { files: string[]; prefix: string };
 
 // Render + upload. Return object keys ter-upload.
 export async function renderCarousel(
-  postId: number,
+  postId: string,
   platform: Platform,
   draft: CarouselOut,
+  slug: string,
+  groupId: string,
 ): Promise<CarouselArtifacts> {
-  const template = await getTemplateHtml('carousel', platform);
+  const template = await getTemplateHtml('carousel', platform, groupId);
   const htmls = slidesToHtml(template, draft);
 
   const outDir = `out/${postId}`;
@@ -67,19 +69,19 @@ export async function renderCarousel(
     // upload MinIO
     const keys: string[] = [];
     for (let i = 0; i < files.length; i++) {
-      keys.push(await uploadPostArtifact(postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
+      keys.push(await uploadPostArtifact(slug, postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
     }
-    if (pdfPath) keys.push(await uploadPostArtifact(postId, pdfPath, 'carousel.pdf'));
+    if (pdfPath) keys.push(await uploadPostArtifact(slug, postId, pdfPath, 'carousel.pdf'));
 
-    return { files: keys, prefix: `posts/${postId}/` };
+    return { files: keys, prefix: `${slug}/posts/${postId}/` };
   } finally {
     await browser.close();
   }
 }
 
 // Render + persist status + artifact_prefix. Bagian "persist" dipisah biar testable.
-export async function renderAndSave(postId: number, platform: Platform, draft: CarouselOut): Promise<CarouselArtifacts> {
-  const { files, prefix } = await renderCarousel(postId, platform, draft);
+export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, slug: string, groupId: string): Promise<CarouselArtifacts> {
+  const { files, prefix } = await renderCarousel(postId, platform, draft, slug, groupId);
   await sql`update posts set status = 'rendered', artifact_prefix = ${prefix}
     where id = ${postId}`;
   console.log(`[render] post #${postId}: ${files.length} artefak → ${prefix}`);

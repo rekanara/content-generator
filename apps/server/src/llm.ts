@@ -1,5 +1,6 @@
 // Klien openai-compatible chat completion. JSON mode + 1 retry per panggilan.
-import { config } from './config.ts';
+// Config per-group (GroupCfg) — baseUrl/apiKey/model dari group ?? env.
+import type { GroupCfg } from './groups.ts';
 
 export type Usage = { prompt: number; completion: number };
 export type LlmResult<T> = { data: T; usage: Usage };
@@ -22,10 +23,10 @@ function parseLoose(body: string): any {
   throw new Error(`LLM: JSON tidak ketemu dalam body; head=${body.slice(0, 120)}`);
 }
 
-async function chatOnce(model: string, messages: Msg[], maxTokens: number): Promise<RawResp> {
-  const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
+async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens: number): Promise<RawResp> {
+  const res = await fetch(`${cfg.llm.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.llm.apiKey}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },
     body: JSON.stringify({
       model,
       messages,
@@ -67,6 +68,7 @@ async function chatOnce(model: string, messages: Msg[], maxTokens: number): Prom
 
 // Chat + parse JSON + guard. Rusak → 1x retry → throw.
 export async function chatJson<T>(
+  cfg: GroupCfg,
   model: string,
   messages: Msg[],
   guard: (x: unknown) => x is T,
@@ -76,7 +78,7 @@ export async function chatJson<T>(
   for (let attempt = 0; attempt < 2; attempt++) {
     let content: string, usage: Usage;
     try {
-      ({ content, usage } = await chatOnce(model, messages, maxTokens));
+      ({ content, usage } = await chatOnce(cfg, model, messages, maxTokens));
     } catch (e) {
       // router/upstream kadang 503 capacity — tunggu sebelum retry (retryDelay tipikal 52s)
       lastErr = e as Error;
@@ -111,7 +113,6 @@ export async function chatJson<T>(
   throw lastErr;
 }
 
-// Chat biasa (tanpa JSON) — untuk critic revisi yang outputnya JSON juga, jadi pakai chatJson.
 export type { Usage as LlmUsage };
-export const criticModel = (): string => config.llm.criticModel;
-export const writerModel = (): string => config.llm.model;
+export const criticModel = (cfg: GroupCfg): string => cfg.llm.criticModel;
+export const writerModel = (cfg: GroupCfg): string => cfg.llm.model;

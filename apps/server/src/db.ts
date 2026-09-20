@@ -1,8 +1,9 @@
 // postgres.js pool + migrasi runner + helper state/pillars.
-// Jalankan migrasi: tsx src/db.ts migrate (atau pnpm migrate)
+// Jalankan migrasi: tsx src/db.ts migrate (atau npm run migrate -w apps/server)
 import postgres from 'postgres';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { config } from './config.ts';
 import type { RotationState, Slot } from './state.ts';
 
@@ -31,13 +32,38 @@ export async function migrate(): Promise<void> {
     });
     console.log(`[migrate] applied ${f}`);
   }
+  await seedAdmin();
 }
 
-export async function getRotation(): Promise<RotationState> {
-  const rows = await sql`select last_platform, last_ig_format, last_li_format, last_pillar_id
-    from rotation_state where id`;
+// Seeder: users kosong → buat admin + klaim group orphan.
+// Dynamic import auth.ts (auth import sql dari sini — hindari circular dep statis).
+async function seedAdmin(): Promise<void> {
+  const seed = await sql<{ n: number }[]>`select count(*)::int as n from users`;
+  if ((seed[0]?.n ?? 0) > 0) return;
+  const { hashPassword } = await import('./auth.ts');
+  const pass = process.env.CG_ADMIN_PASSWORD ?? randomBytes(12).toString('base64url');
+  const hash = await hashPassword(pass);
+  const [admin] = await sql`insert into users (username, password_hash, role) values ('admin', ${hash}, 'admin') returning id`;
+  const claimed = await sql`update groups set user_id = ${admin!.id} where user_id is null returning slug`;
+  console.log(`[seed] admin user dibuat — password: ${pass}`);
+  if (claimed.length > 0) console.log(`[seed] ${claimed.length} group di-assign ke admin: ${claimed.map((g) => g.slug).join(', ')}`);
+}
+
+// ---------- rotation (per group) ----------
+
+const ROT_COLS = `last_platform, last_ig_format, last_li_format, last_pillar_id`;
+
+export async function getRotation(groupId: string): Promise<RotationState> {
+  const rows = await sql`select ${sql(ROT_COLS)} from rotation_state where group_id = ${groupId}`;
   const r = rows[0] as any;
-  if (!r) throw new Error('rotation_state kosong — jalankan migrasi+seed');
+  if (!r) {
+    // group baru tanpa state → seed baris kosong (migration 005 default)
+    const [created] = await sql`insert into rotation_state (group_id) values (${groupId})
+      on conflict (group_id) do nothing
+      returning ${sql(ROT_COLS)}`;
+    if (created) return created as any;
+    throw new Error(`rotation_state group ${groupId} kosong`);
+  }
   return {
     last_platform: r.last_platform,
     last_ig_format: r.last_ig_format,
@@ -46,22 +72,22 @@ export async function getRotation(): Promise<RotationState> {
   };
 }
 
-export async function setRotation(next: RotationState): Promise<void> {
+export async function setRotation(groupId: string, next: RotationState): Promise<void> {
   await sql`update rotation_state set
     last_platform = ${next.last_platform},
     last_ig_format = ${next.last_ig_format},
     last_li_format = ${next.last_li_format},
     last_pillar_id = ${next.last_pillar_id},
-    updated_at = now() where id`;
+    updated_at = now() where group_id = ${groupId}`;
 }
 
-export async function getActivePillars(): Promise<{ id: number; is_news: boolean }[]> {
-  return sql`select id, is_news from pillars where active order by id`;
+export async function getActivePillars(groupId: string): Promise<{ id: string; is_news: boolean }[]> {
+  return sql`select id, is_news from pillars where group_id = ${groupId} and active order by id`;
 }
 
 // Simpan slot sebagai post + update rotasi dalam satu transaksi — hanya dipanggil
 // setelah post benar-benar terkirim (spec #11).
-export async function commitSent(postId: number, slot: Slot, next: RotationState): Promise<void> {
+export async function commitSent(groupId: string, postId: string, slot: Slot, next: RotationState): Promise<void> {
   await sql.begin(async (tx) => {
     await tx`update posts set status = 'sent' where id = ${postId}`;
     await tx`update rotation_state set
@@ -69,7 +95,7 @@ export async function commitSent(postId: number, slot: Slot, next: RotationState
       last_ig_format = ${next.last_ig_format},
       last_li_format = ${next.last_li_format},
       last_pillar_id = ${next.last_pillar_id},
-      updated_at = now() where id`;
+      updated_at = now() where group_id = ${groupId}`;
   });
 }
 

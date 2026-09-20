@@ -1,4 +1,5 @@
 // Env loader + tipe config. Satu-satunya file yang baca process.env.
+// Nilai env di sini adalah FALLBACK — group-level override ada di groups.ts (DB).
 import { readFileSync } from 'node:fs';
 
 for (const f of ['.env', '.env.local']) {
@@ -34,10 +35,11 @@ export const config = {
     useSSL: process.env.MINIO_USE_SSL === 'true',
   },
   llm: {
-    baseUrl: req('LLM_BASE_URL'),
-    apiKey: req('LLM_API_KEY'),
-    model: req('LLM_MODEL'),
-    criticModel: process.env.LLM_MODEL_CRITIC || process.env.LLM_MODEL!,
+    // env = fallback; group bisa override via DB. Validasi keberadaan dilakukan saat generate.
+    baseUrl: process.env.LLM_BASE_URL || '',
+    apiKey: process.env.LLM_API_KEY || '',
+    model: process.env.LLM_MODEL || '',
+    criticModel: process.env.LLM_MODEL_CRITIC || process.env.LLM_MODEL || '',
   },
   tts: {
     provider: (process.env.TTS_PROVIDER ?? 'edge') as 'edge' | 'openai',

@@ -1,12 +1,13 @@
-// Telegram Bot API via fetch: sendMessage, sendMediaGroup, sendDocument.
+// Telegram Bot API via fetch: sendMessage, sendMediaGroup, sendDocument, sendVideo.
 // Artefak di-stream dari MinIO → buffer → Blob (file kecil, <1MB total).
-import { config } from './config.ts';
+// Config per-group (GroupCfg) — token/chatId dari group ?? env.
 import { getArtifactStream } from './storage.ts';
+import type { GroupCfg } from './groups.ts';
 
-const BASE = () => `https://api.telegram.org/bot${config.telegram.botToken}`;
+const BASE = (cfg: GroupCfg) => `https://api.telegram.org/bot${cfg.telegram.botToken}`;
 
-async function tg(method: string, body: Record<string, unknown>): Promise<any> {
-  const res = await fetch(`${BASE()}/${method}`, {
+async function tg(cfg: GroupCfg, method: string, body: Record<string, unknown>): Promise<any> {
+  const res = await fetch(`${BASE(cfg)}/${method}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -15,8 +16,17 @@ async function tg(method: string, body: Record<string, unknown>): Promise<any> {
   return mustOk(res, method);
 }
 
-async function postForm(method: string, fd: FormData): Promise<any> {
-  const res = await fetch(`${BASE()}/${method}`, {
+// Long-poll utk bot global (env token) — dipakai bot.ts. Token env, bukan per-group.
+export async function getUpdates(token: string, offset: number): Promise<any[]> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  const j = await mustOk(res, 'getUpdates');
+  return j.result ?? [];
+}
+
+async function postForm(cfg: GroupCfg, method: string, fd: FormData): Promise<any> {
+  const res = await fetch(`${BASE(cfg)}/${method}`, {
     method: 'POST',
     body: fd,
     signal: AbortSignal.timeout(120_000),
@@ -31,20 +41,32 @@ async function mustOk(res: Response, method: string): Promise<any> {
   return j;
 }
 
-async function objectAsBlob(key: string): Promise<Blob> {
+async function objectAsBlob(key: string, type: string): Promise<Blob> {
   const stream = await getArtifactStream(key);
   const chunks: Uint8Array[] = [];
   for await (const c of stream) chunks.push(c as Buffer);
-  return new Blob(chunks as BlobPart[], { type: 'image/png' });
+  return new Blob(chunks as BlobPart[], { type });
 }
 
-export async function sendMessage(text: string): Promise<void> {
-  await tg('sendMessage', { chat_id: config.telegram.chatId, text });
+export async function sendMessage(cfg: GroupCfg, text: string): Promise<void> {
+  await tg(cfg, 'sendMessage', { chat_id: cfg.telegram.chatId, text });
+}
+
+// Balas chat spesifik via token env (dipakai bot polling utk reply ke chat asal command).
+export async function replyGlobal(chatId: string, text: string): Promise<void> {
+  const token = (await import('./config.ts')).config.telegram.botToken;
+  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ chat_id: chatId, text }),
+    signal: AbortSignal.timeout(60_000),
+  });
+  await mustOk(res, 'sendMessage');
 }
 
 // Album photo max 10 (telegram limit). Caption menempel di foto pertama, max 1024 char.
-export async function sendMediaGroupPhoto(keys: string[], caption: string): Promise<void> {
-  const chatId = config.telegram.chatId;
+export async function sendMediaGroupPhoto(cfg: GroupCfg, keys: string[], caption: string): Promise<void> {
+  const chatId = cfg.telegram.chatId;
   const use = keys.slice(0, 10);
   const media: { type: string; media: string; caption?: string }[] = use.map((_, i) => ({ type: 'photo', media: `attach://f${i}` }));
   media[0]!.caption = caption.slice(0, 1024);
@@ -53,41 +75,29 @@ export async function sendMediaGroupPhoto(keys: string[], caption: string): Prom
   fd.set('chat_id', chatId);
   fd.set('media', JSON.stringify(media));
   for (let i = 0; i < use.length; i++) {
-    fd.set(`f${i}`, await objectAsBlob(use[i]!), `slide-${i + 1}.png`);
+    fd.set(`f${i}`, await objectAsBlob(use[i]!, 'image/png'), `slide-${i + 1}.png`);
   }
-  await postForm('sendMediaGroup', fd);
+  await postForm(cfg, 'sendMediaGroup', fd);
 }
 
 // sendDocument utk PDF (LinkedIn). Input file bisa >10MB — telegram batas 50MB, aman.
-export async function sendDocument(key: string, filename: string, caption: string): Promise<void> {
+export async function sendDocument(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
   const fd = new FormData();
-  fd.set('chat_id', config.telegram.chatId);
-  fd.set('document', await objectAsBlob(key), filename);
+  fd.set('chat_id', cfg.telegram.chatId);
+  fd.set('document', await objectAsBlob(key, 'application/pdf'), filename);
   fd.set('caption', caption.slice(0, 1024));
-  await postForm('sendDocument', fd);
+  await postForm(cfg, 'sendDocument', fd);
 }
 
 // sendVideo utk reels MP4 — supports_streaming biar preview di Telegram.
-export async function sendVideo(key: string, filename: string, caption: string): Promise<void> {
+export async function sendVideo(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
   const stream = await getArtifactStream(key);
   const chunks: Uint8Array[] = [];
   for await (const c of stream) chunks.push(c as Buffer);
   const fd = new FormData();
-  fd.set('chat_id', config.telegram.chatId);
+  fd.set('chat_id', cfg.telegram.chatId);
   fd.set('video', new Blob(chunks as BlobPart[], { type: 'video/mp4' }), filename);
   fd.set('caption', caption.slice(0, 1024));
   fd.set('supports_streaming', 'true');
-  await postForm('sendVideo', fd);
-}
-
-// Polling getUpdates — offset commit per update.
-export type TgUpdate = { update_id: number; message?: { chat: { id: number }; text?: string } };
-
-export async function getUpdates(offset: number, timeoutSec = 25): Promise<TgUpdate[]> {
-  const res = await fetch(
-    `${BASE()}/getUpdates?timeout=${timeoutSec}&offset=${offset}&allowed_updates=%5B%22message%22%5D`,
-    { signal: AbortSignal.timeout((timeoutSec + 10) * 1000) },
-  );
-  const j = await mustOk(res, 'getUpdates');
-  return j.result as TgUpdate[];
+  await postForm(cfg, 'sendVideo', fd);
 }

@@ -18,9 +18,75 @@ export type TemplateFormat = z.infer<typeof TemplateFormat>;
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'sent', 'failed']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
+// ---------- groups (multi-akun) ----------
+// Secret (api_key, bot_token) TIDAK pernah keluar penuh dari API — hanya flag "ter-set".
+const GROUP_CONFIG_FIELDS = {
+  llm_base_url: z.string().nullable(),
+  llm_model: z.string().nullable(),
+  llm_model_critic: z.string().nullable(),
+  tts_provider: z.string().nullable(),
+  tts_voice: z.string().nullable(),
+  tts_base_url: z.string().nullable(),
+  tts_model: z.string().nullable(),
+  telegram_chat_id: z.string().nullable(),
+  llm_api_key_set: z.boolean(),
+  tts_api_key_set: z.boolean(),
+  telegram_bot_token_set: z.boolean(),
+};
+
+export const Group = z.object({
+  id: z.string().uuid(),
+  slug: z.string(),
+  name: z.string(),
+  cron_expr: z.string(),
+  cron_enabled: z.boolean(),
+  created_at: z.string(),
+  ...GROUP_CONFIG_FIELDS,
+});
+export type Group = z.infer<typeof Group>;
+
+export const GroupInput = z.object({
+  slug: z.string().regex(/^[a-z0-9][a-z0-9-]*$/, 'slug: huruf kecil, angka, strip'),
+  name: z.string().min(1),
+  cron_expr: z.string().min(1).default('0 7 * * *'),
+  cron_enabled: z.boolean().default(true),
+  llm_base_url: z.string().nullable().default(null),
+  llm_api_key: z.string().nullable().default(null),
+  llm_model: z.string().nullable().default(null),
+  llm_model_critic: z.string().nullable().default(null),
+  tts_provider: z.string().nullable().default(null),
+  tts_voice: z.string().nullable().default(null),
+  tts_base_url: z.string().nullable().default(null),
+  tts_api_key: z.string().nullable().default(null),
+  tts_model: z.string().nullable().default(null),
+  telegram_bot_token: z.string().nullable().default(null),
+  telegram_chat_id: z.string().nullable().default(null),
+});
+export type GroupInput = z.infer<typeof GroupInput>;
+// Versi input (field ber-default jadi optional) — untuk body request dari FE.
+export type GroupInputBody = z.input<typeof GroupInput>;
+
+export const GroupPatch = z.object({
+  name: z.string().min(1).optional(),
+  cron_expr: z.string().min(1).optional(),
+  cron_enabled: z.boolean().optional(),
+  llm_base_url: z.string().nullable().optional(),
+  llm_api_key: z.string().nullable().optional(), // null = hapus override, balik ke env
+  llm_model: z.string().nullable().optional(),
+  llm_model_critic: z.string().nullable().optional(),
+  tts_provider: z.string().nullable().optional(),
+  tts_voice: z.string().nullable().optional(),
+  tts_base_url: z.string().nullable().optional(),
+  tts_api_key: z.string().nullable().optional(),
+  tts_model: z.string().nullable().optional(),
+  telegram_bot_token: z.string().nullable().optional(),
+  telegram_chat_id: z.string().nullable().optional(),
+});
+export type GroupPatch = z.infer<typeof GroupPatch>;
+
 // ---------- response shapes ----------
 export const Pillar = z.object({
-  id: z.number(),
+  id: z.string().uuid(),
   name: z.string(),
   description: z.string(),
   is_news: z.boolean(),
@@ -51,14 +117,14 @@ export const CronInput = z.object({
 export type CronInput = z.infer<typeof CronInput>;
 
 export const PostSummary = z.object({
-  id: z.number(),
+  id: z.string().uuid(),
   platform: z.string(),
   format: z.string(),
   topic: z.string(),
   status: PostStatus,
   source: z.string(),
   created_at: z.string(),
-  pillar_id: z.number().nullable(),
+  pillar_id: z.string().uuid().nullable(),
 });
 export type PostSummary = z.infer<typeof PostSummary>;
 
@@ -70,7 +136,7 @@ export const PostDetail = PostSummary.extend({
 export type PostDetail = z.infer<typeof PostDetail>;
 
 export const StyleSample = z.object({
-  id: z.number(),
+  id: z.string().uuid(),
   title: z.string(),
   body: z.string(),
   platform: z.string().nullable(),
@@ -86,7 +152,7 @@ export const StyleInput = z.object({
 export type StyleInput = z.infer<typeof StyleInput>;
 
 export const Template = z.object({
-  id: z.number(),
+  id: z.string().uuid(),
   name: z.string(),
   format: TemplateFormat,
   is_active: z.boolean(),
@@ -106,7 +172,7 @@ export const RotationView = z.object({
   last_platform: z.string(),
   last_ig_format: z.string().nullable(),
   last_li_format: z.string().nullable(),
-  last_pillar_id: z.number().nullable(),
+  last_pillar_id: z.string().uuid().nullable(),
   updated_at: z.string().nullable(),
 });
 export type RotationView = z.infer<typeof RotationView>;
@@ -114,13 +180,13 @@ export type RotationView = z.infer<typeof RotationView>;
 export const NextSlot = z.object({
   platform: Platform,
   format: Format,
-  pillar_id: z.number(),
+  pillar_id: z.string().uuid(),
 });
 export type NextSlot = z.infer<typeof NextSlot>;
 
 export const Dashboard = z.object({
-  cron: CronSettings,
-  queue: z.object({ running: z.boolean(), pending: z.number() }),
+  cron: CronSettings, // cron milik group aktif
+  queue: z.object({ running: z.boolean(), pending: z.number() }), // queue milik group aktif
   rotation: RotationView,
   next_slot: NextSlot,
   last_posts: z.array(PostSummary),
@@ -139,3 +205,31 @@ export const TEMPLATE_TOKENS: Record<TemplateFormat, string[]> = {
   'li-carousel': ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   reel: ['{{overlay}}', '{{index}}', '{{total}}'],
 };
+
+// ---------- auth ----------
+export const AuthMe = z.object({
+  username: z.string(),
+  role: z.enum(['admin', 'user']),
+});
+export type AuthMe = z.infer<typeof AuthMe>;
+
+export const LoginBody = z.object({
+  username: z.string().min(1),
+  password: z.string().min(1),
+});
+export type LoginBody = z.infer<typeof LoginBody>;
+
+// ---------- users (admin) ----------
+export const UserRow = z.object({
+  id: z.string().uuid(),
+  username: z.string(),
+  role: z.enum(['admin', 'user']),
+});
+export type UserRow = z.infer<typeof UserRow>;
+
+export const UserInputBody = z.object({
+  username: z.string().regex(/^[a-z0-9_-]{2,32}$/),
+  password: z.string().min(8),
+  role: z.enum(['admin', 'user']),
+});
+export type UserInputBody = z.infer<typeof UserInputBody>;
