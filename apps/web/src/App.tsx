@@ -32,14 +32,14 @@ export function App() {
       .catch(() => setMe(false))
   }, [])
 
-  // 401 dari API mana pun → logout state
+  // 401 from any API call → logged-out state
   useEffect(() => {
     const on = () => setMe(false)
     window.addEventListener("cg-unauthorized", on)
     return () => window.removeEventListener("cg-unauthorized", on)
   }, [])
 
-  // belum auth: hanya login view; sudah auth di /login → ke /app
+  // not authed: login view only; authed on /login → /app
   useEffect(() => {
     if (me === null) return
     if (me === false && route.name !== "login") navigate("/login")

@@ -29,11 +29,11 @@ export function StylesView({ slug }: { slug: string }) {
       setMsg(null)
       reload()
     } catch (err) {
-      setMsg(err instanceof ApiError ? err.message : "gagal menambah style")
+      setMsg(err instanceof ApiError ? err.message : "failed to add style")
     }
   }
 
-  if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
 
   return (
@@ -46,18 +46,18 @@ export function StylesView({ slug }: { slug: string }) {
           <form onSubmit={submit} id="style-form" className="grid gap-3">
             <div className="grid gap-3 md:grid-cols-[1fr_180px]">
               <div className="space-y-1.5">
-                <Label htmlFor="style-title">Judul</Label>
-                <Input id="style-title" placeholder="judul" required value={form.title}
+                <Label htmlFor="style-title">Title</Label>
+                <Input id="style-title" placeholder="title" required value={form.title}
                   onChange={(e) => setForm({ ...form, title: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label>Platform</Label>
                 <Select value={form.platform} onValueChange={(v) => setForm({ ...form, platform: v })}>
                   <SelectTrigger className="w-full">
-                    <SelectValue placeholder="semua platform" />
+                    <SelectValue placeholder="all platforms" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">semua platform</SelectItem>
+                    <SelectItem value="all">all platforms</SelectItem>
                     <SelectItem value="instagram">instagram</SelectItem>
                     <SelectItem value="linkedin">linkedin</SelectItem>
                   </SelectContent>
@@ -65,11 +65,11 @@ export function StylesView({ slug }: { slug: string }) {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="style-body">Contoh tulisan (body)</Label>
-              <Textarea id="style-body" placeholder="contoh tulisan (body)" required value={form.body}
+              <Label htmlFor="style-body">Sample text (body)</Label>
+              <Textarea id="style-body" placeholder="sample text (body)" required value={form.body}
                 onChange={(e) => setForm({ ...form, body: e.target.value })} />
             </div>
-            <Button type="submit" form="style-form" className="justify-self-start">Tambah</Button>
+            <Button type="submit" form="style-form" className="justify-self-start">Add</Button>
           </form>
         </CardContent>
       </Card>
@@ -81,7 +81,7 @@ export function StylesView({ slug }: { slug: string }) {
               <div className="mb-2 flex items-center gap-2">
                 <h3 className="flex-1 text-sm font-medium">{s.title}</h3>
                 {s.platform && <Badge variant="secondary">{s.platform}</Badge>}
-                <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delStyle(slug, s.id).then(reload)}>
+                <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delStyle(slug, s.id).then(reload)}>
                   <Trash2 className="size-4" />
                 </Button>
               </div>
@@ -89,7 +89,7 @@ export function StylesView({ slug }: { slug: string }) {
             </CardContent>
           </Card>
         ))}
-        {data?.length === 0 && <p className="text-sm text-muted-foreground">belum ada style sample</p>}
+        {data?.length === 0 && <p className="text-sm text-muted-foreground">no style samples yet</p>}
       </div>
     </div>
   )

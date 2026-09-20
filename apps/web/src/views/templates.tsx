@@ -33,11 +33,11 @@ export function TemplatesView({ slug }: { slug: string }) {
       setMsg(null)
       reload()
     } catch (err) {
-      setMsg(err instanceof ApiError ? err.message : "gagal menambah template")
+      setMsg(err instanceof ApiError ? err.message : "failed to add template")
     }
   }
 
-  if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
 
   return (
@@ -50,8 +50,8 @@ export function TemplatesView({ slug }: { slug: string }) {
           <form onSubmit={submit} id="template-form" className="grid gap-3">
             <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
               <div className="space-y-1.5">
-                <Label htmlFor="tpl-name">Nama template</Label>
-                <Input id="tpl-name" placeholder="nama template" required value={form.name}
+                <Label htmlFor="tpl-name">Template name</Label>
+                <Input id="tpl-name" placeholder="template name" required value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-1.5">
@@ -66,7 +66,7 @@ export function TemplatesView({ slug }: { slug: string }) {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="tpl-active">Aktif</Label>
+                <Label htmlFor="tpl-active">Active</Label>
                 <div className="flex h-7 items-center">
                   <Checkbox id="tpl-active" checked={form.is_active}
                     onCheckedChange={(c) => setForm({ ...form, is_active: c === true })} />
@@ -79,7 +79,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               <Textarea id="tpl-html" className="min-h-32 font-mono text-xs" placeholder="HTML template" required
                 value={form.html} onChange={(e) => setForm({ ...form, html: e.target.value })} />
             </div>
-            <Button type="submit" form="template-form" className="justify-self-start">Tambah</Button>
+            <Button type="submit" form="template-form" className="justify-self-start">Add</Button>
           </form>
         </CardContent>
       </Card>
@@ -89,17 +89,17 @@ export function TemplatesView({ slug }: { slug: string }) {
           <div key={t.id} className="flex items-center gap-3 p-3 text-sm">
             <button onClick={() => api.activateTemplate(slug, t.id).then(reload)}>
               <Badge variant="secondary" className={t.is_active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
-                {t.is_active ? "aktif" : "off"}
+                {t.is_active ? "active" : "off"}
               </Badge>
             </button>
             <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
             <span className="text-xs text-muted-foreground">{t.format}</span>
-            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
+            <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
           </div>
         ))}
-        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">belum ada template</p>}
+        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">no templates yet</p>}
       </div>
     </div>
   )

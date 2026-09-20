@@ -19,7 +19,7 @@ export function LoginView({ onLogin }: { onLogin: (u: AuthMe) => void }) {
       const r = await api.login(form.username, form.password)
       onLogin(r.user)
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : "gagal login")
+      setErr(e2 instanceof ApiError ? e2.message : "login failed")
     } finally {
       setBusy(false)
     }
@@ -29,7 +29,7 @@ export function LoginView({ onLogin }: { onLogin: (u: AuthMe) => void }) {
     <div className="flex min-h-svh items-center justify-center p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Masuk</CardTitle>
+          <CardTitle>Sign in</CardTitle>
           <CardDescription>content-generator</CardDescription>
         </CardHeader>
         <CardContent>
@@ -45,7 +45,7 @@ export function LoginView({ onLogin }: { onLogin: (u: AuthMe) => void }) {
                 value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </div>
             {err && <p className="text-sm text-destructive">{err}</p>}
-            <Button type="submit" className="w-full" disabled={busy}>{busy ? "memeriksa…" : "Masuk"}</Button>
+            <Button type="submit" className="w-full" disabled={busy}>{busy ? "checking…" : "Sign in"}</Button>
           </form>
         </CardContent>
       </Card>

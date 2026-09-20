@@ -14,7 +14,7 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
     setLoading(true);
     fetcher()
       .then((d) => live && (setData(d), setError(null)))
-      .catch((e) => live && setError(e instanceof ApiError ? e.message : 'gagal memuat'))
+      .catch((e) => live && setError(e instanceof ApiError ? e.message : 'failed to load'))
       .finally(() => live && setLoading(false));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

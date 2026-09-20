@@ -9,14 +9,14 @@ import { useApi } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import type { Group } from "@workspace/shared"
 
-// Field config: key, label, placeholder, apakah secret (write-only + flag *_set).
+// Field config: key, label, placeholder, whether secret (write-only + *_set flag).
 type Field = { key: string; label: string; ph?: string; secret?: boolean }
 
 const LLM_FIELDS: Field[] = [
   { key: "llm_base_url", label: "Base URL", ph: "https://openrouter.ai/api/v1" },
   { key: "llm_api_key", label: "API Key", ph: "sk-…", secret: true },
   { key: "llm_model", label: "Model", ph: "gpt-4o-mini" },
-  { key: "llm_model_critic", label: "Model Critic", ph: "gpt-4o" },
+  { key: "llm_model_critic", label: "Critic Model", ph: "gpt-4o" },
 ]
 const TTS_FIELDS: Field[] = [
   { key: "tts_provider", label: "Provider", ph: "edge | openai" },
@@ -43,14 +43,14 @@ export function SettingsView({ slug }: { slug: string }) {
     e.preventDefault()
     setBusy(true); setMsg(null)
     try {
-      // hanya kirim field yang diisi; string kosong → null (hapus override, fallback env)
+      // only send filled fields; empty string → null (clears override, falls back to env)
       const body = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === "" ? null : v]))
       if (Object.keys(body).length > 0) await api.patchGroup(slug, body)
       setPatch({})
       reload()
-      setMsg("tersimpan")
+      setMsg("saved")
     } catch (err) {
-      setMsg(err instanceof ApiError ? err.message : "gagal simpan")
+      setMsg(err instanceof ApiError ? err.message : "failed to save")
     } finally {
       setBusy(false)
     }
@@ -62,12 +62,12 @@ export function SettingsView({ slug }: { slug: string }) {
       await api.delGroup(slug)
       navigate("/app")
     } catch (err) {
-      setMsg(err instanceof ApiError ? err.message : "gagal hapus group")
+      setMsg(err instanceof ApiError ? err.message : "failed to delete group")
       setBusy(false)
     }
   }
 
-  if (loading && !group) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !group) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
   if (!group) return null
 
@@ -76,7 +76,7 @@ export function SettingsView({ slug }: { slug: string }) {
       <section className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold">Settings — {group.name}</h1>
-          <p className="text-xs text-muted-foreground">slug: {group.slug} · kosongkan field = fallback ke env server</p>
+          <p className="text-xs text-muted-foreground">slug: {group.slug} · leave a field empty = fall back to server env</p>
         </div>
       </section>
 
@@ -101,7 +101,7 @@ export function SettingsView({ slug }: { slug: string }) {
 
         <div className="flex items-center gap-2">
           <Button type="submit" disabled={busy || Object.keys(patch).length === 0}>
-            {busy ? "menyimpan…" : "Simpan"}
+            {busy ? "saving…" : "Save"}
           </Button>
           {Object.keys(patch).length > 0 && (
             <Button type="button" variant="ghost" onClick={() => setPatch({})}>Reset</Button>
@@ -112,17 +112,17 @@ export function SettingsView({ slug }: { slug: string }) {
       <Card className="border-destructive/50">
         <CardContent className="flex items-center justify-between p-4">
           <div>
-            <p className="text-sm font-medium">Hapus akun ini</p>
-            <p className="text-xs text-muted-foreground">Semua pillar, post, style, template ikut terhapus.</p>
+            <p className="text-sm font-medium">Delete this account</p>
+            <p className="text-xs text-muted-foreground">All pillars, posts, styles, templates will be deleted too.</p>
           </div>
           {confirmDel ? (
             <div className="flex gap-2">
-              <Button variant="destructive" size="sm" disabled={busy} onClick={del}>Yakin, hapus</Button>
-              <Button variant="ghost" size="sm" onClick={() => setConfirmDel(false)}>Batal</Button>
+              <Button variant="destructive" size="sm" disabled={busy} onClick={del}>Yes, delete</Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDel(false)}>Cancel</Button>
             </div>
           ) : (
             <Button variant="outline" size="sm" onClick={() => setConfirmDel(true)}>
-              <Trash2 className="size-4" /> Hapus
+              <Trash2 className="size-4" /> Delete
             </Button>
           )}
         </CardContent>
@@ -154,16 +154,16 @@ function FieldRow({ f, group, value, onChange }: {
         {f.label}
         {f.secret && (
           <span className={"ml-1 text-xs " + (isSet ? "text-emerald-500" : "text-muted-foreground")}>
-            {isSet ? "· ter-set" : "· env"}
+            {isSet ? "· set" : "· env"}
           </span>
         )}
-        {!f.secret && current && <span className="ml-1 text-xs text-muted-foreground">· aktif: {current}</span>}
+        {!f.secret && current && <span className="ml-1 text-xs text-muted-foreground">· active: {current}</span>}
       </Label>
       <Input
         id={f.key}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={f.secret ? (isSet ? "ter-set — isi untuk ganti, kosong = tidak diubah" : f.ph) : (f.ph ?? "")}
+        placeholder={f.secret ? (isSet ? "set — fill to replace, empty = unchanged" : f.ph) : (f.ph ?? "")}
         type={f.secret ? "password" : "text"}
         autoComplete="off"
       />

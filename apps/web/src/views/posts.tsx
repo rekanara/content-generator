@@ -23,7 +23,7 @@ export function PostsView({ slug }: { slug: string }) {
   const { data, error, loading, reload } = usePosts(slug)
   const [selected, setSelected] = useState<string | null>(null)
 
-  if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
 
   return (
@@ -45,7 +45,7 @@ export function PostsView({ slug }: { slug: string }) {
             )}
           </div>
         ))}
-        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">belum ada post</p>}
+        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">no posts yet</p>}
       </div>
       <PostDetailModal slug={slug} id={selected} onClose={() => setSelected(null)} />
     </div>
@@ -57,14 +57,14 @@ function PostDetailModal({ slug, id, onClose }: { slug: string; id: string | nul
   return (
     <Dialog open={id !== null} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
-        {loading && <p className="text-sm text-muted-foreground">memuat…</p>}
+        {loading && <p className="text-sm text-muted-foreground">loading…</p>}
         {error && <p className="text-sm text-destructive">{error}</p>}
         {data && (
           <>
             <DialogHeader>
               <DialogTitle>#{data.id} — {data.topic}</DialogTitle>
               <DialogDescription>
-                {data.platform}/{data.format} · {data.status} · {data.source} · {new Date(data.created_at).toLocaleString("id-ID")}
+                {data.platform}/{data.format} · {data.status} · {data.source} · {new Date(data.created_at).toLocaleString("en-US")}
               </DialogDescription>
             </DialogHeader>
             {data.error && <pre className="rounded bg-red-500/10 p-3 text-xs whitespace-pre-wrap text-red-500">{data.error}</pre>}

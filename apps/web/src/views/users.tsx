@@ -29,7 +29,7 @@ export function UsersView() {
       setOpen(false); setForm({ username: "", password: "", role: "user" })
       reload()
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : "gagal buat user")
+      setErr(e2 instanceof ApiError ? e2.message : "failed to create user")
     } finally {
       setBusy(false)
     }
@@ -41,7 +41,7 @@ export function UsersView() {
       setConfirmDel(null)
       reload()
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : "gagal hapus user")
+      setErr(e2 instanceof ApiError ? e2.message : "failed to delete user")
     }
   }
 
@@ -50,15 +50,15 @@ export function UsersView() {
       <section className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold">Users</h1>
-          <p className="text-xs text-muted-foreground">kelola akun login (admin)</p>
+          <p className="text-xs text-muted-foreground">manage login accounts (admin)</p>
         </div>
         <Button onClick={() => setOpen(true)}>
-          <Plus className="size-4" /> User baru
+          <Plus className="size-4" /> New user
         </Button>
       </section>
 
       {err && <p className="text-sm text-destructive">{err}</p>}
-      {loading && !users && <p className="text-sm text-muted-foreground">memuat…</p>}
+      {loading && !users && <p className="text-sm text-muted-foreground">loading…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="space-y-2">
@@ -78,8 +78,8 @@ export function UsersView() {
                 </Button>
                 {confirmDel === u.id ? (
                   <div className="flex gap-2">
-                    <Button variant="destructive" size="sm" disabled={busy} onClick={() => del(u.id)}>Yakin</Button>
-                    <Button variant="ghost" size="sm" onClick={() => setConfirmDel(null)}>Batal</Button>
+                    <Button variant="destructive" size="sm" disabled={busy} onClick={() => del(u.id)}>Confirm</Button>
+                    <Button variant="ghost" size="sm" onClick={() => setConfirmDel(null)}>Cancel</Button>
                   </div>
                 ) : (
                   <Button variant="outline" size="sm" onClick={() => setConfirmDel(u.id)}>
@@ -95,8 +95,8 @@ export function UsersView() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>User baru</DialogTitle>
-            <DialogDescription>Username 2-32 char [a-z0-9_-], password minimal 8.</DialogDescription>
+            <DialogTitle>New user</DialogTitle>
+            <DialogDescription>Username 2-32 chars [a-z0-9_-], password min 8.</DialogDescription>
           </DialogHeader>
           <form className="space-y-3" onSubmit={submit}>
             <div className="space-y-1.5">
@@ -120,7 +120,7 @@ export function UsersView() {
               </Select>
             </div>
             {err && <p className="text-sm text-destructive">{err}</p>}
-            <Button type="submit" disabled={busy} className="w-full">{busy ? "membuat…" : "Buat"}</Button>
+            <Button type="submit" disabled={busy} className="w-full">{busy ? "creating…" : "Create"}</Button>
           </form>
         </DialogContent>
       </Dialog>

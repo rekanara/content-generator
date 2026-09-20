@@ -28,7 +28,7 @@ export function GroupsView() {
       reload()
       navigate(`/app/${form.slug}/dashboard`)
     } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : "gagal buat group")
+      setErr(e2 instanceof ApiError ? e2.message : "failed to create group")
     } finally {
       setBusy(false)
     }
@@ -39,17 +39,17 @@ export function GroupsView() {
       <section className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold">Groups</h1>
-          <p className="text-xs text-muted-foreground">satu group = satu akun/brand</p>
+          <p className="text-xs text-muted-foreground">one group = one account/brand</p>
         </div>
         <Button onClick={() => setOpen(true)}>
-          <Plus className="size-4" /> Group baru
+          <Plus className="size-4" /> New group
         </Button>
       </section>
 
-      {loading && !groups && <p className="text-sm text-muted-foreground">memuat…</p>}
+      {loading && !groups && <p className="text-sm text-muted-foreground">loading…</p>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       {groups && groups.length === 0 && (
-        <p className="text-sm text-muted-foreground">belum ada group — buat dulu.</p>
+        <p className="text-sm text-muted-foreground">no groups yet — create one first.</p>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -60,7 +60,7 @@ export function GroupsView() {
                 <p className="font-medium">{g.name}</p>
                 <p className="text-xs text-muted-foreground font-mono">{g.slug}</p>
                 <p className="text-xs text-muted-foreground">
-                  {g.cron_enabled ? "cron aktif" : "cron off"} · {g.cron_expr}
+                  {g.cron_enabled ? "cron on" : "cron off"} · {g.cron_expr}
                 </p>
               </CardContent>
             </Card>
@@ -71,17 +71,17 @@ export function GroupsView() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Group baru</DialogTitle>
-            <DialogDescription>Satu group = satu brand. Konfigurasi lanjutan bisa di-patch setelah dibuat.</DialogDescription>
+            <DialogTitle>New group</DialogTitle>
+            <DialogDescription>One group = one brand. Advanced config can be patched after creation.</DialogDescription>
           </DialogHeader>
           <form className="space-y-3" onSubmit={submit}>
             <div className="space-y-1.5">
               <Label htmlFor="g-slug">Slug</Label>
               <Input id="g-slug" required value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })}
-                placeholder="mis: akun-b" pattern="[a-z0-9][a-z0-9-]*" />
+                placeholder="e.g. account-b" pattern="[a-z0-9][a-z0-9-]*" />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="g-name">Nama</Label>
+              <Label htmlFor="g-name">Name</Label>
               <Input id="g-name" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
             <div className="space-y-1.5">
@@ -89,7 +89,7 @@ export function GroupsView() {
               <Input id="g-cron" required value={form.cron} onChange={(e) => setForm({ ...form, cron: e.target.value })} className="font-mono" />
             </div>
             {err && <p className="text-sm text-destructive">{err}</p>}
-            <Button type="submit" disabled={busy} className="w-full">{busy ? "membuat…" : "Buat"}</Button>
+            <Button type="submit" disabled={busy} className="w-full">{busy ? "creating…" : "Create"}</Button>
           </form>
         </DialogContent>
       </Dialog>

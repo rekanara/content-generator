@@ -22,15 +22,15 @@ export function DashboardView({ slug }: { slug: string }) {
     setBusy(true); setMsg(null)
     try {
       await api.gen(slug, opts)
-      setMsg("generate diantrikan — cek tab Posts")
+      setMsg("generate queued — check the Posts tab")
     } catch (e) {
-      setMsg(e instanceof ApiError ? e.message : "gagal")
+      setMsg(e instanceof ApiError ? e.message : "failed")
     } finally {
       setBusy(false)
     }
   }
 
-  if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
   if (!data) return null
 
@@ -42,7 +42,7 @@ export function DashboardView({ slug }: { slug: string }) {
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={reload}><RefreshCw className="size-4" /></Button>
           <Button size="sm" disabled={busy} onClick={() => gen()}>
-            <Play className="size-4" /> {busy ? "mengirim…" : "Generate sekarang"}
+            <Play className="size-4" /> {busy ? "sending…" : "Generate now"}
           </Button>
         </div>
       </section>
@@ -50,16 +50,16 @@ export function DashboardView({ slug }: { slug: string }) {
       {msg && <p className="text-muted-foreground text-sm">{msg}</p>}
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Stat label="Cron" value={cron.enabled ? cron.expr : "off"} sub={cron.running ? "berjalan" : "berhenti"} mono />
-        <Stat label="Queue" value={queue.running ? "aktif" : "idle"} sub={`${queue.pending} pending`} />
-        <Stat label="Rotasi terakhir" value={rotation.last_platform} sub={rotation.updated_at ? new Date(rotation.updated_at).toLocaleString("id-ID") : "—"} />
-        <Stat label="Slot berikut" value={`${next_slot.platform}/${next_slot.format}`} sub={`pillar #${next_slot.pillar_id}`} />
+        <Stat label="Cron" value={cron.enabled ? cron.expr : "off"} sub={cron.running ? "running" : "stopped"} mono />
+        <Stat label="Queue" value={queue.running ? "active" : "idle"} sub={`${queue.pending} pending`} />
+        <Stat label="Last rotation" value={rotation.last_platform} sub={rotation.updated_at ? new Date(rotation.updated_at).toLocaleString("en-US") : "—"} />
+        <Stat label="Next slot" value={`${next_slot.platform}/${next_slot.format}`} sub={`pillar #${next_slot.pillar_id}`} />
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-muted-foreground">10 post terakhir</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">Last 10 posts</h2>
         <div className="divide-y rounded-lg border">
-          {last_posts.length === 0 && <p className="p-4 text-sm text-muted-foreground">belum ada post</p>}
+          {last_posts.length === 0 && <p className="p-4 text-sm text-muted-foreground">no posts yet</p>}
           {last_posts.map((p) => (
             <div key={p.id} className="flex items-center gap-3 p-3 text-sm">
               <Badge variant="secondary" className={STATUS_BADGE[p.status]}>{p.status}</Badge>
