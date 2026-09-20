@@ -1,19 +1,31 @@
 import { useState } from "react"
 import { Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
+import { Badge } from "@workspace/ui/components/badge"
+import { Card, CardContent } from "@workspace/ui/components/card"
+import { Input } from "@workspace/ui/components/input"
+import { Textarea } from "@workspace/ui/components/textarea"
+import { Label } from "@workspace/ui/components/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@workspace/ui/components/select"
 import { api, ApiError } from "@/lib/api"
 import { useStyles } from "@/lib/hooks"
 
 export function StylesView() {
   const { data, error, loading, reload } = useStyles()
-  const [form, setForm] = useState({ title: "", body: "", platform: "" })
+  const [form, setForm] = useState({ title: "", body: "", platform: "all" })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addStyle({ ...form, platform: form.platform || null })
-      setForm({ title: "", body: "", platform: "" })
+      await api.addStyle({ ...form, platform: form.platform === "all" ? null : form.platform })
+      setForm({ title: "", body: "", platform: "all" })
       setMsg(null)
       reload()
     } catch (err) {
@@ -29,31 +41,53 @@ export function StylesView() {
       <h1 className="text-lg font-semibold">Style Samples</h1>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
 
-      <form onSubmit={submit} className="grid gap-3 rounded-lg border p-4">
-        <div className="grid gap-3 md:grid-cols-[1fr_180px]">
-          <input className="input" placeholder="judul" required value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-          <select className="input" value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })}>
-            <option value="">semua platform</option>
-            <option value="instagram">instagram</option>
-            <option value="linkedin">linkedin</option>
-          </select>
-        </div>
-        <textarea className="input min-h-24" placeholder="contoh tulisan (body)" required value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} />
-        <Button type="submit" className="justify-self-start">Tambah</Button>
-      </form>
+      <Card>
+        <CardContent className="grid gap-3 p-4">
+          <form onSubmit={submit} id="style-form" className="grid gap-3">
+            <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+              <div className="space-y-1.5">
+                <Label htmlFor="style-title">Judul</Label>
+                <Input id="style-title" placeholder="judul" required value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Platform</Label>
+                <Select value={form.platform} onValueChange={(v) => setForm({ ...form, platform: v })}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="semua platform" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">semua platform</SelectItem>
+                    <SelectItem value="instagram">instagram</SelectItem>
+                    <SelectItem value="linkedin">linkedin</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="style-body">Contoh tulisan (body)</Label>
+              <Textarea id="style-body" placeholder="contoh tulisan (body)" required value={form.body}
+                onChange={(e) => setForm({ ...form, body: e.target.value })} />
+            </div>
+            <Button type="submit" form="style-form" className="justify-self-start">Tambah</Button>
+          </form>
+        </CardContent>
+      </Card>
 
       <div className="space-y-3">
         {(data ?? []).map((s) => (
-          <div key={s.id} className="rounded-lg border p-4">
-            <div className="mb-2 flex items-center gap-2">
-              <h3 className="flex-1 text-sm font-medium">{s.title}</h3>
-              {s.platform && <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{s.platform}</span>}
-              <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delStyle(s.id).then(reload)}>
-                <Trash2 className="size-4" />
-              </Button>
-            </div>
-            <p className="text-xs whitespace-pre-wrap text-muted-foreground">{s.body}</p>
-          </div>
+          <Card key={s.id}>
+            <CardContent className="p-4">
+              <div className="mb-2 flex items-center gap-2">
+                <h3 className="flex-1 text-sm font-medium">{s.title}</h3>
+                {s.platform && <Badge variant="secondary">{s.platform}</Badge>}
+                <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delStyle(s.id).then(reload)}>
+                  <Trash2 className="size-4" />
+                </Button>
+              </div>
+              <p className="text-xs whitespace-pre-wrap text-muted-foreground">{s.body}</p>
+            </CardContent>
+          </Card>
         ))}
         {data?.length === 0 && <p className="text-sm text-muted-foreground">belum ada style sample</p>}
       </div>
