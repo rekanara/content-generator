@@ -2,7 +2,7 @@
 // Local staging out/<id>/ → upload to MinIO posts/<id>/.
 import { mkdirSync, readdirSync, rmSync } from 'node:fs';
 import puppeteer from 'puppeteer';
-import { sql } from '../db.ts';
+import { sql } from '../db/pool.ts';
 import type { Platform } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 import { getTemplateHtml, slidesToHtml } from './template.ts';

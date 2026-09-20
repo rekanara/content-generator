@@ -3,8 +3,8 @@
 //            npm run user:pass -- <username>            (reset password)
 import { generateDraft, resolveSlot } from './pipeline.ts';
 import { getGroupCfg } from './groups.ts';
-import { createUser, resetPassword, listUsers } from './auth.ts';
-import { sql } from './db.ts';
+import { createUser, resetPassword, listUsers } from './auth/users.ts';
+import { sql } from './db/pool.ts';
 import type { Platform, Format } from './state.ts';
 import type { CarouselOut } from './schema.ts';
 

@@ -1,7 +1,7 @@
 // Auth unit test: scrypt hash/verify (no DB — pure function).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hashPassword, verifyPassword } from '../src/auth.ts';
+import { hashPassword, verifyPassword } from '../src/auth/password.ts';
 
 test('hashPassword: scrypt$N$r$p$salt$key format + verify round-trip', async () => {
   const h = await hashPassword('correct horse battery staple');

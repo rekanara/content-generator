@@ -1,5 +1,5 @@
 // Group resolver + CRUD. 1 group = 1 account/brand. Null config row → env fallback.
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { config } from './config.ts';
 
 export type GroupRow = {

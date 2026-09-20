@@ -1,26 +1,28 @@
 // JSON API for the SPA frontend — zod-validated via @workspace/shared.
+// Transport layer only: auth/cookies, validation, status codes. Logic lives in repos/usecases.
 // Two parts: /groups (multi-account CRUD) + /g/:slug/... (all resources scoped to a group).
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { enqueue, queueStatus } from './queue.ts';
 import { refreshCron, cronStatus } from './cron.ts';
-import { nextSlot } from './state.ts';
-import type { Platform, Format } from './state.ts';
+import { getDashboard } from './usecases/dashboard.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
   GroupInput, GroupPatch,
-  type Pillar, type PostSummary, type PostDetail, type StyleSample,
-  type Template, type Dashboard, type TemplateFormat,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
 } from './groups.ts';
+import { listPillars, createPillar, togglePillar, deletePillar } from './repos/pillars.ts';
+import { listPosts, getPost } from './repos/posts.ts';
+import { listStyles, createStyle, deleteStyle } from './repos/styles.ts';
+import { listTemplates, createTemplate, activateTemplate, deleteTemplate } from './repos/templates.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
-  touchSession, destroySession, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
-} from './auth.ts';
+  touchSession, destroySession, revokeUserSessions, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
+} from './auth/index.ts';
 
 export const api = new Hono<{ Variables: { user: AuthUser } }>();
 
@@ -116,7 +118,7 @@ api.post('/users/:id/reset-password', async (c) => {
   if (!target) return c.json({ error: 'user not found' }, 404);
   await resetPassword(target.username, parsed.data.password);
   // revoke all of that user's sessions — new password means logging in again
-  await sql`delete from sessions where user_id = ${id}`;
+  await revokeUserSessions(id);
   return c.json({ ok: true });
 });
 
@@ -193,89 +195,29 @@ g.use('/:slug/*', async (c, next) => {
 const gr = (c: Context<{ Variables: { user: AuthUser; group: NonNullable<GroupRow> } }>) => c.get('group');
 
 // ---------- dashboard ----------
-g.get('/:slug/dashboard', async (c) => {
-  const group = gr(c);
-  const rows = await sql`select last_platform, last_ig_format, last_li_format,
-    last_pillar_id, updated_at from rotation_state where group_id = ${group.id}`;
-  const rot = rows[0] ?? {
-    last_platform: 'linkedin', last_ig_format: null, last_li_format: null,
-    last_pillar_id: null, updated_at: null,
-  };
-  const pillarRows = await sql`select id, is_news from pillars
-    where group_id = ${group.id} and active order by id`;
-  const pillars = pillarRows.map((r) => ({ id: r.id as string, is_news: r.is_news as boolean }));
-  const next = nextSlot(
-    {
-      last_platform: rot.last_platform as Platform,
-      last_ig_format: rot.last_ig_format,
-      last_li_format: rot.last_li_format,
-      last_pillar_id: rot.last_pillar_id,
-    },
-    pillars,
-    true,
-  );
-  const posts = await sql`select id, platform, format, topic, status, source, created_at, pillar_id
-    from posts where group_id = ${group.id} order by id desc limit 10`;
-  const dash: Dashboard = {
-    cron: cronStatus(group.id),
-    queue: queueStatus(),
-    rotation: {
-      last_platform: rot.last_platform ?? '—',
-      last_ig_format: rot.last_ig_format,
-      last_li_format: rot.last_li_format,
-      last_pillar_id: rot.last_pillar_id,
-      updated_at: (rot.updated_at as string) ?? null,
-    },
-    next_slot: next,
-    last_posts: posts.map((p) => ({
-      id: p.id as string,
-      platform: p.platform as string,
-      format: p.format as string,
-      topic: p.topic as string,
-      status: p.status as PostSummary['status'],
-      source: p.source as string,
-      created_at: (p.created_at as string) ?? new Date().toISOString(),
-      pillar_id: (p.pillar_id as string) ?? null,
-    })),
-  };
-  return c.json(dash);
-});
+g.get('/:slug/dashboard', async (c) => c.json(await getDashboard(gr(c).id)));
 
 // ---------- pillars ----------
-g.get('/:slug/pillars', async (c) => {
-  const group = gr(c);
-  const rows = await sql`select id, name, description, is_news, active, sort_order
-    from pillars where group_id = ${group.id} order by sort_order, id`;
-  const pillars: Pillar[] = rows.map((r) => ({
-    id: r.id as string, name: r.name as string, description: r.description as string,
-    is_news: r.is_news as boolean, active: r.active as boolean, sort_order: r.sort_order as number,
-  }));
-  return c.json(pillars);
-});
+g.get('/:slug/pillars', async (c) => c.json(await listPillars(gr(c).id)));
 
 g.post('/:slug/pillars', async (c) => {
-  const group = gr(c);
   const parsed = PillarInput.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const { name, description, is_news, sort_order } = parsed.data;
-  await sql`insert into pillars (group_id, name, description, is_news, sort_order)
-    values (${group.id}, ${name}, ${description}, ${is_news}, ${sort_order})`;
+  await createPillar(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
 });
 
 g.post('/:slug/pillars/:id/toggle', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  await sql`update pillars set active = not active where id = ${id} and group_id = ${group.id}`;
+  await togglePillar(gr(c).id, id);
   return c.json({ ok: true });
 });
 
 g.delete('/:slug/pillars/:id', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  await sql`delete from pillars where id = ${id} and group_id = ${group.id}`;
+  await deletePillar(gr(c).id, id);
   return c.json({ ok: true });
 });
 
@@ -302,61 +244,32 @@ g.post('/:slug/cron', async (c) => {
 });
 
 // ---------- posts ----------
-g.get('/:slug/posts', async (c) => {
-  const group = gr(c);
-  const rows = await sql`select id, platform, format, topic, status, source, created_at, pillar_id
-    from posts where group_id = ${group.id} order by id desc limit 100`;
-  const posts: PostSummary[] = rows.map((p) => ({
-    id: p.id as string, platform: p.platform as string, format: p.format as string,
-    topic: p.topic as string, status: p.status as PostSummary['status'],
-    source: p.source as string, created_at: (p.created_at as string) ?? new Date().toISOString(),
-    pillar_id: (p.pillar_id as string) ?? null,
-  }));
-  return c.json(posts);
-});
+g.get('/:slug/posts', async (c) => c.json(await listPosts(gr(c).id)));
 
 g.get('/:slug/posts/:id', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  const [p] = await sql`select id, platform, format, topic, caption, body, status, error, source, created_at, pillar_id
-    from posts where id = ${id} and group_id = ${group.id}`;
+  const p = await getPost(gr(c).id, id);
   if (!p) return c.json({ error: 'post not found' }, 404);
-  const body = JSON.parse(p.body ?? 'null');
-  const bodyText = body.body ? body.body
-    : body.slides ? body.slides.map((s: { headline: string; body: string }, i: number) => `${i + 1}. ${s.headline}\n${s.body}`).join('\n\n')
-    : body.scenes ? body.scenes.map((s: { overlay_text: string; narration: string }, i: number) => `${i + 1}. [${s.overlay_text}] ${s.narration}`).join('\n')
-    : JSON.stringify(body);
-  const detail: PostDetail = {
-    id: p.id as string, platform: p.platform as string, format: p.format as string,
-    topic: p.topic as string, status: p.status as PostSummary['status'],
-    source: p.source as string, created_at: (p.created_at as string) ?? new Date().toISOString(),
-    pillar_id: (p.pillar_id as string) ?? null,
-    caption: (p.caption as string) ?? '',
-    error: (p.error as string) ?? null,
-    body_text: bodyText,
-  };
-  return c.json(detail);
+  return c.json(p);
 });
 
 g.post('/:slug/posts/:id/resend', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  enqueue({ kind: 'resend', slug: group.slug, postId: id });
+  enqueue({ kind: 'resend', slug: gr(c).slug, postId: id });
   return c.json({ ok: true, queued: queueStatus() });
 });
 
 // ---------- manual generate ----------
 g.post('/:slug/gen', async (c) => {
-  const group = gr(c);
   const raw = await c.req.json().catch(() => ({}));
   const parsed = GenerateInput.safeParse(raw);
   if (!parsed.success) return c.json({ error: 'invalid platform/format' }, 400);
   const { platform, format } = parsed.data;
   enqueue({
     kind: 'generate',
-    slug: group.slug,
+    slug: gr(c).slug,
     forced: platform ? { platform, format } : undefined,
     notifyChat: true,
     source: 'web',
@@ -365,77 +278,43 @@ g.post('/:slug/gen', async (c) => {
 });
 
 // ---------- styles ----------
-g.get('/:slug/styles', async (c) => {
-  const group = gr(c);
-  const rows = await sql`select id, title, body, platform, created_at
-    from style_samples where group_id = ${group.id} order by id desc limit 50`;
-  const styles: StyleSample[] = rows.map((s) => ({
-    id: s.id as string, title: s.title as string, body: s.body as string,
-    platform: (s.platform as string) ?? null, created_at: s.created_at as string,
-  }));
-  return c.json(styles);
-});
+g.get('/:slug/styles', async (c) => c.json(await listStyles(gr(c).id)));
 
 g.post('/:slug/styles', async (c) => {
-  const group = gr(c);
   const parsed = StyleInput.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const { title, body, platform } = parsed.data;
-  await sql`insert into style_samples (group_id, title, body, platform)
-    values (${group.id}, ${title}, ${body}, ${platform})`;
+  await createStyle(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
 });
 
 g.delete('/:slug/styles/:id', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  await sql`delete from style_samples where id = ${id} and group_id = ${group.id}`;
+  await deleteStyle(gr(c).id, id);
   return c.json({ ok: true });
 });
 
 // ---------- templates ----------
-g.get('/:slug/templates', async (c) => {
-  const group = gr(c);
-  const rows = await sql`select id, name, format, is_active, updated_at
-    from templates where group_id = ${group.id} order by id desc limit 50`;
-  const templates: Template[] = rows.map((t) => ({
-    id: t.id as string, name: t.name as string, format: t.format as TemplateFormat,
-    is_active: t.is_active as boolean, updated_at: t.updated_at as string,
-  }));
-  return c.json(templates);
-});
+g.get('/:slug/templates', async (c) => c.json(await listTemplates(gr(c).id)));
 
 g.post('/:slug/templates', async (c) => {
-  const group = gr(c);
   const parsed = TemplateInput.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const { name, format, html, is_active } = parsed.data;
-  if (is_active) {
-    await sql`update templates set is_active = false where format = ${format} and group_id = ${group.id}`;
-  }
-  await sql`insert into templates (group_id, name, format, html, is_active)
-    values (${group.id}, ${name}, ${format}, ${html}, ${is_active})`;
+  await createTemplate(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
 });
 
 g.post('/:slug/templates/:id/activate', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  const [t] = await sql`select format from templates where id = ${id} and group_id = ${group.id}`;
-  if (t) {
-    await sql`update templates set is_active = false where format = ${t.format} and group_id = ${group.id}`;
-    await sql`update templates set is_active = true where id = ${id} and group_id = ${group.id}`;
-  }
+  await activateTemplate(gr(c).id, id);
   return c.json({ ok: true });
 });
 
 g.delete('/:slug/templates/:id', async (c) => {
-  const group = gr(c);
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  await sql`delete from templates where id = ${id} and group_id = ${group.id}`;
+  await deleteTemplate(gr(c).id, id);
   return c.json({ ok: true });
 });
 

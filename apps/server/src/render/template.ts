@@ -1,5 +1,5 @@
 // Load active template from DB (per format), fall back to default. Fill tokens + escape HTML.
-import { sql } from '../db.ts';
+import { sql } from '../db/pool.ts';
 import type { Platform, Format } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 

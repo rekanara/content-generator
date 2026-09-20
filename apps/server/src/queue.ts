@@ -1,6 +1,6 @@
 // In-process FIFO, one active run. Cron, bot, FE → same enqueue.
 // Job carries group slug — cfg resolved at run time (config edits don't wait for old jobs).
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
 import type { Slot, Platform, Format } from './state.ts';
 import { renderAndSave } from './render/carousel.ts';

@@ -1,7 +1,7 @@
 // Orchestrates one run: slot → ideation → writer → critic → (render/send called from outside).
 // All queries group-scoped; LLM uses GroupCfg (group ?? env).
-import { sql } from './db.ts';
-import { getRotation, getActivePillars, commitSent } from './db.ts';
+import { sql } from './db/pool.ts';
+import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { nextSlot, forcedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName } from './schema.ts';

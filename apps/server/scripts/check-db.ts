@@ -1,4 +1,4 @@
-import { sql } from '../src/db.ts';
+import { sql } from '../src/db/pool.ts';
 const u = await sql`select id, username, role from users`;
 console.log('users:', JSON.stringify(u));
 const g = await sql`select slug, user_id from groups`;

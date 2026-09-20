@@ -3,7 +3,8 @@
 //   /gen <slug> <platform> <format> — without a slug = first group.
 import { getUpdates, replyGlobal } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
-import { getRotation, getActivePillars, sql } from './db.ts';
+import { sql } from './db/pool.ts';
+import { getRotation, getActivePillars } from './repos/rotation.ts';
 import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
 import { config } from './config.ts';

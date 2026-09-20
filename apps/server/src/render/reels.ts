@@ -6,7 +6,7 @@ import { writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
-import { sql } from '../db.ts';
+import { sql } from '../db/pool.ts';
 import type { ReelsOut } from '../schema.ts';
 import { ttsToFile } from '../tts.ts';
 import type { GroupCfg } from '../groups.ts';

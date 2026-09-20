@@ -1,7 +1,7 @@
 // In-app cron per group: schedule from the groups DB row, re-scheduled on change.
 // Map of groupId → CronJob. Boot: load all groups. Cron patch → refreshCron(group).
 import { CronJob } from 'cron';
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { enqueue } from './queue.ts';
 
 type JobState = { job: CronJob | null; expr: string; enabled: boolean };

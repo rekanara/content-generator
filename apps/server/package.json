@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "migrate": "tsx src/db.ts migrate",
+    "migrate": "tsx src/db/migrate.ts",
     "daily": "tsx src/cli.ts daily",
     "serve": "tsx src/server.ts",
     "user:add": "tsx src/cli.ts user:add",

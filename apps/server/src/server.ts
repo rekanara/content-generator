@@ -4,7 +4,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { readFileSync } from 'node:fs';
 import { config } from './config.ts';
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { startBot } from './bot.ts';
 import { queueStatus } from './queue.ts';
 import { startCron } from './cron.ts';
