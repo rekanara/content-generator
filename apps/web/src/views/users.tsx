@@ -19,7 +19,7 @@ export function UsersView() {
   const [form, setForm] = useState({ username: "", password: "", role: "user" })
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [confirmDel, setConfirmDel] = useState<number | null>(null)
+  const [confirmDel, setConfirmDel] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  nextSlot, forcedSlot, nextState,
+  nextSlot, forcedSlot, nextState, previewSlots,
   type RotationState, type PillarLite,
 } from '../src/state.ts';
 
@@ -111,4 +111,35 @@ test('skipped days break nothing — rotation purely from state', () => {
   const st0 = S({ last_platform: 'linkedin', last_ig_format: 'carousel', last_li_format: 'pdf', last_pillar_id: "2" });
   assert.deepEqual(run2(st0), run2(st0)); // deterministic
   assert.deepEqual(run2(st0), ['instagram:reels:1', 'linkedin:text:2']);
+});
+
+// ---------- previewSlots (calendar) ----------
+
+test('previewSlots: full PRD cycle sequence', () => {
+  const seq = previewSlots(S({ last_platform: 'linkedin' }), [P("1")], 4)
+    .map((s) => `${s.platform}:${s.format}`);
+  assert.deepEqual(seq, ['instagram:carousel', 'linkedin:pdf', 'instagram:reels', 'linkedin:text']);
+});
+
+test('previewSlots: pillars alternate in preview', () => {
+  const seq = previewSlots(S({ last_platform: 'linkedin', last_pillar_id: "2" }), [P("1"), P("2")], 4)
+    .map((s) => s.pillar_id);
+  assert.deepEqual(seq, ['1', '2', '1', '2']);
+});
+
+test('previewSlots: does not mutate the input state', () => {
+  const st = S({ last_platform: 'linkedin', last_ig_format: 'reels', last_li_format: 'text', last_pillar_id: "1" });
+  previewSlots(st, [P("1"), P("2")], 5);
+  assert.deepEqual(st, S({ last_platform: 'linkedin', last_ig_format: 'reels', last_li_format: 'text', last_pillar_id: "1" }));
+});
+
+test('previewSlots: n=0 → empty, cycle repeats', () => {
+  assert.deepEqual(previewSlots(S({}), [P("1")], 0), []);
+  const seq = previewSlots(S({ last_platform: 'linkedin' }), [P("1")], 5)
+    .map((s) => `${s.platform}:${s.format}`);
+  assert.equal(seq[0], seq[4]); // 4-format cycle → 5th equals 1st
+});
+
+test('previewSlots: no active pillars → throw (same as nextSlot)', () => {
+  assert.throws(() => previewSlots(S({}), [], 3), /no active pillars/);
 });

@@ -83,3 +83,17 @@ export function nextState(state: RotationState, slot: Slot): RotationState {
     last_pillar_id: slot.pillar_id,
   };
 }
+
+// Preview the next n slots from a state — calendar view, no DB, no mutation.
+// Assumes allowNews=true (RSS availability for future runs is unknowable).
+// ponytail: re-derive when an in-flight run finishes (rotation advances only after `sent`).
+export function previewSlots(state: RotationState, pillars: PillarLite[], n: number): Slot[] {
+  const out: Slot[] = [];
+  let st = state;
+  for (let i = 0; i < n; i++) {
+    const slot = nextSlot(st, pillars, true);
+    out.push(slot);
+    st = nextState(st, slot);
+  }
+  return out;
+}

@@ -8,6 +8,7 @@ import { sql } from './db/pool.ts';
 import { startBot } from './bot.ts';
 import { queueLiveness } from './queue.ts';
 import { startCron } from './cron.ts';
+import { startMonitor } from './monitor.ts';
 import { api } from './api.ts';
 
 const app = new Hono();
@@ -37,4 +38,5 @@ app.get('/*', (c) => {
 serve({ fetch: app.fetch, port: config.port });
 console.log(`[server] daemon v2 running on :${config.port}`);
 await startCron();
+startMonitor(); // watchdog: boot missed-slot check + heartbeat (must run before bot's blocking loop)
 await startBot();

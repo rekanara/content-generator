@@ -1,7 +1,7 @@
 // Small data-fetch hooks — no react-query, stdlib fetch + useEffect.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings, Group } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings, Group, CalendarRun } from '@workspace/shared';
 
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -26,6 +26,7 @@ export const useGroups = () => useApi<Group[]>(api.groups);
 export const useDashboard = (slug: string) => useApi<Dashboard>(() => api.dashboard(slug), [slug]);
 export const usePillars = (slug: string) => useApi<Pillar[]>(() => api.pillars(slug), [slug]);
 export const usePosts = (slug: string) => useApi<PostSummary[]>(() => api.posts(slug), [slug]);
+export const useCalendar = (slug: string) => useApi<CalendarRun[]>(() => api.calendar(slug), [slug]);
 export const usePost = (slug: string, id: string | null) => useApi<PostDetail>(() => id ? api.post(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
 export const useStyles = (slug: string) => useApi<StyleSample[]>(() => api.styles(slug), [slug]);
 export const useTemplates = (slug: string) => useApi<Template[]>(() => api.templates(slug), [slug]);

@@ -4,17 +4,21 @@ import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { api, ApiError } from "@/lib/api"
-import { useDashboard } from "@/lib/hooks"
+import { useDashboard, useCalendar } from "@/lib/hooks"
 
 const STATUS_BADGE: Record<string, string> = {
   queued: "bg-blue-500/15 text-blue-500 border-transparent",
+  draft: "bg-muted text-muted-foreground border-transparent",
   rendered: "bg-amber-500/15 text-amber-500 border-transparent",
+  awaiting_approval: "bg-violet-500/15 text-violet-500 border-transparent",
   sent: "bg-emerald-500/15 text-emerald-500 border-transparent",
   failed: "bg-red-500/15 text-red-500 border-transparent",
+  rejected: "bg-zinc-500/15 text-zinc-500 border-transparent",
 }
 
 export function DashboardView({ slug }: { slug: string }) {
   const { data, error, loading, reload } = useDashboard(slug)
+  const { data: calendar } = useCalendar(slug)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -54,6 +58,22 @@ export function DashboardView({ slug }: { slug: string }) {
         <Stat label="Queue" value={queue.running ? "active" : "idle"} sub={`${queue.pending} pending`} />
         <Stat label="Last rotation" value={rotation.last_platform} sub={rotation.updated_at ? new Date(rotation.updated_at).toLocaleString("en-US") : "—"} />
         <Stat label="Next slot" value={`${next_slot.platform}/${next_slot.format}`} sub={`pillar #${next_slot.pillar_id}`} />
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-sm font-medium text-muted-foreground">Next runs</h2>
+        <div className="divide-y rounded-lg border">
+          {(calendar ?? []).length === 0 && <p className="p-4 text-sm text-muted-foreground">no active pillars</p>}
+          {(calendar ?? []).map((r, i) => (
+            <div key={i} className="flex items-center gap-3 p-3 text-sm">
+              <span className="w-36 shrink-0 text-xs text-muted-foreground">
+                {r.scheduled_at ? new Date(r.scheduled_at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+              </span>
+              <span className="w-28 shrink-0">{r.platform}/{r.format}</span>
+              <span className="min-w-0 flex-1 truncate">{r.pillar_name}</span>
+            </div>
+          ))}
+        </div>
       </section>
 
       <section className="space-y-2">
