@@ -29,6 +29,9 @@ Multi-group: setiap group = satu "akun konten" dengan konfigurasi sendiri (LLM, 
 11. Gagal di tengah pipeline tidak mengkonsumsi rotasi: `rotation_state` hanya di-update setelah post `sent`.
 12. Satu run aktif pada satu waktu per daemon (antrean FIFO in-process). Cron, bot, dan FE memasukkan ke antrean yang sama.
 13. Auth: session cookie httpOnly (sha256 token di DB, sliding 30 hari), rate-limit login per IP (5 gagal/15 menit → lock 15 menit), anti-enumeration login, admin guard untuk user-management + group CRUD.
+14. **Approval gate (per group, default off)**: run dengan `groups.approval_required` → render → status `awaiting_approval` → tombol Approve/Reject (inline keyboard Telegram atau FE) → approve = kirim + rotasi maju; reject = terminal `rejected`, rotasi TIDAK maju. `awaiting_approval` sengaja survive daemon restart (bukan orphan).
+15. **Watchdog**: slot cron terlewat (daemon down / run tak pernah mulai) terdeteksi di boot + heartbeat tiap 6 jam → alert ke chat Telegram group. Run gagal (queue) + orphan boot juga alert — tidak ada failure senyap.
+16. **Calendar preview**: `GET /api/g/:slug/calendar?n=` — N slot berikutnya (pure `previewSlots`) + tanggal fire dari cron expr. Tidak merefleksikan run yang sedang in-flight.
 
 ## 3. Arsitektur
 
@@ -79,18 +82,23 @@ scenes (writer output, 4–6 scene): {overlay_text, narration}
 Driver `postgres` (postgres.js). Migrasi SQL plain di `apps/server/db/migrations/` (001–007), runner sendiri, tabel `schema_migrations`. Tanpa ORM. **Semua PK UUID v7** (time-ordered, string di TS).
 
 ```sql
-groups            -- id, slug, name, user_id (owner, null=admin), cron_expr, cron_enabled,
-                  --   llm_* overrides, tts_* overrides, telegram_* overrides, created_at
+groups            -- id, slug, name, user_id (owner, null=admin), cron_expr, cron_enabled, approval_required,
+                   --   llm_* overrides, tts_* overrides, telegram_* overrides, created_at
 users             -- id, username unique, password_hash (scrypt), role (admin|user), created_at
 sessions          -- id, user_id, token_hash (sha256), expires_at (sliding 30d), created_at
 pillars           -- id, group_id, name, description, is_news, active, sort_order
 rotation_state    -- group_id PK, last_platform, last_ig_format, last_li_format, last_pillar_id
 posts             -- id, group_id, platform, format, pillar_id, topic, caption, body (jsonb),
-                  --   artifact_prefix, status (queued|draft|rendered|sent|failed), error, source, llm_usage
+                   --   artifact_prefix, status (queued|draft|rendered|awaiting_approval|sent|failed|rejected),
+                   --   error, source, llm_usage
 templates         -- id, name, format (ig-carousel|li-carousel|reel), html, is_active (satu per format per group)
 style_samples     -- id, group_id, title, body, platform
 feeds_cache       -- url PK, fetched_at, items jsonb
 ```
+
+Status lifecycle: `queued → draft → rendered → awaiting_approval →(approve) sent` | `→(reject) rejected` | `→ failed` (error di langkah mana pun). `awaiting_approval` survive restart; lainnya in-flight → orphan-failed di boot.
+
+Migrasi 001–009 (009 = approval gate). Watchdog pakai `cronmath.ts` (prevFire/nextFires di atas CronTime `cron` package, TZ Asia/Jakarta).
 
 Boot cleanup: post berstatus `queued`/`draft`/`rendered` saat daemon start → tandai `failed` (orphan dari crash). Migrate runner men-seed admin default (`ADMIN_USER`/`ADMIN_PASSWORD` env atau default) jika tabel users kosong.
 
@@ -165,6 +173,8 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | GET/POST | /api/g/:slug/pillars, /:id/toggle, DELETE /:id | CRUD pilar |
 | GET/POST | /api/g/:slug/cron | status / simpan expr+enabled |
 | GET | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail / kirim ulang |
+| POST | /api/g/:slug/posts/:id/approve, /:id/reject | approval gate (approve via queue; reject langsung + status guard) |
+| GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
 | POST | /api/g/:slug/gen | generate manual (platform/format optional) |
 | GET/POST/DELETE | /api/g/:slug/styles[/:id] | CRUD style samples |
 | GET/POST/DELETE | /api/g/:slug/templates[/:id], /:id/activate | CRUD + aktivasi template |
@@ -241,6 +251,9 @@ Postgres & MinIO = service eksternal. Log tidak pernah mencetak secret. Key hany
 9. **(2026-09-20) FE view-switcher state-based, bukan URL router.** `ponytail:` react-router kalau FE publik.
 10. **(2026-09-21) Multi-group + auth multi-user.** Group = unit isolasi konfigurasi (LLM/TTS/Telegram/cron/pilar/rotasi). Slug reserved (`users`, `login`). ID semua UUID v7. Postgres.js tanpa ORM tetap.
 11. **(2026-09-21) Pragmatic layered, bukan full Clean Architecture.** Tidak ada interface satu-impl / domain-application-infrastructure nesting. Lapisan: transport (api) → usecases → repos → adapters. `ponytail:` interface repo kalau butuh swap DB.
+12. **(2026-09-21) Approval gate: render SEBELUM approval** — approve→deliver instan (tanpa tunggu render saat tombol ditekan); reject membuang render CPU, itu harga yang diterima. Approve via queue (serial), reject langsung (tanpa kerja berat). Send gagal saat approve → post TETAP `awaiting_approval` (tap approve lagi), bukan failed.
+13. **(2026-09-21) Watchdog = alert-only, tidak auto-catchup.** Auto-run saat boot berisiko double-generate kalau deteksi salah; alert + `/gen` manual cukup. Dedup alert per slot in-memory (ponytail: DB-backed).
+14. **(2026-09-21) Missed slot = "tidak ada post dibuat setelah fire time"** — post apa pun (cron/manual, status apa pun) menganggap slot terpenuhi; run yang gagal adalah sinyal berbeda (alert lewat jalur failure).
 
 ## 13. Upgrade Paths (ponytail ceilings)
 
@@ -252,8 +265,8 @@ Postgres & MinIO = service eksternal. Log tidak pernah mencetak secret. Key hany
 
 ## 14. Verification (2026-09-21)
 
-- `npm test` workspace: 43/43 pass.
-- Typecheck: server, shared, ui, web — semua clean.
-- `npm run migrate`: idempotent no-op (semua 007 applied, admin seed skip jika ada user).
-- Live RSS: `scripts/test-rss.ts` → context 8 item segar dari HN/dev.to.
-- Refactor audit (agent verification): layers clean — repos zero HTTP, api.ts zero raw SQL, tidak ada import god module lama.
+- `npm test` workspace: 63/63 pass (43 lama + 10 cronmath + 5 previewSlots + 5 parseCallback).
+- Typecheck: server, shared, ui, web — semua clean. FE build (tsc -b + vite) clean.
+- `npm run migrate`: 009 applied (constraint status/event baru + groups.approval_required terverifikasi via pg_constraint).
+- Live E2E (daemon di Mac mini): watchdog mendeteksi missed slot 07:00 asli → alert Telegram terkirim; approval gate → post nyata `generated → rendered → awaiting_approval → rejected`, rotation TIDAK maju (updated_at tidak berubah); calendar endpoint mengembalikan siklus PRD + tanggal cron.
+- **Bug fix**: `sql('kolom, kolom')` postgres.js = Identifier (bukan fragment) — break `getRotation`/`listPosts` sejak refactor e887922 (cron run gagal senyap). Fixed: kolom di-inline literal.
