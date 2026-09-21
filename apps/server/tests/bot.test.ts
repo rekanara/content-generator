@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCmd } from '../src/bot.ts';
+import { parseCmd, parseCallback } from '../src/bot.ts';
 
 const SLUGS = ['default', 'brand2'];
 
@@ -60,4 +60,32 @@ test('parseCmd: /help and /start', () => {
 test('parseCmd: random text', () => {
   const c = parseCmd('hello bot', SLUGS);
   assert.equal(c.t, 'unknown');
+});
+
+// ---------- parseCallback (approval gate buttons) ----------
+
+const UUID = '0192ab6e-5f78-7abc-8def-0123456789ab';
+
+test('parseCallback: approve:<uuid>', () => {
+  assert.deepEqual(parseCallback(`approve:${UUID}`), { t: 'approve', postId: UUID });
+});
+
+test('parseCallback: reject:<uuid>', () => {
+  assert.deepEqual(parseCallback(`reject:${UUID}`), { t: 'reject', postId: UUID });
+});
+
+test('parseCallback: uppercase uuid → normalized lowercase', () => {
+  const c = parseCallback(`APPROVE:${UUID.toUpperCase()}`);
+  assert.deepEqual(c, { t: 'approve', postId: UUID });
+});
+
+test('parseCallback: non-uuid payload → null', () => {
+  assert.equal(parseCallback('approve:not-a-uuid'), null);
+  assert.equal(parseCallback('approve:123'), null);
+});
+
+test('parseCallback: unknown action → null', () => {
+  assert.equal(parseCallback(`delete:${UUID}`), null);
+  assert.equal(parseCallback(UUID), null);
+  assert.equal(parseCallback(''), null);
 });

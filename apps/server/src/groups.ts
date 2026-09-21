@@ -4,7 +4,7 @@ import { config } from './config.ts';
 
 export type GroupRow = {
   id: string; slug: string; name: string; user_id: string | null;
-  cron_expr: string; cron_enabled: boolean; created_at: Date;
+  cron_expr: string; cron_enabled: boolean; approval_required: boolean; created_at: Date;
   llm_base_url: string | null; llm_api_key: string | null; llm_model: string | null; llm_model_critic: string | null;
   tts_provider: string | null; tts_voice: string | null; tts_base_url: string | null; tts_api_key: string | null; tts_model: string | null;
   telegram_bot_token: string | null; telegram_chat_id: string | null;
@@ -13,6 +13,7 @@ export type GroupRow = {
 // Effective config for one run: groups row merged over env.
 export type GroupCfg = {
   id: string; slug: string;
+  approval_required: boolean;
   llm: { baseUrl: string; apiKey: string; model: string; criticModel: string };
   tts: { provider: 'edge' | 'openai'; voice: string; baseUrl: string; apiKey: string; model: string };
   telegram: { botToken: string; chatId: string };
@@ -22,6 +23,7 @@ export function toGroupCfg(row: GroupRow): GroupCfg {
   return {
     id: row.id,
     slug: row.slug,
+    approval_required: row.approval_required,
     llm: {
       baseUrl: row.llm_base_url ?? config.llm.baseUrl,
       apiKey: row.llm_api_key ?? config.llm.apiKey,
@@ -42,13 +44,13 @@ export function toGroupCfg(row: GroupRow): GroupCfg {
   };
 }
 
-const COLS = sql`select id, slug, name, user_id, cron_expr, cron_enabled, created_at,
+const COLS = sql`select id, slug, name, user_id, cron_expr, cron_enabled, approval_required, created_at,
   llm_base_url, llm_api_key, llm_model, llm_model_critic,
   tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
   telegram_bot_token, telegram_chat_id from groups`;
 
 // returning-list for sql.unsafe (dynamic patch) — identical to COLS.
-const RET = 'id, slug, name, user_id, cron_expr, cron_enabled, created_at, llm_base_url, llm_api_key, llm_model, llm_model_critic, tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model, telegram_bot_token, telegram_chat_id';
+const RET = 'id, slug, name, user_id, cron_expr, cron_enabled, approval_required, created_at, llm_base_url, llm_api_key, llm_model, llm_model_critic, tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model, telegram_bot_token, telegram_chat_id';
 
 export async function listGroups(): Promise<GroupRow[]> {
   return sql<GroupRow[]>`${COLS} order by id`;
@@ -79,21 +81,21 @@ export async function getGroupCfgById(id: string): Promise<GroupCfg> {
 const RESERVED_SLUGS = new Set(['users', 'login']);
 
 export async function createGroup(d: {
-  slug: string; name: string; cron_expr: string; cron_enabled: boolean; user_id: string | null;
+  slug: string; name: string; cron_expr: string; cron_enabled: boolean; approval_required: boolean; user_id: string | null;
   llm_base_url: string | null; llm_api_key: string | null; llm_model: string | null; llm_model_critic: string | null;
   tts_provider: string | null; tts_voice: string | null; tts_base_url: string | null; tts_api_key: string | null; tts_model: string | null;
   telegram_bot_token: string | null; telegram_chat_id: string | null;
 }): Promise<GroupRow> {
   if (RESERVED_SLUGS.has(d.slug)) throw new Error(`slug "${d.slug}" reserved`);
-  const [row] = await sql<GroupRow[]>`insert into groups (slug, name, user_id, cron_expr, cron_enabled,
+  const [row] = await sql<GroupRow[]>`insert into groups (slug, name, user_id, cron_expr, cron_enabled, approval_required,
     llm_base_url, llm_api_key, llm_model, llm_model_critic,
     tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
     telegram_bot_token, telegram_chat_id)
-    values (${d.slug}, ${d.name}, ${d.user_id}, ${d.cron_expr}, ${d.cron_enabled},
+    values (${d.slug}, ${d.name}, ${d.user_id}, ${d.cron_expr}, ${d.cron_enabled}, ${d.approval_required},
       ${d.llm_base_url}, ${d.llm_api_key}, ${d.llm_model}, ${d.llm_model_critic},
       ${d.tts_provider}, ${d.tts_voice}, ${d.tts_base_url}, ${d.tts_api_key}, ${d.tts_model},
       ${d.telegram_bot_token}, ${d.telegram_chat_id})
-    returning id, slug, name, user_id, cron_expr, cron_enabled, created_at,
+    returning id, slug, name, user_id, cron_expr, cron_enabled, approval_required, created_at,
       llm_base_url, llm_api_key, llm_model, llm_model_critic,
       tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
       telegram_bot_token, telegram_chat_id`;
@@ -107,7 +109,7 @@ export async function createGroup(d: {
 // Identifiers from the MAP whitelist, values parameterized — injection-safe.
 export async function patchGroup(slug: string, d: Record<string, unknown>): Promise<GroupRow | null> {
   const MAP: Record<string, string> = {
-    name: 'name', cron_expr: 'cron_expr', cron_enabled: 'cron_enabled',
+    name: 'name', cron_expr: 'cron_expr', cron_enabled: 'cron_enabled', approval_required: 'approval_required',
     llm_base_url: 'llm_base_url', llm_api_key: 'llm_api_key', llm_model: 'llm_model', llm_model_critic: 'llm_model_critic',
     tts_provider: 'tts_provider', tts_voice: 'tts_voice', tts_base_url: 'tts_base_url', tts_api_key: 'tts_api_key', tts_model: 'tts_model',
     telegram_bot_token: 'telegram_bot_token', telegram_chat_id: 'telegram_chat_id',
@@ -142,6 +144,7 @@ export function groupOut(row: GroupRow) {
   return {
     id: row.id, slug: row.slug, name: row.name,
     cron_expr: row.cron_expr, cron_enabled: row.cron_enabled,
+    approval_required: row.approval_required,
     created_at: row.created_at.toISOString(),
     llm_base_url: row.llm_base_url, llm_model: row.llm_model, llm_model_critic: row.llm_model_critic,
     tts_provider: row.tts_provider, tts_voice: row.tts_voice, tts_base_url: row.tts_base_url, tts_model: row.tts_model,

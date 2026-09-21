@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { enqueue, queueStatus } from './queue.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
+import { getCalendar } from './usecases/calendar.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
   GroupInput, GroupPatch,
@@ -16,8 +17,8 @@ import {
   getGroupOwner, saveCron,
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar } from './repos/pillars.ts';
-import { listPosts, getPost } from './repos/posts.ts';
-import { listEvents } from './repos/events.ts';
+import { listPosts, getPost, rejectPost } from './repos/posts.ts';
+import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle } from './repos/styles.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate } from './repos/templates.ts';
 import {
@@ -266,6 +267,30 @@ g.post('/:slug/posts/:id/resend', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   enqueue({ kind: 'resend', slug: gr(c).slug, postId: id });
   return c.json({ ok: true, queued: queueStatus() });
+});
+
+// ---------- approval gate ----------
+g.post('/:slug/posts/:id/approve', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  enqueue({ kind: 'approve', slug: gr(c).slug, postId: id });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+g.post('/:slug/posts/:id/reject', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await rejectPost(gr(c).id, id);
+  if (!ok) return c.json({ error: 'post not found or not awaiting approval' }, 400);
+  await addEvent(id, gr(c).id, 'rejected');
+  return c.json({ ok: true });
+});
+
+// ---------- calendar preview ----------
+g.get('/:slug/calendar', async (c) => {
+  const group = gr(c);
+  const n = Math.min(14, Math.max(1, Number(c.req.query('n')) || 7));
+  return c.json(await getCalendar(group.id, group.cron_expr, group.cron_enabled, n));
 });
 
 // ---------- manual generate ----------

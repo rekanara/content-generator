@@ -52,6 +52,31 @@ export async function sendMessage(cfg: GroupCfg, text: string): Promise<void> {
   await tg(cfg, 'sendMessage', { chat_id: cfg.telegram.chatId, text });
 }
 
+// Text message with inline keyboard buttons (callback_data max 64 bytes — uuid + prefix fits).
+// Used for the approval gate: [approve:<postId>] / [reject:<postId>].
+export async function sendMessageWithButtons(
+  cfg: GroupCfg,
+  text: string,
+  buttons: { text: string; callback_data: string }[][],
+): Promise<void> {
+  await tg(cfg, 'sendMessage', {
+    chat_id: cfg.telegram.chatId,
+    text,
+    reply_markup: { inline_keyboard: buttons },
+  });
+}
+
+// Answer a callback query (stops the button spinner in the client) — env token, bot polling side.
+export async function answerCallback(token: string, callbackQueryId: string): Promise<void> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackQueryId }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  await mustOk(res, 'answerCallbackQuery');
+}
+
 // Reply to a specific chat via env token (used by bot polling to reply to the chat the command came from).
 export async function replyGlobal(chatId: string, text: string): Promise<void> {
   const token = (await import('./config.ts')).config.telegram.botToken;

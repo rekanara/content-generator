@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -66,6 +66,9 @@ export const api = {
   posts: (slug: string) => req<PostSummary[]>(`${g(slug)}/posts`),
   post: (slug: string, id: string) => req<PostDetail>(`${g(slug)}/posts/${id}`),
   resend: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/resend`, { method: 'POST' }),
+  approve: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/approve`, { method: 'POST' }),
+  reject: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/reject`, { method: 'POST' }),
+  calendar: (slug: string, n = 7) => req<CalendarRun[]>(`${g(slug)}/calendar?n=${n}`),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),

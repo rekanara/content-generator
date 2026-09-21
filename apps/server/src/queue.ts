@@ -5,14 +5,15 @@ import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts'
 import type { Slot, Platform, Format } from './state.ts';
 import { renderAndSave } from './render/carousel.ts';
 import { renderReelsAndSave } from './render/reels.ts';
-import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo } from './telegram.ts';
+import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons } from './telegram.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
-import { getGroupCfg } from './groups.ts';
+import { getGroupCfg, getGroupCfgById } from './groups.ts';
 import { addEvent } from './repos/events.ts';
 
 type Job =
   | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
-  | { kind: 'resend'; slug: string; postId: string };
+  | { kind: 'resend'; slug: string; postId: string }
+  | { kind: 'approve'; slug: string; postId: string };
 
 const jobs: Job[] = [];
 let running = false;
@@ -45,13 +46,14 @@ async function drain(): Promise<void> {
       try {
         cfg = await getGroupCfg(job.slug);
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
+        else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else await runResend(cfg, job.postId);
       } catch (e) {
         const msg = (e as Error).message;
         console.error(`[queue] job failed (${job.slug}): ${msg}`);
         try {
-          // generate failures with a post row are evented in runGenerate; here only resend (id always known)
-          if (job.kind === 'resend' && cfg) await addEvent(job.postId, cfg.id, 'failed', msg);
+          // generate failures with a post row are evented in runGenerate; here only resend/approve (id always known)
+          if (cfg && job.kind !== 'generate') await addEvent(job.postId, cfg.id, 'failed', msg);
         } catch { /* event write must never break the queue */ }
       }
       lastActivity = Date.now();
@@ -62,6 +64,8 @@ async function drain(): Promise<void> {
 }
 
 // One full run: resolve slot → draft → render → send → markSent.
+// Approval gate (group flag): render → status awaiting_approval → Telegram approve/reject
+// buttons → stop. Rotation NOT consumed until approved & sent (spec #11 holds).
 async function runGenerate(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   forced?: { platform: Platform; format?: Format },
@@ -73,15 +77,83 @@ async function runGenerate(
   const r = await generateDraft(cfg, slot, source);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
-    await deliver(cfg, r.postId, slot, notifyChat);
+    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot);
+    else await deliver(cfg, r.postId, slot, notifyChat);
   } catch (e) {
     await markFailed(r.postId, e); // status → failed immediately, not just event
     await addEvent(r.postId, cfg.id, 'failed', (e as Error).message).catch(() => {});
+    await notifyRunFailed(cfg, e); // silent failures are the daemon's #1 operational risk
     throw e;
   }
 }
 
-// Send a rendered post (used by runGenerate + resend).
+// Render (if needed) + park the post at awaiting_approval + request approval in Telegram.
+// Render happens BEFORE approval so approve→deliver is instant (no CPU wait on the button tap).
+// ponytail: pre-render approval if rejected-runs waste too much CPU.
+async function prepareForApproval(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  slot: Slot,
+): Promise<void> {
+  const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; status: string }[]>`select platform, format, topic, caption, body, status, artifact_prefix
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  if (post.format !== 'text' && post.status !== 'rendered') {
+    if (slot.format === 'reels') {
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+    } else {
+      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg.slug, cfg.id);
+    }
+    await addEvent(postId, cfg.id, 'rendered');
+  }
+  const upd = await sql`update posts set status = 'awaiting_approval'
+    where id = ${postId} and group_id = ${cfg.id} and status in ('draft','rendered','queued') returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} not in a pre-approval state`);
+  await addEvent(postId, cfg.id, 'awaiting_approval');
+  console.log(`[queue] post #${postId} awaiting approval (${cfg.slug})`);
+  // Approval request is best-effort: if Telegram flakes, the post stays awaiting — FE can approve.
+  // ponytail: inline buttons only work for the env (polled) bot — groups with a token override
+  // get the message from their own bot whose callbacks we never receive; FE approve covers them.
+  // (multi-bot polling = one getUpdates loop per token, when it ever matters)
+  try {
+    await withRetry(() => sendMessageWithButtons(cfg, approvalText(cfg.slug, post), [
+      [
+        { text: 'Approve — send now', callback_data: `approve:${postId}` },
+        { text: 'Reject', callback_data: `reject:${postId}` },
+      ],
+    ]));
+  } catch (e) {
+    console.warn(`[queue] approval request failed (${cfg.slug}): ${(e as Error).message}`);
+    await addEvent(postId, cfg.id, 'failed', `approval request not delivered: ${(e as Error).message}`).catch(() => {});
+  }
+}
+
+function approvalText(slug: string, post: { topic: string; platform: string; format: string; caption: string | null }): string {
+  return [
+    `Approval needed — ${slug}`,
+    `Topic: ${post.topic}`,
+    `${post.platform}/${post.format} · slot rotation unchanged until sent`,
+    '',
+    `Caption: ${post.caption ? post.caption.slice(0, 900) : '—'}`,
+  ].join('\n');
+}
+
+// Approve an awaiting_approval post: send now + advance rotation. On send failure the post
+// STAYS awaiting_approval (tap approve again) — no markFailed, no rotation consumption.
+async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string }[]>`select platform, format, pillar_id, status
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  if (post.status !== 'awaiting_approval') {
+    throw new Error(`post ${postId} status ${post.status} — cannot approve`);
+  }
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  await addEvent(postId, cfg.id, 'approved');
+  await deliver(cfg, postId, slot, true);
+}
+
+// Send a post (used by runGenerate, runApprove, resend-style flows).
+// awaiting_approval counts as artifact-ready (approve path) — no re-render.
 async function deliver(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   postId: string,
@@ -92,14 +164,8 @@ async function deliver(
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
 
-  if (post.status !== 'rendered') {
-    if (slot.format === 'text') {
-      // text format: send body directly, no render needed
-      if (notifyChat) await withRetry(() => sendMessage(cfg, `${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`));
-      await markSent(cfg.id, postId, slot);
-      await addEvent(postId, cfg.id, 'sent');
-      return;
-    }
+  const ready = post.status === 'rendered' || post.status === 'awaiting_approval';
+  if (!ready && slot.format !== 'text') {
     // not rendered yet → render first per format
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
@@ -121,9 +187,14 @@ async function deliver(
     if (notifyChat) await withRetry(() => sendDocument(cfg, `${prefix}carousel.pdf`, `carousel-${postId}.pdf`, post.caption || post.topic));
   } else if (post.format === 'reels') {
     if (notifyChat) await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic));
+  } else {
+    // text format: send body directly, no artifacts
+    if (notifyChat) await withRetry(() => sendMessage(cfg, `${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`));
   }
   await markSent(cfg.id, postId, slot);
   await addEvent(postId, cfg.id, 'sent');
+  // ponytail: telegram send happens BEFORE the DB commit — send-ok + commit-fail = duplicate
+  // send on re-tap. Outbox/idempotency keys if it ever bites in practice.
   console.log(`[queue] post #${postId} delivered + rotation advanced (${cfg.slug})`);
 }
 
@@ -165,7 +236,18 @@ async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: s
   console.log(`[queue] post #${postId} resent (${cfg.slug})`);
 }
 
+// Best-effort run-failure alert to the group's Telegram chat. Never throws.
+async function notifyRunFailed(cfg: Awaited<ReturnType<typeof getGroupCfg>>, e: unknown): Promise<void> {
+  const msg = String((e as Error)?.message ?? e).slice(0, 300);
+  try {
+    await sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`);
+  } catch (te) {
+    console.warn(`[queue] failure alert not delivered (${cfg.slug}): ${(te as Error).message}`);
+  }
+}
+
 // Boot cleanup: orphan queued/draft/rendered at daemon start → failed (previous crash).
+// awaiting_approval is a DELIBERATE pause — survives restarts, never boot-failed.
 export async function bootCleanup(): Promise<void> {
   const r = await sql`update posts set status = 'failed', error = 'orphaned at boot'
     where status in ('queued','draft','rendered') returning id, group_id`;
@@ -174,5 +256,15 @@ export async function bootCleanup(): Promise<void> {
     try {
       await addEvent(row.id, row.group_id, 'failed', 'orphaned at boot');
     } catch { /* event write must never break boot */ }
+  }
+  // one best-effort alert per affected group — crashed runs shouldn't be silent either
+  const byGroup = new Map<string, number>();
+  for (const row of r) byGroup.set(row.group_id, (byGroup.get(row.group_id) ?? 0) + 1);
+  for (const [groupId, n] of byGroup) {
+    const cfg = await getGroupCfgById(groupId).catch(() => null);
+    if (!cfg) continue;
+    try {
+      await sendMessage(cfg, `Daemon restarted — ${n} in-flight post${n > 1 ? 's' : ''} marked failed (${cfg.slug}). Regenerate: /gen ${cfg.slug}`);
+    } catch { /* alert is best-effort */ }
   }
 }

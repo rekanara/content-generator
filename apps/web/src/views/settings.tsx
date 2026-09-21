@@ -4,6 +4,7 @@ import { Button } from "@workspace/ui/components/button"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
+import { Switch } from "@workspace/ui/components/switch"
 import { api, ApiError } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
@@ -81,6 +82,25 @@ export function SettingsView({ slug }: { slug: string }) {
       </section>
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
+
+      <Card>
+        <CardContent className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium">Approval gate</p>
+            <p className="text-xs text-muted-foreground">
+              Generated posts pause before sending — approve/reject via Telegram buttons or the Posts tab. Rotation only advances after approval.
+            </p>
+          </div>
+          <Switch
+            checked={group.approval_required}
+            onCheckedChange={(v) => {
+              api.patchGroup(slug, { approval_required: v }).then(reload).catch((err) => {
+                setMsg(err instanceof ApiError ? err.message : "failed to save")
+              })
+            }}
+          />
+        </CardContent>
+      </Card>
 
       <form className="space-y-6" onSubmit={save}>
         <Section title="LLM">

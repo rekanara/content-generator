@@ -15,7 +15,7 @@ export type Format = z.infer<typeof Format>;
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
-export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'sent', 'failed']);
+export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
 // ---------- groups (multi-account) ----------
@@ -40,6 +40,7 @@ export const Group = z.object({
   name: z.string(),
   cron_expr: z.string(),
   cron_enabled: z.boolean(),
+  approval_required: z.boolean(),
   created_at: z.string(),
   ...GROUP_CONFIG_FIELDS,
 });
@@ -61,6 +62,7 @@ export const GroupInput = z.object({
   tts_model: z.string().nullable().default(null),
   telegram_bot_token: z.string().nullable().default(null),
   telegram_chat_id: z.string().nullable().default(null),
+  approval_required: z.boolean().default(false),
 });
 export type GroupInput = z.infer<typeof GroupInput>;
 // Input version (fields with defaults become optional) — for request bodies from the FE.
@@ -81,6 +83,7 @@ export const GroupPatch = z.object({
   tts_model: z.string().nullable().optional(),
   telegram_bot_token: z.string().nullable().optional(),
   telegram_chat_id: z.string().nullable().optional(),
+  approval_required: z.boolean().optional(),
 });
 export type GroupPatch = z.infer<typeof GroupPatch>;
 
@@ -198,6 +201,19 @@ export const GenerateInput = z.object({
   format: Format.optional(),
 });
 export type GenerateInput = z.infer<typeof GenerateInput>;
+
+// ---------- calendar preview ----------
+// One upcoming run: slot sequence from pure rotation + (optional) scheduled fire time
+// from the group's cron expr. scheduled_at null when cron is off or beyond computed fires.
+// ponytail: in-flight queue runs are NOT reflected — rotation advances only after `sent`.
+export const CalendarRun = z.object({
+  scheduled_at: z.string().nullable(),
+  platform: Platform,
+  format: Format,
+  pillar_id: z.string().uuid(),
+  pillar_name: z.string(),
+});
+export type CalendarRun = z.infer<typeof CalendarRun>;
 
 // Template tokens per format — for UI hints + FE validation.
 export const TEMPLATE_TOKENS: Record<TemplateFormat, string[]> = {

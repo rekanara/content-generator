@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Send } from "lucide-react"
+import { Check, Send, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import {
@@ -14,9 +14,12 @@ import { usePosts, usePost } from "@/lib/hooks"
 
 const STATUS_BADGE: Record<string, string> = {
   queued: "bg-blue-500/15 text-blue-500 border-transparent",
+  draft: "bg-muted text-muted-foreground border-transparent",
   rendered: "bg-amber-500/15 text-amber-500 border-transparent",
+  awaiting_approval: "bg-violet-500/15 text-violet-500 border-transparent",
   sent: "bg-emerald-500/15 text-emerald-500 border-transparent",
   failed: "bg-red-500/15 text-red-500 border-transparent",
+  rejected: "bg-zinc-500/15 text-zinc-500 border-transparent",
 }
 
 export function PostsView({ slug }: { slug: string }) {
@@ -42,6 +45,18 @@ export function PostsView({ slug }: { slug: string }) {
               <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(slug, p.id).then(reload)}>
                 <Send className="size-4" />
               </Button>
+            )}
+            {p.status === "awaiting_approval" && (
+              <div className="flex shrink-0 gap-1">
+                <Button variant="ghost" size="icon" aria-label="approve" title="Approve — send now"
+                  onClick={() => api.approve(slug, p.id).then(reload)}>
+                  <Check className="size-4 text-emerald-500" />
+                </Button>
+                <Button variant="ghost" size="icon" aria-label="reject" title="Reject — rotation not consumed"
+                  onClick={() => api.reject(slug, p.id).then(reload)}>
+                  <X className="size-4 text-red-500" />
+                </Button>
+              </div>
             )}
           </div>
         ))}

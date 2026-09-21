@@ -1,12 +1,16 @@
 // Telegram bot: long-polling + command parsing. Regex-based, no framework.
 // Polling uses the bot token env (global). Commands accept an optional group slug:
 //   /gen <slug> <platform> <format> — without a slug = first group.
-import { getUpdates, replyGlobal } from './telegram.ts';
+// Approval-gate callbacks arrive as callback_query updates (inline keyboard buttons):
+//   approve:<postId> / reject:<postId>
+import { getUpdates, replyGlobal, answerCallback } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars } from './repos/rotation.ts';
 import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
+import { rejectPost } from './repos/posts.ts';
+import { addEvent } from './repos/events.ts';
 import { config } from './config.ts';
 import type { Platform, Format } from './state.ts';
 
@@ -42,6 +46,19 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
     return { t: 'gen', slug, platform, format };
   }
   return { t: 'unknown', raw: s };
+}
+
+// ——— approval callback parser (pure, unit-test) ———
+export type Callback =
+  | { t: 'approve'; postId: string }
+  | { t: 'reject'; postId: string };
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function parseCallback(data: string): Callback | null {
+  const m = data.match(/^(approve|reject):([0-9a-f-]{36})$/i);
+  if (!m || !UUID_RE.test(m[2]!)) return null;
+  return { t: m[1]!.toLowerCase() as 'approve' | 'reject', postId: m[2]!.toLowerCase() };
 }
 
 // ——— handler ———
@@ -129,6 +146,15 @@ export async function startBot(): Promise<void> {
       const slugs = (await listGroups()).map((x) => x.slug);
       for (const u of updates) {
         offset = u.update_id + 1;
+
+        // approval-gate inline keyboard buttons
+        if (u.callback_query) {
+          const cb = u.callback_query;
+          await answerCallback(config.telegram.botToken, String(cb.id)).catch(() => {});
+          await handleCallback(String(cb.data ?? ''), String(cb.message?.chat?.id ?? config.telegram.chatId));
+          continue;
+        }
+
         const text = u.message?.text;
         if (!text) continue;
         const cmd = parseCmd(text, slugs);
@@ -142,4 +168,35 @@ export async function startBot(): Promise<void> {
     }
   }
   console.log('[bot] polling stopped');
+}
+
+// Approve/reject from an inline button tap. Group scoping comes from the post row itself.
+async function handleCallback(data: string, chatId: string): Promise<void> {
+  const cb = parseCallback(data);
+  if (!cb) {
+    await replyGlobal(chatId, `Unknown button: ${data}`);
+    return;
+  }
+  const [post] = await sql`select p.id, p.group_id, p.status, g.slug
+    from posts p join groups g on g.id = p.group_id where p.id = ${cb.postId}`;
+  if (!post) {
+    await replyGlobal(chatId, `Post ${cb.postId} not found`);
+    return;
+  }
+  if (cb.t === 'approve') {
+    if (post.status !== 'awaiting_approval') {
+      await replyGlobal(chatId, `Cannot approve #${post.id} — status is ${post.status}`);
+      return;
+    }
+    enqueue({ kind: 'approve', slug: post.slug, postId: post.id });
+    await replyGlobal(chatId, `Approved — #${post.id} delivering…`);
+  } else {
+    const ok = await rejectPost(post.group_id, post.id);
+    if (!ok) {
+      await replyGlobal(chatId, `Cannot reject #${post.id} — status is ${post.status}`);
+      return;
+    }
+    await addEvent(post.id, post.group_id, 'rejected').catch(() => {});
+    await replyGlobal(chatId, `Rejected — #${post.id} · rotation not consumed`);
+  }
 }
