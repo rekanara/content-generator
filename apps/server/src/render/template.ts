@@ -9,6 +9,21 @@ export type SlideHtml = string; // single-slide html, ready for puppeteer
 // A template package: body slides + optional cover/CTA pages (null → body fallback).
 export type TemplateSet = { body: string; first: string | null; last: string | null };
 
+// Manual cover mode: image model blank OR the literal "empty" — the pipeline pauses and
+// asks for a Telegram photo upload instead of generating. Any other value = auto-generate.
+// (a group with no cover part in its template never asks, regardless of this setting)
+export function isManualCoverMode(imageModel: string): boolean {
+  const m = imageModel.trim().toLowerCase();
+  return m === '' || m === 'empty';
+}
+
+// Sniff actual bytes: auto-generated covers are PNG, Telegram photo uploads are JPEG —
+// the data-URI mime must match or some renderers refuse to decode. Default PNG.
+export function imageMime(buf: Buffer): 'image/jpeg' | 'image/png' {
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  return 'image/png';
+}
+
 // Tokens: {{headline}} {{body}} {{image}} {{index}} {{total}} — text values escaped.
 // {{image}} is a data: URI — NOT escaped (base64 has no escapable chars; skipping keeps htmls small).
 const esc = (s: string): string =>
@@ -68,7 +83,7 @@ export function buildSlides(
 ): SlideHtml[] {
   const total = c.slides.length;
   const last = total - 1;
-  const coverUri = coverImage ? `data:image/png;base64,${coverImage.toString('base64')}` : undefined;
+  const coverUri = coverImage ? `data:${imageMime(coverImage)};base64,${coverImage.toString('base64')}` : undefined;
   return c.slides.map((s, i) => {
     const vars = { headline: s.headline, body: s.body, index: String(i + 1), total: String(total) };
     if (i === 0 && coverUri && templates.first) {

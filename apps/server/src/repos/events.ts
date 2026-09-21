@@ -1,7 +1,7 @@
 // post_events audit trail: append-only log per post.
 import { sql } from '../db/pool.ts';
 
-export type PostEvent = 'generated' | 'rendered' | 'awaiting_approval' | 'approved' | 'sent' | 'failed' | 'resent' | 'rejected' | 'rerendered';
+export type PostEvent = 'generated' | 'rendered' | 'awaiting_cover' | 'cover_received' | 'awaiting_approval' | 'approved' | 'sent' | 'failed' | 'resent' | 'rejected' | 'rerendered';
 
 export async function addEvent(postId: string, groupId: string, event: PostEvent, error?: string): Promise<void> {
   await sql`insert into post_events (post_id, group_id, event, error)

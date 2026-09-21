@@ -8,6 +8,7 @@ import { navigate } from "@/lib/router"
 const STATUS_BADGE: Record<string, string> = {
   queued: "bg-blue-500/15 text-blue-500 border-transparent",
   draft: "bg-muted text-muted-foreground border-transparent",
+  awaiting_cover: "bg-cyan-500/15 text-cyan-500 border-transparent",
   rendered: "bg-amber-500/15 text-amber-500 border-transparent",
   awaiting_approval: "bg-violet-500/15 text-violet-500 border-transparent",
   sent: "bg-emerald-500/15 text-emerald-500 border-transparent",

@@ -317,9 +317,21 @@ g.post('/:slug/posts/:id/approve', async (c) => {
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
-// re-render with the current template (same content) — Telegram /rerender parity
-g.post('/:slug/posts/:id/rerender', async (c) => {
+// skip the manual cover ask — render without a cover page (FE parity with the Telegram button)
+g.post('/:slug/posts/:id/skip-cover', async (c) => {
   const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const post = await getPost(gr(c).id, id);
+  if (!post) return c.json({ error: 'post not found' }, 404);
+  if (post.status !== 'awaiting_cover') {
+    return c.json({ error: `post status ${post.status} — nothing to skip` }, 400);
+  }
+  enqueue({ kind: 'coverContinue', slug: gr(c).slug, postId: id, skipCover: true });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+// re-render with the current template (same content) — Telegram /rerender parity
+g.post('/:slug/posts/:id/rerender', async (c) => {  const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const post = await getPost(gr(c).id, id);
   if (!post) return c.json({ error: 'post not found' }, 404);

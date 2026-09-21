@@ -127,7 +127,7 @@ Bot Telegram (polling):
 - **`groups.image_model`** — per-group ONLY, tanpa env fallback (opt-in, beda dari llm/tts/telegram yang env=fallback). Kosong = cover OFF.
 - Urutan render: slide 1 = html_first (hanya jika gambar tersedia), slide 2..n-1 = html, slide terakhir = html_last.
 - Gambar di-generate SEKALI per post via `/images/generations` (gateway sama dengan LLM), disimpan `posts/<id>/cover.png` di MinIO → `/rerender` pakai ulang tanpa bayar ulang.
-- **Fail-safe**: generate gagal → render lanjut tanpa cover (slide 1 pakai body template), post tetap jalan. html_first tanpa gambar = tidak dipakai (tidak ada `<img src="">` kosong).
+- **Fail-safe**: generate gagal → post parkir di `awaiting_cover` + notifikasi Telegram "Generate cover gagal" (dengan teks error) → upload foto manual ATAU tombol "Lewati — render tanpa cover". Skip selalu mengakhiri alur (tidak ada percobaan generate kedua). Post `sent` yang di-rerender tetap fail-safe senyap (tidak parkir — menjaga rotasi dari double-advance). html_first tanpa gambar = tidak dipakai (tidak ada `<img src="">` kosong).
 
 Process management: launchd plist atau pm2 — ops, di luar scope kode.
 

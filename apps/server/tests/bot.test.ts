@@ -88,6 +88,10 @@ test('parseCallback: reject:<uuid>', () => {
   assert.deepEqual(parseCallback(`reject:${UUID}`), { t: 'reject', postId: UUID });
 });
 
+test('parseCallback: skip_cover:<uuid>', () => {
+  assert.deepEqual(parseCallback(`skip_cover:${UUID}`), { t: 'skip_cover', postId: UUID });
+});
+
 test('parseCallback: uppercase uuid → normalized lowercase', () => {
   const c = parseCallback(`APPROVE:${UUID.toUpperCase()}`);
   assert.deepEqual(c, { t: 'approve', postId: UUID });

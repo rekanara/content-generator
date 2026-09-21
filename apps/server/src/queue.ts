@@ -3,7 +3,9 @@
 import { sql } from './db/pool.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
 import type { Slot, Platform, Format } from './state.ts';
-import { renderAndSave } from './render/carousel.ts';
+import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
+import { getTemplateSet, isManualCoverMode } from './render/template.ts';
+import { artifactExists } from './storage.ts';
 import { renderReelsAndSave } from './render/reels.ts';
 import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons } from './telegram.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
@@ -14,7 +16,8 @@ type Job =
   | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
   | { kind: 'resend'; slug: string; postId: string }
   | { kind: 'approve'; slug: string; postId: string }
-  | { kind: 'rerender'; slug: string; postId: string };
+  | { kind: 'rerender'; slug: string; postId: string }
+  | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean };
 
 const jobs: Job[] = [];
 let running = false;
@@ -49,6 +52,7 @@ async function drain(): Promise<void> {
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
+        else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
         else await runResend(cfg, job.postId);
   } catch (e) {
     const msg = (e as Error).message;
@@ -79,12 +83,118 @@ async function runGenerate(
   const r = await generateDraft(cfg, slot, source);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
-    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot);
-    else await deliver(cfg, r.postId, slot, notifyChat);
+    // manual cover (no image model, cover part in template, no stored cover yet):
+    // pause BEFORE render — the cover image must exist before slide 1 can use it.
+    if (await needsManualCover(cfg, r.postId, slot)) {
+      await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft));
+      return;
+    }
+    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot, { coverRequired: true });
+    else await deliver(cfg, r.postId, slot, notifyChat, { coverRequired: true });
   } catch (e) {
+    // cover generation failed with a model configured → same manual flow, but say why
+    if (e instanceof CoverGenerationError) {
+      await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft), e.cause);
+      return;
+    }
     await markFailed(r.postId, e); // status → failed immediately, not just event
     await addEvent(r.postId, cfg.id, 'failed', (e as Error).message).catch(() => {});
     await notifyRunFailed(cfg, e); // silent failures are the daemon's #1 operational risk
+    throw e;
+  }
+}
+
+// Park the post at awaiting_cover + ask Telegram for the image (skip button included).
+// Two triggers: manual mode (blank/'empty' image model) or generation failure (genError).
+// Status guard covers draft (fresh generate) and rendered/awaiting_approval (rerender path
+// — renderAndSave throws BEFORE touching status, so the pre-rerender status is still there).
+// Ask message is best-effort: the post is status-driven — uploading a photo works
+// even if this message flakes (handlePhoto finds any awaiting_cover post).
+async function parkAwaitingCover(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  topic: string,
+  slot: Slot,
+  firstHeadline: string,
+  genError?: Error,
+): Promise<void> {
+  const upd = await sql`update posts set status = 'awaiting_cover'
+    where id = ${postId} and group_id = ${cfg.id}
+    and status in ('draft','rendered','awaiting_approval') returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} not in a cover-pausable state`);
+  await addEvent(postId, cfg.id, 'awaiting_cover');
+  console.log(`[queue] post #${postId} awaiting cover image (${cfg.slug})${genError ? ' — generation failed' : ''}`);
+  try {
+    const lines = genError
+      ? [
+          `Generate cover gagal — ${cfg.slug}`,
+          `Topik: ${topic}`,
+          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          `Error: ${genError.message.slice(0, 200)}`,
+          '',
+          'Kalau tetap mau gambar cover, upload fotonya langsung di chat ini —',
+          'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
+        ]
+      : [
+          `Cover image dibutuhkan — ${cfg.slug}`,
+          `Topik: ${topic}`,
+          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          '',
+          'Sudah menyiapkan gambar cover? Upload fotonya langsung di chat ini —',
+          'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
+        ];
+    await withRetry(() => sendMessageWithButtons(cfg, lines.join('\n'), [
+      [{ text: 'Lewati — render tanpa cover', callback_data: `skip_cover:${postId}` }],
+    ]));
+  } catch (e) {
+    console.warn(`[queue] cover request not delivered (${cfg.slug}): ${(e as Error).message}`);
+  }
+}
+
+// Manual cover needed: carousel/pdf format + cover part in the active template
+// + manual mode (blank/'empty' image model) + no stored cover yet.
+async function needsManualCover(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  slot: Slot,
+): Promise<boolean> {
+  if (slot.format !== 'carousel' && slot.format !== 'pdf') return false;
+  if (!isManualCoverMode(cfg.image.model)) return false;
+  const set = await getTemplateSet('carousel', slot.platform, cfg.id);
+  if (!set.first) return false; // no cover page in the template → nothing to ask for
+  return !(await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
+}
+
+function firstHeadline(draft: CarouselOut | ReelsOut | TextOut): string {
+  return 'slides' in draft ? (draft.slides[0]?.headline ?? '') : '';
+}
+
+// Resume after cover received (photo saved to MinIO by bot) or skipped:
+// back to draft → render (getCover reuses the uploaded cover.png; skip = never generate)
+// → gate/deliver. skipCover=true comes from the "Lewati" button — it MUST terminate the
+// cover flow (no second generation attempt → no park loop).
+async function runCoverContinue(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string, skipCover: boolean): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; body: string }[]>`select platform, format, pillar_id, status, topic, body
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  if (post.status !== 'awaiting_cover') {
+    throw new Error(`post ${postId} status ${post.status} — no cover to continue`);
+  }
+  const upd = await sql`update posts set status = 'draft'
+    where id = ${postId} and group_id = ${cfg.id} and status = 'awaiting_cover' returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} left awaiting_cover concurrently`);
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  try {
+    const resumeOpts = skipCover ? { skipCover: true } : { coverRequired: true };
+    if (cfg.approval_required) await prepareForApproval(cfg, postId, slot, resumeOpts);
+    else await deliver(cfg, postId, slot, true, resumeOpts);
+  } catch (e) {
+    // model was (re)configured between ask and resume → generation can fail here too
+    // (never on the skip path — skipCover never reaches generateImage)
+    if (e instanceof CoverGenerationError) {
+      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut), e.cause);
+      return;
+    }
     throw e;
   }
 }
@@ -96,6 +206,7 @@ async function prepareForApproval(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   postId: string,
   slot: Slot,
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean } = {},
 ): Promise<void> {
   const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; status: string }[]>`select platform, format, topic, caption, body, status, artifact_prefix
     from posts where id = ${postId} and group_id = ${cfg.id}`;
@@ -104,7 +215,7 @@ async function prepareForApproval(
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
-      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg);
+      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg, coverOpts);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }
@@ -151,7 +262,7 @@ async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: 
   }
   const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
   await addEvent(postId, cfg.id, 'approved');
-  await deliver(cfg, postId, slot, true);
+  await deliver(cfg, postId, slot, true); // artifacts exist — no cover path
 }
 
 // Re-render an EXISTING post's body with the CURRENT template (content unchanged —
@@ -171,10 +282,21 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
   if (post.format === 'text') throw new Error('text format has no visual template — nothing to re-render');
 
   console.log(`[queue] rerender #${postId} (${cfg.slug}, was ${wasStatus}) with current template`);
-  if (post.format === 'reels') {
-    await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
-  } else {
-    await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg);
+  try {
+    if (post.format === 'reels') {
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+    } else {
+      // sent posts fail-safe on cover failure (parking a delivered post + re-approving would
+      // double-advance rotation); awaiting/rendered posts park for the manual decision.
+      await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg, { coverRequired: wasStatus !== 'sent' });
+    }
+  } catch (e) {
+    if (e instanceof CoverGenerationError) {
+      const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut), e.cause);
+      return;
+    }
+    throw e;
   }
   await addEvent(postId, cfg.id, 'rerendered');
 
@@ -224,6 +346,7 @@ async function deliver(
   postId: string,
   slot: Slot,
   notifyChat: boolean,
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean } = {},
 ): Promise<void> {
   const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
     from posts where id = ${postId} and group_id = ${cfg.id}`;
@@ -236,7 +359,7 @@ async function deliver(
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
       const draft = JSON.parse(post.body) as CarouselOut;
-      await renderAndSave(postId, slot.platform, draft, cfg);
+      await renderAndSave(postId, slot.platform, draft, cfg, coverOpts);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }

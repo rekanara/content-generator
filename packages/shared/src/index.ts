@@ -15,7 +15,7 @@ export type Format = z.infer<typeof Format>;
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
-export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_approval', 'sent', 'failed', 'rejected']);
+export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_cover', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
 // ---------- groups (multi-account) ----------

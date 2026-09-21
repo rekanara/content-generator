@@ -74,6 +74,7 @@ export const api = {
   approve: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/approve`, { method: 'POST' }),
   reject: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/reject`, { method: 'POST' }),
   rerender: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/rerender`, { method: 'POST' }),
+  skipCover: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/skip-cover`, { method: 'POST' }),
   calendar: (slug: string, n = 7) => req<CalendarRun[]>(`${g(slug)}/calendar?n=${n}`),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),

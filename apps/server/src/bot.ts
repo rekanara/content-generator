@@ -3,9 +3,11 @@
 //   /gen <slug> <platform> <format> — without a slug = first group.
 // Approval-gate callbacks arrive as callback_query updates (inline keyboard buttons):
 //   approve:<postId> / reject:<postId>
-import { getUpdates, replyGlobal, answerCallback, registerCommands } from './telegram.ts';
+import { getUpdates, replyGlobal, answerCallback, registerCommands, downloadTelegramFile } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
 import { sql } from './db/pool.ts';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { uploadPostArtifact } from './storage.ts';
 import { getRotation, getActivePillars } from './repos/rotation.ts';
 import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
@@ -56,14 +58,15 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
 // ——— approval callback parser (pure, unit-test) ———
 export type Callback =
   | { t: 'approve'; postId: string }
-  | { t: 'reject'; postId: string };
+  | { t: 'reject'; postId: string }
+  | { t: 'skip_cover'; postId: string };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseCallback(data: string): Callback | null {
-  const m = data.match(/^(approve|reject):([0-9a-f-]{36})$/i);
+  const m = data.match(/^(approve|reject|skip_cover):([0-9a-f-]{36})$/i);
   if (!m || !UUID_RE.test(m[2]!)) return null;
-  return { t: m[1]!.toLowerCase() as 'approve' | 'reject', postId: m[2]!.toLowerCase() };
+  return { t: m[1]!.toLowerCase() as 'approve' | 'reject' | 'skip_cover', postId: m[2]!.toLowerCase() };
 }
 
 // ——— handler ———
@@ -180,7 +183,14 @@ export async function startBot(): Promise<void> {
           }
 
           const text = u.message?.text;
-          if (!text) continue;
+          if (!text) {
+            // photo upload = manual cover image (when a post awaits one)
+            const photo = u.message?.photo;
+            if (Array.isArray(photo) && photo.length > 0) {
+              await handlePhoto(String(u.message?.chat?.id ?? config.telegram.chatId), photo);
+            }
+            continue;
+          }
           const cmd = parseCmd(text, slugs);
           const reply = await handleCmd(cmd);
           // reply via the global bot (env token) to the chat the command came from
@@ -197,7 +207,7 @@ export async function startBot(): Promise<void> {
   console.log('[bot] polling stopped');
 }
 
-// Approve/reject from an inline button tap. Group scoping comes from the post row itself.
+// Approve/reject/skip-cover from an inline button tap. Group scoping comes from the post row itself.
 async function handleCallback(data: string, chatId: string): Promise<void> {
   const cb = parseCallback(data);
   if (!cb) {
@@ -217,6 +227,13 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     }
     enqueue({ kind: 'approve', slug: post.slug, postId: post.id });
     await replyGlobal(chatId, `Approved — #${post.id} delivering…`);
+  } else if (cb.t === 'skip_cover') {
+    if (post.status !== 'awaiting_cover') {
+      await replyGlobal(chatId, `Cannot skip cover #${post.id} — status is ${post.status}`);
+      return;
+    }
+    enqueue({ kind: 'coverContinue', slug: post.slug, postId: post.id, skipCover: true });
+    await replyGlobal(chatId, `Cover dilewati — #${post.id} rendering tanpa cover…`);
   } else {
     const ok = await rejectPost(post.group_id, post.id);
     if (!ok) {
@@ -226,4 +243,32 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     await addEvent(post.id, post.group_id, 'rejected').catch(() => {});
     await replyGlobal(chatId, `Rejected — #${post.id} · rotation not consumed`);
   }
+}
+
+// Manual cover: photo upload in the chat → download (largest size) → MinIO cover.png
+// → resume the pipeline (render + gate/deliver). Status-driven: matches the latest
+// awaiting_cover post. ponytail: photo replies scoped to a specific ask-message when
+// multiple groups ever wait at once.
+async function handlePhoto(chatId: string, photo: { file_id: string; width: number; height: number }[]): Promise<void> {
+  const best = [...photo].sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
+  const [row] = await sql<{ id: string; group_id: string; slug: string; topic: string }[]>`
+    select p.id, p.group_id, g.slug, p.topic from posts p join groups g on g.id = p.group_id
+    where p.status = 'awaiting_cover' order by p.created_at desc limit 1`;
+  if (!row) {
+    await replyGlobal(chatId, 'Tidak ada post yang menunggu cover — foto diabaikan.');
+    return;
+  }
+  const buf = await downloadTelegramFile(config.telegram.botToken, best.file_id);
+  const dir = `out/${row.id}`;
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${dir}/cover.png`;
+  writeFileSync(tmp, buf);
+  await uploadPostArtifact(row.slug, row.id, tmp, 'cover.png');
+  await addEvent(row.id, row.group_id, 'cover_received').catch(() => {});
+  console.log(`[bot] cover photo received → ${row.slug}/posts/${row.id}/cover.png (${buf.length}B)`);
+  enqueue({ kind: 'coverContinue', slug: row.slug, postId: row.id });
+  await replyGlobal(chatId, [
+    `Cover diterima (${Math.round(buf.length / 1024)}KB) — "${String(row.topic).slice(0, 60)}"`,
+    'Disimpan ke MinIO, rendering…',
+  ].join('\n'));
 }

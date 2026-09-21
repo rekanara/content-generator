@@ -1,7 +1,7 @@
-// Pure render-template logic: buildSlides package sequencing (body/cover/CTA) + imagePrompt.
+// Pure render-template logic: buildSlides package sequencing (body/cover/CTA) + cover policy.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSlides } from '../src/render/template.ts';
+import { buildSlides, isManualCoverMode, imageMime } from '../src/render/template.ts';
 import { imagePrompt } from '../src/prompts.ts';
 import type { CarouselOut } from '../src/schema.ts';
 
@@ -59,4 +59,31 @@ test('imagePrompt: mentions headline, forbids text, deterministic', () => {
   assert.equal(p1, p2);
   assert.ok(p1.includes('"Refactor"'));
   assert.ok(/no text/i.test(p1));
+});
+
+// ---------- cover policy (pure) ----------
+
+test('isManualCoverMode: blank/empty → manual (ask for Telegram upload)', () => {
+  assert.equal(isManualCoverMode(''), true);
+  assert.equal(isManualCoverMode('   '), true);
+  assert.equal(isManualCoverMode('empty'), true);
+  assert.equal(isManualCoverMode('EMPTY'), true);
+  assert.equal(isManualCoverMode(' Empty '), true);
+});
+
+test('isManualCoverMode: model name → auto-generate', () => {
+  assert.equal(isManualCoverMode('dall-e-3'), false);
+  assert.equal(isManualCoverMode('openrouter/google/gemini-2.5-flash-image'), false);
+});
+
+test('imageMime: JPEG magic (Telegram photos) vs everything-else → PNG', () => {
+  assert.equal(imageMime(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00])), 'image/jpeg');
+  assert.equal(imageMime(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d])), 'image/png'); // PNG magic
+  assert.equal(imageMime(Buffer.from('ab')), 'image/png'); // unknown → png default
+});
+
+test('buildSlides: JPEG cover gets the correct data-URI mime', () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+  const htmls = buildSlides(T, DRAFT, jpeg);
+  assert.ok(htmls[0]!.startsWith('<body>FIRST data:image/jpeg;base64,'));
 });

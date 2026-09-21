@@ -70,6 +70,23 @@ export async function sendMessageWithButtons(
   });
 }
 
+// Download a file the bot received (manual cover photos). Global env token —
+// the photo arrived on the polled bot, so getFile must use the same token.
+// Telegram file downloads are capped at 20MB by the API — photos are well under.
+export async function downloadTelegramFile(token: string, fileId: string): Promise<Buffer> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${fileId}`, {
+    signal: AbortSignal.timeout(30_000),
+  });
+  const j = await mustOk(res, 'getFile');
+  const filePath: unknown = j?.result?.file_path;
+  if (typeof filePath !== 'string' || filePath.length === 0) throw new Error('telegram getFile: no file_path');
+  const dl = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`, {
+    signal: AbortSignal.timeout(60_000),
+  });
+  if (!dl.ok) throw new Error(`telegram file download ${dl.status}`);
+  return Buffer.from(await dl.arrayBuffer());
+}
+
 // Answer a callback query (stops the button spinner in the client) — env token, bot polling side.
 export async function answerCallback(token: string, callbackQueryId: string): Promise<void> {
   const res = await fetch(`https://api.telegram.org/bot${token}/answerCallbackQuery`, {

@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ArrowLeft, Check, Download, RefreshCw, Send, X } from "lucide-react"
+import { ArrowLeft, Check, Download, ImageOff, RefreshCw, Send, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -10,6 +10,7 @@ import { navigate } from "@/lib/router"
 const STATUS_BADGE: Record<string, string> = {
   queued: "bg-blue-500/15 text-blue-500 border-transparent",
   draft: "bg-muted text-muted-foreground border-transparent",
+  awaiting_cover: "bg-cyan-500/15 text-cyan-500 border-transparent",
   rendered: "bg-amber-500/15 text-amber-500 border-transparent",
   awaiting_approval: "bg-violet-500/15 text-violet-500 border-transparent",
   sent: "bg-emerald-500/15 text-emerald-500 border-transparent",
@@ -20,6 +21,8 @@ const STATUS_BADGE: Record<string, string> = {
 const EVENT_BADGE: Record<string, string> = {
   generated: "bg-blue-500/15 text-blue-500 border-transparent",
   rendered: "bg-amber-500/15 text-amber-500 border-transparent",
+  awaiting_cover: "bg-cyan-500/15 text-cyan-500 border-transparent",
+  cover_received: "bg-cyan-500/15 text-cyan-500 border-transparent",
   awaiting_approval: "bg-violet-500/15 text-violet-500 border-transparent",
   approved: "bg-violet-500/15 text-violet-500 border-transparent",
   sent: "bg-emerald-500/15 text-emerald-500 border-transparent",
@@ -72,6 +75,16 @@ export function PostDetailView({ slug, id }: { slug: string; id: string }) {
       </p>
 
       <section className="flex flex-wrap gap-2">
+        {data.status === "awaiting_cover" && (
+          <p className="w-full rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+            Waiting for a cover image — upload a photo in the Telegram chat, or skip:
+          </p>
+        )}
+        {data.status === "awaiting_cover" && (
+          <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.skipCover(slug, id), "skip cover")}>
+            <ImageOff className="size-4" /> Skip cover — render now
+          </Button>
+        )}
         {data.status === "awaiting_approval" && (
           <>
             <Button size="sm" disabled={busy} onClick={() => act(() => api.approve(slug, id), "approve")}>
