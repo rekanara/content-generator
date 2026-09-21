@@ -10,17 +10,17 @@ import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
   getGroupOwner, saveCron,
 } from './groups.ts';
-import { listPillars, createPillar, togglePillar, deletePillar } from './repos/pillars.ts';
+import { listPillars, createPillar, togglePillar, deletePillar, updatePillar } from './repos/pillars.ts';
 import { listPosts, getPost, rejectPost } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
-import { listStyles, createStyle, deleteStyle } from './repos/styles.ts';
-import { listTemplates, createTemplate, activateTemplate, deleteTemplate } from './repos/templates.ts';
+import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
+import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
   touchSession, destroySession, revokeUserSessions, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
@@ -205,7 +205,12 @@ g.get('/:slug/pillars', async (c) => c.json(await listPillars(gr(c).id)));
 g.post('/:slug/pillars', async (c) => {
   const parsed = PillarInput.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  await createPillar(gr(c).id, parsed.data);
+  try {
+    await createPillar(gr(c).id, parsed.data);
+  } catch (e) {
+    if ((e as { code?: string }).code === '23505') return c.json({ error: 'pillar name already exists in this group' }, 400);
+    throw e; // infra errors stay 500s
+  }
   return c.json({ ok: true }, 201);
 });
 
@@ -221,6 +226,22 @@ g.delete('/:slug/pillars/:id', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await deletePillar(gr(c).id, id);
   return c.json({ ok: true });
+});
+
+g.patch('/:slug/pillars/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = PillarEdit.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  let ok: boolean;
+  try {
+    ok = await updatePillar(gr(c).id, id, parsed.data);
+  } catch (e) {
+    if ((e as { code?: string }).code === '23505') return c.json({ error: 'pillar name already exists in this group' }, 400);
+    throw e; // infra errors stay 500s
+  }
+  if (!ok) return c.json({ error: 'pillar not found' }, 404);
+  return c.json(await listPillars(gr(c).id));
 });
 
 // ---------- cron (per group) ----------
@@ -326,6 +347,16 @@ g.delete('/:slug/styles/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+g.patch('/:slug/styles/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = StyleEdit.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ok = await updateStyle(gr(c).id, id, parsed.data);
+  if (!ok) return c.json({ error: 'style not found' }, 404);
+  return c.json({ ok: true });
+});
+
 // ---------- templates ----------
 g.get('/:slug/templates', async (c) => c.json(await listTemplates(gr(c).id)));
 
@@ -334,6 +365,24 @@ g.post('/:slug/templates', async (c) => {
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   await createTemplate(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
+});
+
+g.get('/:slug/templates/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const t = await getTemplate(gr(c).id, id);
+  if (!t) return c.json({ error: 'template not found' }, 404);
+  return c.json(t);
+});
+
+g.patch('/:slug/templates/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = TemplateEdit.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ok = await updateTemplate(gr(c).id, id, parsed.data);
+  if (!ok) return c.json({ error: 'template not found' }, 404);
+  return c.json({ ok: true });
 });
 
 g.post('/:slug/templates/:id/activate', async (c) => {

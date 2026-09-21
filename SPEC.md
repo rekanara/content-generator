@@ -170,14 +170,13 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | GET/POST | /api/groups | daftar / buat (admin) |
 | PATCH/DELETE | /api/groups/:slug | ubah / hapus (admin, owner check) |
 | GET | /api/g/:slug/dashboard | cron + queue + rotation + next_slot + 10 post terakhir |
-| GET/POST | /api/g/:slug/pillars, /:id/toggle, DELETE /:id | CRUD pilar |
+| GET/POST | /api/g/:slug/pillars, /:id/toggle, PATCH /:id, DELETE /:id | CRUD pilar (edit = full-field: name, description, is_news, sort_order) |
 | GET/POST | /api/g/:slug/cron | status / simpan expr+enabled |
-| GET | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail / kirim ulang |
+| GET/POST | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail / kirim ulang |
 | POST | /api/g/:slug/posts/:id/approve, /:id/reject | approval gate (approve via queue; reject langsung + status guard) |
 | GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
-| POST | /api/g/:slug/gen | generate manual (platform/format optional) |
-| GET/POST/DELETE | /api/g/:slug/styles[/:id] | CRUD style samples |
-| GET/POST/DELETE | /api/g/:slug/templates[/:id], /:id/activate | CRUD + aktivasi template |
+| GET/POST | /api/g/:slug/styles, PATCH/DELETE /:id | CRUD style samples (edit = title, body, platform) |
+| GET/POST | /api/g/:slug/templates, GET/PATCH/DELETE /:id, /:id/activate | CRUD + aktivasi template (detail termasuk html; edit = name + html, format immutable) |
 
 Error contract: 400 `{error, issues?}` (zod), 401 unauthenticated, 404 `{error}` (unknown resource / group tak terlihat user), 500 default Hono. Group tak terlihat = 404 (bukan 403) — tidak bocor keberadaan group.
 

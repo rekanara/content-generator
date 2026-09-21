@@ -1,6 +1,6 @@
 // Template repository (group-scoped). 1 active per format — deactivate siblings first.
 import { sql } from '../db/pool.ts';
-import type { Template, TemplateFormat } from '@workspace/shared';
+import type { Template, TemplateDetail, TemplateFormat } from '@workspace/shared';
 
 export async function listTemplates(groupId: string, limit = 50): Promise<Template[]> {
   const rows = await sql`select id, name, format, is_active, updated_at
@@ -9,6 +9,16 @@ export async function listTemplates(groupId: string, limit = 50): Promise<Templa
     id: t.id as string, name: t.name as string, format: t.format as TemplateFormat,
     is_active: t.is_active as boolean, updated_at: t.updated_at as string,
   }));
+}
+
+export async function getTemplate(groupId: string, id: string): Promise<TemplateDetail | null> {
+  const [t] = await sql`select id, name, format, is_active, updated_at, html
+    from templates where id = ${id} and group_id = ${groupId}`;
+  if (!t) return null;
+  return {
+    id: t.id as string, name: t.name as string, format: t.format as TemplateFormat,
+    is_active: t.is_active as boolean, updated_at: t.updated_at as string, html: t.html as string,
+  };
 }
 
 export async function createTemplate(groupId: string, d: { name: string; format: string; html: string; is_active: boolean }): Promise<void> {
@@ -28,4 +38,12 @@ export async function activateTemplate(groupId: string, id: string): Promise<voi
 
 export async function deleteTemplate(groupId: string, id: string): Promise<void> {
   await sql`delete from templates where id = ${id} and group_id = ${groupId}`;
+}
+
+// Edit name + html (format immutable — see shared TemplateEdit). False when not found → API 404.
+export async function updateTemplate(groupId: string, id: string, d: { name: string; html: string }): Promise<boolean> {
+  const r = await sql`update templates set
+    name = ${d.name}, html = ${d.html}, updated_at = now()
+    where id = ${id} and group_id = ${groupId} returning id`;
+  return r.length > 0;
 }

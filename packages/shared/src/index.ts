@@ -106,6 +106,10 @@ export const PillarInput = z.object({
 });
 export type PillarInput = z.infer<typeof PillarInput>;
 
+// Full-field edit (FE edit form sends every field — no partial semantics to trip on).
+export const PillarEdit = PillarInput;
+export type PillarEdit = z.infer<typeof PillarEdit>;
+
 export const CronSettings = z.object({
   expr: z.string(),
   enabled: z.boolean(),
@@ -154,6 +158,10 @@ export const StyleInput = z.object({
 });
 export type StyleInput = z.infer<typeof StyleInput>;
 
+// Full-field edit. platform null = "all platforms" (NOT "skip this field").
+export const StyleEdit = StyleInput;
+export type StyleEdit = z.infer<typeof StyleEdit>;
+
 export const Template = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -163,6 +171,10 @@ export const Template = z.object({
 });
 export type Template = z.infer<typeof Template>;
 
+// Detail view incl. HTML (list excludes it — payloads stay small).
+export const TemplateDetail = Template.extend({ html: z.string() });
+export type TemplateDetail = z.infer<typeof TemplateDetail>;
+
 export const TemplateInput = z.object({
   name: z.string().min(1),
   format: TemplateFormat,
@@ -170,6 +182,14 @@ export const TemplateInput = z.object({
   is_active: z.boolean().default(false),
 });
 export type TemplateInput = z.infer<typeof TemplateInput>;
+
+// Edit: name + html only. format is immutable (one-active-per-format constraint
+// would need deactivating juggling — delete + recreate instead); is_active via activate.
+export const TemplateEdit = z.object({
+  name: z.string().min(1),
+  html: z.string().min(1),
+});
+export type TemplateEdit = z.infer<typeof TemplateEdit>;
 
 export const RotationView = z.object({
   last_platform: z.string(),

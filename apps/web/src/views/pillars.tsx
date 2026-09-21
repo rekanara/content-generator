@@ -1,13 +1,17 @@
 import { useState } from "react"
-import { Trash2 } from "lucide-react"
+import { Pencil, Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import { Checkbox } from "@workspace/ui/components/checkbox"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@workspace/ui/components/dialog"
 import { api, ApiError } from "@/lib/api"
 import { usePillars, useCron } from "@/lib/hooks"
+import type { Pillar } from "@workspace/shared"
 
 export function PillarsView({ slug }: { slug: string }) {
   const { data: pillars, error, loading, reload } = usePillars(slug)
@@ -15,6 +19,7 @@ export function PillarsView({ slug }: { slug: string }) {
   const [form, setForm] = useState({ name: "", description: "", is_news: false, sort_order: 0 })
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [editing, setEditing] = useState<Pillar | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -88,6 +93,9 @@ export function PillarsView({ slug }: { slug: string }) {
               <p className="truncate text-xs text-muted-foreground">{p.description}</p>
             </div>
             <span className="text-xs text-muted-foreground">#{p.sort_order}</span>
+            <Button variant="ghost" size="icon" aria-label="edit" onClick={() => setEditing(p)}>
+              <Pencil className="size-4" />
+            </Button>
             <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delPillar(slug, p.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
@@ -95,7 +103,78 @@ export function PillarsView({ slug }: { slug: string }) {
         ))}
         {pillars?.length === 0 && <p className="p-4 text-sm text-muted-foreground">no pillars yet</p>}
       </div>
+
+      {editing && (
+        <EditPillarDialog
+          slug={slug}
+          pillar={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); reload() }}
+        />
+      )}
     </div>
+  )
+}
+
+function EditPillarDialog({ slug, pillar, onClose, onSaved }: {
+  slug: string; pillar: Pillar; onClose: () => void; onSaved: () => void
+}) {
+  const [form, setForm] = useState({
+    name: pillar.name, description: pillar.description,
+    is_news: pillar.is_news, sort_order: pillar.sort_order,
+  })
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true); setErr(null)
+    try {
+      await api.patchPillar(slug, pillar.id, form)
+      onSaved()
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "failed to save")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit pillar</DialogTitle>
+          <DialogDescription>{pillar.active ? "active" : "inactive"} · rotation order follows creation time, not the order field</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={save} className="grid gap-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-name">Pillar name</Label>
+            <Input id="edit-name" required value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-desc">Description</Label>
+            <Input id="edit-desc" required value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          </div>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="edit-news">News pillar (needs RSS)</Label>
+            <Checkbox id="edit-news" checked={form.is_news}
+              onCheckedChange={(c) => setForm({ ...form, is_news: c === true })} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-order">Order (display only)</Label>
+            <Input id="edit-order" type="number" value={form.sort_order}
+              onChange={(e) => setForm({ ...form, sort_order: Number(e.target.value) })} />
+          </div>
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={busy}>{busy ? "saving…" : "Save"}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

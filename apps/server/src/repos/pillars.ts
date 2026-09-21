@@ -23,3 +23,11 @@ export async function togglePillar(groupId: string, id: string): Promise<void> {
 export async function deletePillar(groupId: string, id: string): Promise<void> {
   await sql`delete from pillars where id = ${id} and group_id = ${groupId}`;
 }
+
+// Full-field update. Returns false when the (id, group) pair doesn't match → API 404.
+export async function updatePillar(groupId: string, id: string, d: { name: string; description: string; is_news: boolean; sort_order: number }): Promise<boolean> {
+  const r = await sql`update pillars set
+    name = ${d.name}, description = ${d.description}, is_news = ${d.is_news}, sort_order = ${d.sort_order}
+    where id = ${id} and group_id = ${groupId} returning id`;
+  return r.length > 0;
+}

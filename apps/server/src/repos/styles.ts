@@ -19,3 +19,11 @@ export async function createStyle(groupId: string, d: { title: string; body: str
 export async function deleteStyle(groupId: string, id: string): Promise<void> {
   await sql`delete from style_samples where id = ${id} and group_id = ${groupId}`;
 }
+
+// Full-field update (platform null = all platforms). Returns false when not found → API 404.
+export async function updateStyle(groupId: string, id: string, d: { title: string; body: string; platform: string | null }): Promise<boolean> {
+  const r = await sql`update style_samples set
+    title = ${d.title}, body = ${d.body}, platform = ${d.platform}
+    where id = ${id} and group_id = ${groupId} returning id`;
+  return r.length > 0;
+}

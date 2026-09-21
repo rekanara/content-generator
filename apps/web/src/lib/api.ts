@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -60,6 +60,8 @@ export const api = {
     req<{ ok: true }>(`${g(slug)}/pillars`, { method: 'POST', body: JSON.stringify(p) }),
   togglePillar: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/pillars/${id}/toggle`, { method: 'POST' }),
   delPillar: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/pillars/${id}`, { method: 'DELETE' }),
+  patchPillar: (slug: string, id: string, p: { name: string; description: string; is_news: boolean; sort_order: number }) =>
+    req<Pillar[]>(`${g(slug)}/pillars/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
   cron: (slug: string) => req<CronSettings>(`${g(slug)}/cron`),
   saveCron: (slug: string, expr: string, enabled: boolean) =>
     req<CronSettings>(`${g(slug)}/cron`, { method: 'POST', body: JSON.stringify({ expr, enabled }) }),
@@ -75,7 +77,12 @@ export const api = {
   addStyle: (slug: string, s: { title: string; body: string; platform?: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/styles`, { method: 'POST', body: JSON.stringify(s) }),
   delStyle: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'DELETE' }),
+  patchStyle: (slug: string, id: string, s: { title: string; body: string; platform: string | null }) =>
+    req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'PATCH', body: JSON.stringify(s) }),
   templates: (slug: string) => req<Template[]>(`${g(slug)}/templates`),
+  template: (slug: string, id: string) => req<TemplateDetail>(`${g(slug)}/templates/${id}`),
+  patchTemplate: (slug: string, id: string, t: { name: string; html: string }) =>
+    req<{ ok: true }>(`${g(slug)}/templates/${id}`, { method: 'PATCH', body: JSON.stringify(t) }),
   addTemplate: (slug: string, t: { name: string; format: string; html: string; is_active?: boolean }) =>
     req<{ ok: true }>(`${g(slug)}/templates`, { method: 'POST', body: JSON.stringify(t) }),
   activateTemplate: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/templates/${id}/activate`, { method: 'POST' }),
