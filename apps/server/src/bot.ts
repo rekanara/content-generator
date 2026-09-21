@@ -3,7 +3,7 @@
 //   /gen <slug> <platform> <format> — without a slug = first group.
 // Approval-gate callbacks arrive as callback_query updates (inline keyboard buttons):
 //   approve:<postId> / reject:<postId>
-import { getUpdates, replyGlobal, answerCallback } from './telegram.ts';
+import { getUpdates, replyGlobal, answerCallback, registerCommands } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars } from './repos/rotation.ts';
@@ -160,6 +160,8 @@ export async function startBot(): Promise<void> {
     return;
   }
   console.log('[bot] polling started');
+  await registerCommands(config.telegram.botToken).catch((e) =>
+    console.warn(`[bot] command menu registration failed: ${(e as Error).message}`));
   while (!stopped) {
     try {
       const updates = await getUpdates(config.telegram.botToken, offset);

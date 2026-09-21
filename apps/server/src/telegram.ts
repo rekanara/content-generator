@@ -81,6 +81,25 @@ export async function answerCallback(token: string, callbackQueryId: string): Pr
   await mustOk(res, 'answerCallbackQuery');
 }
 
+// Register the "/" command menu (the blue menu button in the chat UI). Idempotent —
+// call at boot; Telegram stores it per-bot. Best-effort: failure never blocks polling.
+export async function registerCommands(token: string): Promise<void> {
+  const res = await fetch(`https://api.telegram.org/bot${token}/setMyCommands`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      commands: [
+        { command: 'gen', description: 'Generate the next post (natural rotation)' },
+        { command: 'rerender', description: 'Re-render latest post with current template' },
+        { command: 'status', description: 'Schedule, rotation, latest post' },
+        { command: 'help', description: 'All commands' },
+      ],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  await mustOk(res, 'setMyCommands');
+}
+
 // Reply to a specific chat via env token (used by bot polling to reply to the chat the command came from).
 export async function replyGlobal(chatId: string, text: string): Promise<void> {
   const token = (await import('./config.ts')).config.telegram.botToken;

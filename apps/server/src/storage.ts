@@ -41,3 +41,15 @@ export async function statArtifact(key: string): Promise<number> {
   const info = await client.statObject(config.minio.bucket, key);
   return info.size;
 }
+
+export async function artifactExists(key: string): Promise<boolean> {
+  return statArtifact(key).then(() => true, () => false);
+}
+
+// Full read (cover image reuse on rerender — small files, buffer is fine).
+export async function getArtifactBuffer(key: string): Promise<Buffer> {
+  const stream = await getArtifactStream(key);
+  const chunks: Buffer[] = [];
+  for await (const c of stream) chunks.push(c as Buffer);
+  return Buffer.concat(chunks);
+}

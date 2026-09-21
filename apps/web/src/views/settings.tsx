@@ -18,6 +18,7 @@ const LLM_FIELDS: Field[] = [
   { key: "llm_api_key", label: "API Key", ph: "sk-…", secret: true },
   { key: "llm_model", label: "Model", ph: "gpt-4o-mini" },
   { key: "llm_model_critic", label: "Critic Model", ph: "gpt-4o" },
+  { key: "image_model", label: "Image Model", ph: "empty = cover pages off" },
 ]
 const TTS_FIELDS: Field[] = [
   { key: "tts_provider", label: "Provider", ph: "edge | openai" },

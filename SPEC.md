@@ -119,6 +119,15 @@ Bot Telegram (polling):
 - `/gen [group] [platform] [format]` — tanpa group = group pertama; tanpa format → ikut rotasi.
 - `/status [group]` — jadwal, cron aktif?, posisi rotasi, post terakhir.
 - `/rerender [group]` — re-render post TERAKHIR dengan template saat ini (konten sama, tanpa LLM). Status `sent` → kirim ulang artefak baru (rotasi tak disentuh); `awaiting_approval` → awaiting + tombol approval baru (rotasi tetap menunggu approve); `rendered` → ikut gerbang approval (gate on → awaiting+tombol; gate off → deliver + rotasi maju — first send). Paritas FE: tombol rerender di Posts tab + `POST /api/g/:slug/posts/:id/rerender`.
+- Menu command bot ter-register otomatis saat boot (`setMyCommands`): /gen, /rerender, /status, /help — muncul sebagai tombol menu "/" di chat.
+
+### Cover image (halaman pertama carousel/PDF)
+
+- **Template kind** (`templates.kind`): `body` (slide tengah) | `first` (cover, token `{{image}}`) | `last` (CTA). 1 aktif per (group, format, kind). Reels TIDAK pakai first/last (scene-based, query render difilter `kind='body'`).
+- **`groups.image_model`** — per-group ONLY, tanpa env fallback (opt-in, beda dari llm/tts/telegram yang env=fallback). Kosong = cover OFF.
+- Urutan render: slide 1 = first template (hanya jika gambar tersedia), slide 2..n-1 = body, slide terakhir = last.
+- Gambar di-generate SEKALI per post via `/images/generations` (gateway sama dengan LLM), disimpan `posts/<id>/cover.png` di MinIO → `/rerender` pakai ulang tanpa bayar ulang.
+- **Fail-safe**: generate gagal → render lanjut tanpa cover (slide 1 pakai body template), post tetap jalan. first template tanpa gambar = tidak dipakai (tidak ada `<img src="">` kosong).
 
 Process management: launchd plist atau pm2 — ops, di luar scope kode.
 

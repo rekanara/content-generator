@@ -16,9 +16,12 @@ import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
 const esc = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 
+// 1×1 gray PNG — placeholder for the {{image}} token in first-kind previews.
+const GRAY_IMG = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+
 const SAMPLES: Record<TemplateFormat, Record<string, string>> = {
-  "ig-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8" },
-  "li-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8" },
+  "ig-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8", image: GRAY_IMG },
+  "li-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8", image: GRAY_IMG },
   reel: { overlay: esc("Bug muncul pas demo"), index: "2", total: "5" },
 }
 
@@ -106,6 +109,9 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
         </Button>
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{data.name}</h1>
         <Badge variant="secondary">{data.format}</Badge>
+        {data.kind !== "body" && (
+          <Badge variant="secondary" className="bg-sky-500/15 text-sky-500 border-transparent">{data.kind}</Badge>
+        )}
         <button onClick={activate} disabled={busy}>
           <Badge variant="secondary" className={data.is_active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
             {data.is_active ? "active" : "off"}
@@ -129,7 +135,7 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
                   onChange={(e) => { setName(e.target.value); setTouched(true) }} />
               </div>
               <p className="text-xs text-muted-foreground">
-                token: {TEMPLATE_TOKENS[data.format].join(" ")} · format is immutable · updated {new Date(data.updated_at).toLocaleString("en-US")}
+                token: {TEMPLATE_TOKENS[data.format][data.kind].join(" ")} · format & kind are immutable · updated {new Date(data.updated_at).toLocaleString("en-US")}
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-html">HTML template</Label>

@@ -78,7 +78,7 @@ async function main() {
   if (flag('dry')) {
     if (slot.format === 'carousel' || slot.format === 'pdf') {
       const { renderAndSave } = await import('./render/carousel.ts');
-      const a = await renderAndSave(r.postId, slot.platform, r.draft as CarouselOut, cfg.slug, cfg.id);
+      const a = await renderAndSave(r.postId, slot.platform, r.draft as CarouselOut, cfg);
       console.log(`[cli] dry: ${a.files.length} artifacts at ${a.prefix} (MinIO) + local out/${r.postId}/`);
     } else if (slot.format === 'reels') {
       const { renderReelsAndSave } = await import('./render/reels.ts');

@@ -116,3 +116,31 @@ export async function chatJson<T>(
 export type { Usage as LlmUsage };
 export const criticModel = (cfg: GroupCfg): string => cfg.llm.criticModel;
 export const writerModel = (cfg: GroupCfg): string => cfg.llm.model;
+
+// ——— image generation (cover pages) ———
+// OpenAI-compatible /images/generations, b64 response. Same gateway/creds as chat.
+// No retry loop here — cover failure is fail-safe (render continues without the image),
+// so callers decide whether retrying is worth it (rerender re-attempts naturally).
+// ponytail: size/config knobs when a model needs non-default geometry.
+export async function generateImage(cfg: GroupCfg, prompt: string): Promise<Buffer> {
+  const res = await fetch(`${cfg.llm.baseUrl}/images/generations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.image.model,
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      response_format: 'b64_json',
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const json = await res.json();
+  const b64: unknown = json?.data?.[0]?.b64_json;
+  if (typeof b64 !== 'string' || b64.length === 0) {
+    // some gateways return url instead — unsupported by design (we want bytes, not a fetch)
+    throw new Error(`image: no b64_json in response (${JSON.stringify(json).slice(0, 150)})`);
+  }
+  return Buffer.from(b64, 'base64');
+}

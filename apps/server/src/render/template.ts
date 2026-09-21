@@ -1,16 +1,19 @@
-// Load active template from DB (per format), fall back to default. Fill tokens + escape HTML.
+// Load templates from DB (per format × kind), fall back to default. Fill tokens + escape HTML.
+// kinds: first = cover page ({{image}} token), last = CTA page, body = middle slides.
 import { sql } from '../db/pool.ts';
 import type { Platform, Format } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 
 export type SlideHtml = string; // single-slide html, ready for puppeteer
 
-// Tokens: {{headline}} {{body}} {{index}} {{total}} — all escaped.
+// Tokens: {{headline}} {{body}} {{image}} {{index}} {{total}} — text values escaped.
+// {{image}} is a data: URI — NOT escaped (base64 has no escapable chars; skipping keeps htmls small).
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-function fill(html: string, vars: Record<string, string>): string {
-  return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) => vars[k] ?? '');
+function fill(html: string, vars: Record<string, string>, raw: Record<string, string> = {}): string {
+  return html.replace(/\{\{\s*(\w+)\s*\}\}/g, (_, k: string) =>
+    k in raw ? raw[k]! : esc(vars[k] ?? ''));
 }
 
 // Default template — dark dev theme, 1080x1350, system font. ponytail: user-uploaded custom template via FE (step 8).
@@ -31,25 +34,54 @@ const DEFAULT_IG = `<!doctype html>
 // Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
 
-export async function getTemplateHtml(format: Format, platform: Platform, groupId: string): Promise<string> {
+// Active template for (format, kind) — falls back to kind='body' when the specific
+// kind isn't configured (backward compatible: zero first/last templates = old behavior).
+export async function getTemplateHtml(format: Format, platform: Platform, groupId: string, kind: 'body' | 'first' | 'last' = 'body'): Promise<string> {
   // db format: ig-carousel | li-carousel | reel — pdf (LI) uses li-carousel
   const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
+  if (kind !== 'body') {
+    const rows = await sql`select html from templates
+      where format = ${dbFormat} and kind = ${kind} and is_active and group_id = ${groupId}
+      order by updated_at desc limit 1`;
+    if (rows.length > 0) return rows[0]!.html as string;
+    // no template of this kind → caller falls back to body behavior
+  }
   const rows = await sql`select html from templates
-    where format = ${dbFormat} and is_active and group_id = ${groupId}
+    where format = ${dbFormat} and kind = 'body' and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
   if (rows.length > 0) return rows[0]!.html as string;
   return platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;
 }
 
-// Build HTML per slide. CarouselOut structure → array of screenshot-ready html.
-export function slidesToHtml(template: string, c: CarouselOut): SlideHtml[] {
+// Whether a non-body template exists for the format (decides if slide 1 / last get special treatment).
+export async function hasKindTemplate(format: Format, platform: Platform, groupId: string, kind: 'first' | 'last'): Promise<boolean> {
+  const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
+  const rows = await sql`select 1 from templates
+    where format = ${dbFormat} and kind = ${kind} and is_active and group_id = ${groupId} limit 1`;
+  return rows.length > 0;
+}
+
+// Build HTML per slide with the kind sequence:
+//   slide 1 → first template (ONLY when coverImage is provided — a cover page without
+//             its image is a broken promise; fail-safe renders it as a normal body slide)
+//   last    → last template (when configured; no image dependency)
+//   middle  → body template
+export function buildSlides(
+  templates: { body: string; first?: string; last?: string },
+  c: CarouselOut,
+  coverImage?: Buffer,
+): SlideHtml[] {
   const total = c.slides.length;
-  return c.slides.map((s, i) =>
-    fill(template, {
-      headline: esc(s.headline),
-      body: esc(s.body),
-      index: String(i + 1),
-      total: String(total),
-    }),
-  );
+  const last = total - 1;
+  const coverUri = coverImage ? `data:image/png;base64,${coverImage.toString('base64')}` : undefined;
+  return c.slides.map((s, i) => {
+    const vars = { headline: s.headline, body: s.body, index: String(i + 1), total: String(total) };
+    if (i === 0 && coverUri && templates.first) {
+      return fill(templates.first, vars, { image: coverUri });
+    }
+    if (i === last && total >= 2 && templates.last) {
+      return fill(templates.last, vars);
+    }
+    return fill(templates.body, vars);
+  });
 }

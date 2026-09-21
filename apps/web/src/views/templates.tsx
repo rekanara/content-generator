@@ -17,20 +17,27 @@ import {
 import { api, ApiError } from "@/lib/api"
 import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
-import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
+import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateKind } from "@workspace/shared"
 
 const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
+const KINDS: { value: TemplateKind; label: string }[] = [
+  { value: "body", label: "body — middle slides" },
+  { value: "first", label: "first — cover page ({{image}})" },
+  { value: "last", label: "last — CTA page" },
+]
+// reels are scene-based — no cover/CTA page concept
+const kindsFor = (f: TemplateFormat) => (f === "reel" ? KINDS.filter((k) => k.value === "body") : KINDS)
 
 export function TemplatesView({ slug }: { slug: string }) {
   const { data, error, loading, reload } = useTemplates(slug)
-  const [form, setForm] = useState({ name: "", format: "ig-carousel" as TemplateFormat, html: "", is_active: false })
+  const [form, setForm] = useState({ name: "", format: "ig-carousel" as TemplateFormat, kind: "body" as TemplateKind, html: "", is_active: false })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
       await api.addTemplate(slug, form)
-      setForm({ name: "", format: "ig-carousel", html: "", is_active: false })
+      setForm({ name: "", format: "ig-carousel", kind: "body", html: "", is_active: false })
       setMsg(null)
       reload()
     } catch (err) {
@@ -49,15 +56,26 @@ export function TemplatesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} id="template-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+            <div className="grid gap-3 md:grid-cols-[1fr_200px_220px_auto]">
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-name">Template name</Label>
                 <Input id="tpl-name" placeholder="template name" required value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-1.5">
+                <Label>Kind</Label>
+                <Select value={form.kind} onValueChange={(v) => setForm({ ...form, kind: v as TemplateKind })}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {kindsFor(form.format).map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
                 <Label>Format</Label>
-                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat })}>
+                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat, kind: v === "reel" && form.kind !== "body" ? "body" : form.kind })}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -74,7 +92,7 @@ export function TemplatesView({ slug }: { slug: string }) {
                 </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">token: {TEMPLATE_TOKENS[form.format].join(" ")}</p>
+            <p className="text-xs text-muted-foreground">token: {TEMPLATE_TOKENS[form.format][form.kind].join(" ")}</p>
             <div className="space-y-1.5">
               <Label htmlFor="tpl-html">HTML template</Label>
               <Textarea id="tpl-html" className="min-h-32 font-mono text-xs" placeholder="HTML template" required
@@ -97,6 +115,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               {t.name}
             </button>
             <span className="text-xs text-muted-foreground">{t.format}</span>
+            {t.kind !== "body" && <Badge variant="outline" className="text-xs">{t.kind}</Badge>}
             <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>

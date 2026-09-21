@@ -1,31 +1,71 @@
 // Carousel: HTML per slide → Puppeteer → PNG 1080x1350 (IG) / PDF (LinkedIn).
 // Local staging out/<id>/ → upload to MinIO posts/<id>/.
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+// Cover flow: cover.png in MinIO → reuse (rerender never re-pays image API);
+// missing + image model configured → generate once + upload; generation failure
+// is fail-safe — the post renders without a cover page (body template on slide 1).
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer';
 import { sql } from '../db/pool.ts';
 import type { Platform } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
-import { getTemplateHtml, slidesToHtml } from './template.ts';
-import { uploadPostArtifact } from '../storage.ts';
+import type { GroupCfg } from '../groups.ts';
+import { generateImage } from '../llm.ts';
+import { imagePrompt } from '../prompts.ts';
+import { getTemplateHtml, hasKindTemplate, buildSlides } from './template.ts';
+import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
 
 export type CarouselArtifacts = { files: string[]; prefix: string };
+
+// Cover image for the post: reuse from MinIO, else generate + upload. null = no cover.
+// Caller must have created out/<id>/ already (staging dir doubles as upload source).
+async function getCover(cfg: GroupCfg, postId: string, topic: string): Promise<Buffer | null> {
+  const key = `${cfg.slug}/posts/${postId}/cover.png`;
+  if (await artifactExists(key)) {
+    console.log(`[render] cover reused from ${key}`);
+    return getArtifactBuffer(key);
+  }
+  if (!cfg.image.model) return null; // cover pages disabled for this group
+  try {
+    const buf = await generateImage(cfg, imagePrompt(topic));
+    const tmp = `out/${postId}/cover.png`;
+    writeFileSync(tmp, buf);
+    await uploadPostArtifact(cfg.slug, postId, tmp, 'cover.png');
+    console.log(`[render] cover generated + saved (${buf.length}B, model=${cfg.image.model})`);
+    return buf;
+  } catch (e) {
+    console.warn(`[render] cover generation failed — rendering without cover: ${(e as Error).message}`);
+    return null; // fail-safe: post still ships, slide 1 uses the body template
+  }
+}
 
 // Render + upload. Returns the uploaded object keys.
 export async function renderCarousel(
   postId: string,
   platform: Platform,
   draft: CarouselOut,
-  slug: string,
-  groupId: string,
+  cfg: GroupCfg,
 ): Promise<CarouselArtifacts> {
-  const template = await getTemplateHtml('carousel', platform, groupId);
-  const htmls = slidesToHtml(template, draft);
-
   const outDir = `out/${postId}`;
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+
+  const [body, hasFirst, hasLast] = await Promise.all([
+    getTemplateHtml('carousel', platform, cfg.id, 'body'),
+    hasKindTemplate('carousel', platform, cfg.id, 'first'),
+    hasKindTemplate('carousel', platform, cfg.id, 'last'),
+  ]);
+  const cover = hasFirst ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '') : null;
+  const htmls = buildSlides(
+    {
+      body,
+      first: hasFirst ? await getTemplateHtml('carousel', platform, cfg.id, 'first') : undefined,
+      last: hasLast ? await getTemplateHtml('carousel', platform, cfg.id, 'last') : undefined,
+    },
+    draft,
+    cover ?? undefined,
+  );
 
   const browser = await puppeteer.launch();
   try {
@@ -69,19 +109,19 @@ export async function renderCarousel(
     // upload to MinIO
     const keys: string[] = [];
     for (let i = 0; i < files.length; i++) {
-      keys.push(await uploadPostArtifact(slug, postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
+      keys.push(await uploadPostArtifact(cfg.slug, postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
     }
-    if (pdfPath) keys.push(await uploadPostArtifact(slug, postId, pdfPath, 'carousel.pdf'));
+    if (pdfPath) keys.push(await uploadPostArtifact(cfg.slug, postId, pdfPath, 'carousel.pdf'));
 
-    return { files: keys, prefix: `${slug}/posts/${postId}/` };
+    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/` };
   } finally {
     await browser.close();
   }
 }
 
 // Render + persist status + artifact_prefix. "Persist" split out to keep it testable.
-export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, slug: string, groupId: string): Promise<CarouselArtifacts> {
-  const { files, prefix } = await renderCarousel(postId, platform, draft, slug, groupId);
+export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, cfg: GroupCfg): Promise<CarouselArtifacts> {
+  const { files, prefix } = await renderCarousel(postId, platform, draft, cfg);
   await sql`update posts set status = 'rendered', artifact_prefix = ${prefix}
     where id = ${postId}`;
   console.log(`[render] post #${postId}: ${files.length} artifacts → ${prefix}`);

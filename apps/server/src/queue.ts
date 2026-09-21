@@ -104,7 +104,7 @@ async function prepareForApproval(
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
-      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg.slug, cfg.id);
+      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }
@@ -174,7 +174,7 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
   if (post.format === 'reels') {
     await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
   } else {
-    await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg.slug, cfg.id);
+    await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg);
   }
   await addEvent(postId, cfg.id, 'rerendered');
 
@@ -236,7 +236,7 @@ async function deliver(
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
       const draft = JSON.parse(post.body) as CarouselOut;
-      await renderAndSave(postId, slot.platform, draft, cfg.slug, cfg.id);
+      await renderAndSave(postId, slot.platform, draft, cfg);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }

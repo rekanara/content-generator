@@ -132,3 +132,16 @@ Return JSON with the EXACT same structure (keys and slide/scene counts may chang
     },
   ];
 }
+
+// Cover image prompt (pure — unit-testable). Mechanical derivation from the slide headline:
+// deterministic, no extra LLM call. ponytail: LLM-written image prompts if mechanical ones
+// plateau (inject as an extra ideation field).
+export function imagePrompt(headline: string): string {
+  return [
+    'Minimal flat vector illustration for a developer-audience social media cover.',
+    `Subject: "${headline}".`,
+    'Style: clean geometric shapes, dark background (#0f1117), one accent gradient (green to sky blue),',
+    'subtle tech motifs (terminal windows, code brackets, git graphs), generous negative space.',
+    'Absolutely no text, no letters, no words in the image. Composition centered, works cropped to 4:5.',
+  ].join(' ');
+}

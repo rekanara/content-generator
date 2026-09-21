@@ -15,6 +15,13 @@ export type Format = z.infer<typeof Format>;
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
+// Template role in the page sequence: first = cover page ({{image}} token),
+// last = CTA page, body = middle slides. Render falls back to body when
+// first/last templates are absent (backward compatible).
+// NOTE: reel render ignores first/last — cover pages are a carousel/pdf concept.
+export const TemplateKind = z.enum(['body', 'first', 'last']);
+export type TemplateKind = z.infer<typeof TemplateKind>;
+
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
@@ -24,6 +31,7 @@ const GROUP_CONFIG_FIELDS = {
   llm_base_url: z.string().nullable(),
   llm_model: z.string().nullable(),
   llm_model_critic: z.string().nullable(),
+  image_model: z.string().nullable(),
   tts_provider: z.string().nullable(),
   tts_voice: z.string().nullable(),
   tts_base_url: z.string().nullable(),
@@ -55,6 +63,7 @@ export const GroupInput = z.object({
   llm_api_key: z.string().nullable().default(null),
   llm_model: z.string().nullable().default(null),
   llm_model_critic: z.string().nullable().default(null),
+  image_model: z.string().nullable().default(null),
   tts_provider: z.string().nullable().default(null),
   tts_voice: z.string().nullable().default(null),
   tts_base_url: z.string().nullable().default(null),
@@ -76,6 +85,7 @@ export const GroupPatch = z.object({
   llm_api_key: z.string().nullable().optional(), // null = remove override, fall back to env
   llm_model: z.string().nullable().optional(),
   llm_model_critic: z.string().nullable().optional(),
+  image_model: z.string().nullable().optional(),
   tts_provider: z.string().nullable().optional(),
   tts_voice: z.string().nullable().optional(),
   tts_base_url: z.string().nullable().optional(),
@@ -167,6 +177,7 @@ export const Template = z.object({
   id: z.string().uuid(),
   name: z.string(),
   format: TemplateFormat,
+  kind: TemplateKind,
   is_active: z.boolean(),
   updated_at: z.string(),
 });
@@ -179,6 +190,7 @@ export type TemplateDetail = z.infer<typeof TemplateDetail>;
 export const TemplateInput = z.object({
   name: z.string().min(1),
   format: TemplateFormat,
+  kind: TemplateKind.default('body'),
   html: z.string().min(1),
   is_active: z.boolean().default(false),
 });
@@ -236,11 +248,24 @@ export const CalendarRun = z.object({
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
 
-// Template tokens per format — for UI hints + FE validation.
-export const TEMPLATE_TOKENS: Record<TemplateFormat, string[]> = {
-  'ig-carousel': ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
-  'li-carousel': ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
-  reel: ['{{overlay}}', '{{index}}', '{{total}}'],
+// Template tokens per format × kind — for UI hints + FE validation.
+// {{image}} only exists on first-kind templates (generated cover image).
+export const TEMPLATE_TOKENS: Record<TemplateFormat, Record<TemplateKind, string[]>> = {
+  'ig-carousel': {
+    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+  },
+  'li-carousel': {
+    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+  },
+  reel: {
+    first: ['{{overlay}}', '{{index}}', '{{total}}'],
+    body: ['{{overlay}}', '{{index}}', '{{total}}'],
+    last: ['{{overlay}}', '{{index}}', '{{total}}'],
+  },
 };
 
 // ---------- auth ----------
