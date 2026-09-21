@@ -298,6 +298,20 @@ g.post('/:slug/posts/:id/approve', async (c) => {
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
+// re-render with the current template (same content) — Telegram /rerender parity
+g.post('/:slug/posts/:id/rerender', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const post = await getPost(gr(c).id, id);
+  if (!post) return c.json({ error: 'post not found' }, 404);
+  if (post.format === 'text') return c.json({ error: 'text format has no visual template' }, 400);
+  if (!['sent', 'awaiting_approval', 'rendered'].includes(post.status)) {
+    return c.json({ error: `post status ${post.status} — rerender works on sent/awaiting/rendered` }, 400);
+  }
+  enqueue({ kind: 'rerender', slug: gr(c).slug, postId: id });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
 g.post('/:slug/posts/:id/reject', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);

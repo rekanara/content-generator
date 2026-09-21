@@ -17,6 +17,7 @@ import type { Platform, Format } from './state.ts';
 // ——— command parser (pure, unit-test) ———
 export type Cmd =
   | { t: 'gen'; slug?: string; platform?: Platform; format?: Format }
+  | { t: 'rerender'; slug?: string }
   | { t: 'status'; slug?: string }
   | { t: 'help' }
   | { t: 'unknown'; raw: string };
@@ -30,6 +31,10 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
   if (s.startsWith('/status')) {
     const arg = s.split(/\s+/)[1];
     return { t: 'status', slug: arg && slugs.includes(arg) ? arg : undefined };
+  }
+  if (s.startsWith('/rerender')) {
+    const arg = s.split(/\s+/)[1];
+    return { t: 'rerender', slug: arg && slugs.includes(arg) ? arg : undefined };
   }
   if (s.startsWith('/gen')) {
     const parts = s.split(/\s+/).slice(1);
@@ -100,12 +105,27 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
         '/gen — generate the next post (first group, natural rotation)',
         '/gen <group> — force a group',
         '/gen <group> <platform> <format> — force group+platform+format',
+        '/rerender [group] — re-render the latest post with the current template (content unchanged)',
         '/status [group] — schedule, rotation, latest post',
         `Available groups: ${slugs}`,
       ].join('\n');
     }
     case 'status':
       return handleStatus(cmd.slug);
+    case 'rerender': {
+      const slug = cmd.slug ?? (await defaultSlug());
+      const cfg = await getGroupCfg(slug).catch(() => null);
+      if (!cfg) return `group "${slug}" not found`;
+      const [last] = await sql`select id, format, status from posts
+        where group_id = ${cfg.id} order by created_at desc limit 1`;
+      if (!last) return `no posts yet in "${slug}" — use /gen first`;
+      if (last.format === 'text') return 'latest post is text format — nothing to re-render';
+      if (!['sent', 'awaiting_approval', 'rendered'].includes(last.status)) {
+        return `latest post status is ${last.status} — /rerender works on sent/awaiting/rendered. Use /gen instead.`;
+      }
+      enqueue({ kind: 'rerender', slug, postId: last.id });
+      return `queued (${slug}) — post #${String(last.id).slice(0, 8)} will be re-rendered with the current template.`;
+    }
     case 'gen': {
       const slug = cmd.slug ?? (await defaultSlug());
       const cfg = await getGroupCfg(slug).catch(() => null);

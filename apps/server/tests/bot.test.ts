@@ -52,6 +52,20 @@ test('parseCmd: /status with slug', () => {
   assert.deepEqual(parseCmd('/status brand2', SLUGS), { t: 'status', slug: 'brand2' });
 });
 
+// ---------- parseCmd: /rerender ----------
+
+test('parseCmd: bare /rerender', () => {
+  assert.deepEqual(parseCmd('/rerender', SLUGS), { t: 'rerender', slug: undefined });
+});
+
+test('parseCmd: /rerender with slug', () => {
+  assert.deepEqual(parseCmd('/rerender brand2', SLUGS), { t: 'rerender', slug: 'brand2' });
+});
+
+test('parseCmd: /rerender unknown slug → slug undefined (default group)', () => {
+  assert.deepEqual(parseCmd('/rerender foobar', SLUGS), { t: 'rerender', slug: undefined });
+});
+
 test('parseCmd: /help and /start', () => {
   assert.deepEqual(parseCmd('/help', SLUGS), { t: 'help' });
   assert.deepEqual(parseCmd('/start', SLUGS), { t: 'help' });

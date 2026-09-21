@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Check, Send, X } from "lucide-react"
+import { Check, RefreshCw, Send, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import {
@@ -44,6 +44,13 @@ export function PostsView({ slug }: { slug: string }) {
             {p.status === "failed" && (
               <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(slug, p.id).then(reload)}>
                 <Send className="size-4" />
+              </Button>
+            )}
+            {["sent", "awaiting_approval", "rendered"].includes(p.status) && p.format !== "text" && (
+              <Button variant="ghost" size="icon" aria-label="rerender with current template"
+                title="Re-render with current template (content unchanged)"
+                onClick={() => api.rerender(slug, p.id).then(reload)}>
+                <RefreshCw className="size-4" />
               </Button>
             )}
             {p.status === "awaiting_approval" && (

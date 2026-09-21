@@ -118,6 +118,7 @@ Boot cleanup: post berstatus `queued`/`draft`/`rendered` saat daemon start → t
 Bot Telegram (polling):
 - `/gen [group] [platform] [format]` — tanpa group = group pertama; tanpa format → ikut rotasi.
 - `/status [group]` — jadwal, cron aktif?, posisi rotasi, post terakhir.
+- `/rerender [group]` — re-render post TERAKHIR dengan template saat ini (konten sama, tanpa LLM). Status `sent` → kirim ulang artefak baru (rotasi tak disentuh); `awaiting_approval` → awaiting + tombol approval baru (rotasi tetap menunggu approve); `rendered` → ikut gerbang approval (gate on → awaiting+tombol; gate off → deliver + rotasi maju — first send). Paritas FE: tombol rerender di Posts tab + `POST /api/g/:slug/posts/:id/rerender`.
 
 Process management: launchd plist atau pm2 — ops, di luar scope kode.
 
@@ -174,6 +175,7 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | GET/POST | /api/g/:slug/cron | status / simpan expr+enabled |
 | GET/POST | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail / kirim ulang |
 | POST | /api/g/:slug/posts/:id/approve, /:id/reject | approval gate (approve via queue; reject langsung + status guard) |
+| POST | /api/g/:slug/posts/:id/rerender | re-render dengan template saat ini (konten sama; guard status + format) |
 | GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
 | GET/POST | /api/g/:slug/styles, PATCH/DELETE /:id | CRUD style samples (edit = title, body, platform) |
 | GET/POST | /api/g/:slug/templates, GET/PATCH/DELETE /:id, /:id/activate | CRUD + aktivasi template (detail termasuk html; edit = name + html, format immutable) |

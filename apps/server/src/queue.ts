@@ -13,7 +13,8 @@ import { addEvent } from './repos/events.ts';
 type Job =
   | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
   | { kind: 'resend'; slug: string; postId: string }
-  | { kind: 'approve'; slug: string; postId: string };
+  | { kind: 'approve'; slug: string; postId: string }
+  | { kind: 'rerender'; slug: string; postId: string };
 
 const jobs: Job[] = [];
 let running = false;
@@ -47,15 +48,16 @@ async function drain(): Promise<void> {
         cfg = await getGroupCfg(job.slug);
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
+        else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else await runResend(cfg, job.postId);
-      } catch (e) {
-        const msg = (e as Error).message;
-        console.error(`[queue] job failed (${job.slug}): ${msg}`);
-        try {
-          // generate failures with a post row are evented in runGenerate; here only resend/approve (id always known)
-          if (cfg && job.kind !== 'generate') await addEvent(job.postId, cfg.id, 'failed', msg);
-        } catch { /* event write must never break the queue */ }
-      }
+  } catch (e) {
+    const msg = (e as Error).message;
+    console.error(`[queue] job failed (${job.slug}): ${msg}`);
+    try {
+      // generate failures with a post row are evented in runGenerate; here only resend/approve/rerender (id always known)
+      if (cfg && job.kind !== 'generate') await addEvent(job.postId, cfg.id, 'failed', msg);
+    } catch { /* event write must never break the queue */ }
+  }
       lastActivity = Date.now();
     }
   } finally {
@@ -150,6 +152,69 @@ async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: 
   const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
   await addEvent(postId, cfg.id, 'approved');
   await deliver(cfg, postId, slot, true);
+}
+
+// Re-render an EXISTING post's body with the CURRENT template (content unchanged —
+// for "template edited after send"). Routing by the post's pre-rerender status:
+//   awaiting_approval → back to awaiting + fresh approval buttons (rotation still pending)
+//   rendered          → gate ? awaiting + buttons : deliver (first send → rotation advances)
+//   sent              → resend the new artifacts directly (rotation already consumed — untouched)
+// failed/rejected/draft/queued → refused (/gen is the right tool for those).
+async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; caption: string | null; body: string }[]>`select platform, format, pillar_id, status, topic, caption, body
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  const wasStatus = post.status;
+  if (!['sent', 'awaiting_approval', 'rendered'].includes(wasStatus)) {
+    throw new Error(`post status ${wasStatus} — /rerender only works on sent/awaiting/rendered; use /gen for ${wasStatus}`);
+  }
+  if (post.format === 'text') throw new Error('text format has no visual template — nothing to re-render');
+
+  console.log(`[queue] rerender #${postId} (${cfg.slug}, was ${wasStatus}) with current template`);
+  if (post.format === 'reels') {
+    await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+  } else {
+    await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg.slug, cfg.id);
+  }
+  await addEvent(postId, cfg.id, 'rerendered');
+
+  if (wasStatus === 'sent') {
+    // already delivered once → rotation was consumed → just ship the new artifacts.
+    // restore status FIRST (guarded: render*AndSave just set 'rendered'): leaving it there
+    // would let boot cleanup orphan-fail a genuinely-delivered post.
+    await sql`update posts set status = 'sent' where id = ${postId} and group_id = ${cfg.id} and status = 'rendered'`;
+    await runResend(cfg, postId);
+    return;
+  }
+  if (wasStatus === 'rendered' && !cfg.approval_required) {
+    // never sent, gate off → normal first delivery (send + rotation advance)
+    const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+    await deliver(cfg, postId, slot, true);
+    return;
+  }
+  // awaiting_approval (or rendered with gate on) → park at awaiting + fresh approval message.
+  // render*AndSave set status='rendered' — restore the deliberate pause (guarded: only from 'rendered',
+  // so a concurrent reject can never be clobbered — rejectPost itself guards on 'awaiting_approval').
+  await sql`update posts set status = 'awaiting_approval'
+    where id = ${postId} and group_id = ${cfg.id} and status = 'rendered'`;
+  await addEvent(postId, cfg.id, 'awaiting_approval');
+  try {
+    await withRetry(() => sendMessageWithButtons(cfg, [
+      `Re-rendered with current template — ${cfg.slug}`,
+      `Topic: ${post.topic}`,
+      `${post.platform}/${post.format} · was ${wasStatus}`,
+      '',
+      `Caption: ${post.caption ? post.caption.slice(0, 900) : '—'}`,
+    ].join('\n'), [
+      [
+        { text: 'Approve — send now', callback_data: `approve:${postId}` },
+        { text: 'Reject', callback_data: `reject:${postId}` },
+      ],
+    ]));
+  } catch (e) {
+    console.warn(`[queue] rerender approval request failed (${cfg.slug}): ${(e as Error).message}`);
+  }
+  console.log(`[queue] post #${postId} re-rendered, awaiting approval (${cfg.slug})`);
 }
 
 // Send a post (used by runGenerate, runApprove, resend-style flows).
