@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import { config } from './config.ts';
 import { sql } from './db/pool.ts';
 import { startBot } from './bot.ts';
-import { queueStatus } from './queue.ts';
+import { queueLiveness } from './queue.ts';
 import { startCron } from './cron.ts';
 import { api } from './api.ts';
 
@@ -17,7 +17,10 @@ app.all('/api/*', (c) => c.json({ error: 'endpoint not found' }, 404));
 app.get('/', (c) => c.text('content-generator daemon v2 — OK'));
 app.get('/health', async (c) => {
   await sql`select 1`;
-  return c.json({ ok: true, queue: queueStatus() });
+  const live = queueLiveness();
+  // running + no activity for 30min = stuck run (puppeteer/LLM hang)
+  const stuck = live.running && live.lastActivityMs > 30 * 60_000;
+  return c.json({ ok: !stuck, db: true, queue: live, stuck }, stuck ? 503 : 200);
 });
 
 // SPA build output (apps/web/dist) — static assets + index.html fallback for the client router.

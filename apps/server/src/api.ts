@@ -17,6 +17,7 @@ import {
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar } from './repos/pillars.ts';
 import { listPosts, getPost } from './repos/posts.ts';
+import { listEvents } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle } from './repos/styles.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate } from './repos/templates.ts';
 import {
@@ -252,6 +253,12 @@ g.get('/:slug/posts/:id', async (c) => {
   const p = await getPost(gr(c).id, id);
   if (!p) return c.json({ error: 'post not found' }, 404);
   return c.json(p);
+});
+
+g.get('/:slug/posts/:id/events', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  return c.json(await listEvents(id, gr(c).id));
 });
 
 g.post('/:slug/posts/:id/resend', async (c) => {
