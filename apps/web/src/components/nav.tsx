@@ -21,8 +21,9 @@ export function Nav({ route, me, onNavigate, onLogout }: {
   onLogout: () => void
 }) {
   const { theme, setTheme } = useTheme()
-  const slug = route.name === "groupView" ? route.slug : null
-  const view = route.name === "groupView" ? route.view : null
+  // templateDetail stays inside a group — keep tabs visible, Templates tab highlighted
+  const slug = route.name === 'groupView' || route.name === 'templateDetail' ? route.slug : null
+  const view = route.name === 'groupView' ? route.view : route.name === 'templateDetail' ? 'templates' : null
 
   return (
     <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
