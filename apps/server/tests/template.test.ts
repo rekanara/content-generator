@@ -1,4 +1,4 @@
-// Pure render-template logic: buildSlides kind sequencing + imagePrompt.
+// Pure render-template logic: buildSlides package sequencing (body/cover/CTA) + imagePrompt.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildSlides } from '../src/render/template.ts';
@@ -27,7 +27,7 @@ test('buildSlides: no first/last templates → all body (backward compat)', () =
   assert.equal(htmls[0], '<body>BODY Cover &lt;Hook&gt; first body 1/3</body>');
 });
 
-test('buildSlides: first+last with cover → kind sequence applied', () => {
+test('buildSlides: first+last with cover → package sequence applied', () => {
   const cover = Buffer.from('fakepng');
   const htmls = buildSlides(T, DRAFT, cover);
   assert.ok(htmls[0]!.startsWith('<body>FIRST data:image/png;base64,'));

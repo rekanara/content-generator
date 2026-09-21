@@ -123,11 +123,11 @@ Bot Telegram (polling):
 
 ### Cover image (halaman pertama carousel/PDF)
 
-- **Template kind** (`templates.kind`): `body` (slide tengah) | `first` (cover, token `{{image}}`) | `last` (CTA). 1 aktif per (group, format, kind). Reels TIDAK pakai first/last (scene-based, query render difilter `kind='body'`).
+- **Satu row template = satu paket visual**: `html` (slide tengah) + `html_first` (cover, token `{{image}}`, nullable) + `html_last` (CTA, nullable). Null → halaman itu pakai body. 1 template aktif per format. Reels hanya pakai `html`.
 - **`groups.image_model`** — per-group ONLY, tanpa env fallback (opt-in, beda dari llm/tts/telegram yang env=fallback). Kosong = cover OFF.
-- Urutan render: slide 1 = first template (hanya jika gambar tersedia), slide 2..n-1 = body, slide terakhir = last.
+- Urutan render: slide 1 = html_first (hanya jika gambar tersedia), slide 2..n-1 = html, slide terakhir = html_last.
 - Gambar di-generate SEKALI per post via `/images/generations` (gateway sama dengan LLM), disimpan `posts/<id>/cover.png` di MinIO → `/rerender` pakai ulang tanpa bayar ulang.
-- **Fail-safe**: generate gagal → render lanjut tanpa cover (slide 1 pakai body template), post tetap jalan. first template tanpa gambar = tidak dipakai (tidak ada `<img src="">` kosong).
+- **Fail-safe**: generate gagal → render lanjut tanpa cover (slide 1 pakai body template), post tetap jalan. html_first tanpa gambar = tidak dipakai (tidak ada `<img src="">` kosong).
 
 Process management: launchd plist atau pm2 — ops, di luar scope kode.
 

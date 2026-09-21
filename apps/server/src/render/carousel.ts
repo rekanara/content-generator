@@ -11,7 +11,7 @@ import type { CarouselOut } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
 import { imagePrompt } from '../prompts.ts';
-import { getTemplateHtml, hasKindTemplate, buildSlides } from './template.ts';
+import { getTemplateSet, buildSlides } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
@@ -51,21 +51,9 @@ export async function renderCarousel(
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  const [body, hasFirst, hasLast] = await Promise.all([
-    getTemplateHtml('carousel', platform, cfg.id, 'body'),
-    hasKindTemplate('carousel', platform, cfg.id, 'first'),
-    hasKindTemplate('carousel', platform, cfg.id, 'last'),
-  ]);
-  const cover = hasFirst ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '') : null;
-  const htmls = buildSlides(
-    {
-      body,
-      first: hasFirst ? await getTemplateHtml('carousel', platform, cfg.id, 'first') : undefined,
-      last: hasLast ? await getTemplateHtml('carousel', platform, cfg.id, 'last') : undefined,
-    },
-    draft,
-    cover ?? undefined,
-  );
+  const set = await getTemplateSet('carousel', platform, cfg.id);
+  const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '') : null;
+  const htmls = buildSlides(set, draft, cover ?? undefined);
 
   const browser = await puppeteer.launch();
   try {

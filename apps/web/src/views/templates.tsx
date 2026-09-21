@@ -17,27 +17,29 @@ import {
 import { api, ApiError } from "@/lib/api"
 import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
-import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateKind } from "@workspace/shared"
+import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
 
 const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
-const KINDS: { value: TemplateKind; label: string }[] = [
-  { value: "body", label: "body — middle slides" },
-  { value: "first", label: "first — cover page ({{image}})" },
-  { value: "last", label: "last — CTA page" },
-]
-// reels are scene-based — no cover/CTA page concept
-const kindsFor = (f: TemplateFormat) => (f === "reel" ? KINDS.filter((k) => k.value === "body") : KINDS)
 
 export function TemplatesView({ slug }: { slug: string }) {
   const { data, error, loading, reload } = useTemplates(slug)
-  const [form, setForm] = useState({ name: "", format: "ig-carousel" as TemplateFormat, kind: "body" as TemplateKind, html: "", is_active: false })
+  const [form, setForm] = useState({
+    name: "", format: "ig-carousel" as TemplateFormat,
+    html: "", html_first: "", html_last: "", is_active: false,
+  })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addTemplate(slug, form)
-      setForm({ name: "", format: "ig-carousel", kind: "body", html: "", is_active: false })
+      await api.addTemplate(slug, {
+        name: form.name, format: form.format,
+        html: form.html,
+        html_first: form.format === "reel" || form.html_first === "" ? null : form.html_first,
+        html_last: form.format === "reel" || form.html_last === "" ? null : form.html_last,
+        is_active: form.is_active,
+      })
+      setForm({ name: "", format: "ig-carousel", html: "", html_first: "", html_last: "", is_active: false })
       setMsg(null)
       reload()
     } catch (err) {
@@ -48,6 +50,8 @@ export function TemplatesView({ slug }: { slug: string }) {
   if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
 
+  const isReel = form.format === "reel"
+
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-semibold">Templates</h1>
@@ -56,26 +60,15 @@ export function TemplatesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} id="template-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_200px_220px_auto]">
+            <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-name">Template name</Label>
                 <Input id="tpl-name" placeholder="template name" required value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-1.5">
-                <Label>Kind</Label>
-                <Select value={form.kind} onValueChange={(v) => setForm({ ...form, kind: v as TemplateKind })}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {kindsFor(form.format).map((k) => <SelectItem key={k.value} value={k.value}>{k.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
                 <Label>Format</Label>
-                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat, kind: v === "reel" && form.kind !== "body" ? "body" : form.kind })}>
+                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat })}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -92,12 +85,36 @@ export function TemplatesView({ slug }: { slug: string }) {
                 </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">token: {TEMPLATE_TOKENS[form.format][form.kind].join(" ")}</p>
+
+            <p className="text-xs text-muted-foreground">
+              body token: {TEMPLATE_TOKENS[form.format].body.join(" ")}
+              {!isReel && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
+              {!isReel && form.html_last !== "" && <> · CTA: {TEMPLATE_TOKENS[form.format].last?.join(" ")}</>}
+            </p>
+
             <div className="space-y-1.5">
-              <Label htmlFor="tpl-html">HTML template</Label>
+              <Label htmlFor="tpl-html">Body HTML (middle slides)</Label>
               <Textarea id="tpl-html" className="min-h-32 font-mono text-xs" placeholder="HTML template" required
                 value={form.html} onChange={(e) => setForm({ ...form, html: e.target.value })} />
             </div>
+
+            {!isReel && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-first">Cover HTML (first slide, optional)</Label>
+                  <Textarea id="tpl-first" className="min-h-32 font-mono text-xs"
+                    placeholder={`uses {{image}} + ${TEMPLATE_TOKENS[form.format].first?.join(" ")} — empty = no cover page`}
+                    value={form.html_first} onChange={(e) => setForm({ ...form, html_first: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-last">CTA HTML (last slide, optional)</Label>
+                  <Textarea id="tpl-last" className="min-h-32 font-mono text-xs"
+                    placeholder={`uses ${TEMPLATE_TOKENS[form.format].last?.join(" ")} — empty = no CTA page`}
+                    value={form.html_last} onChange={(e) => setForm({ ...form, html_last: e.target.value })} />
+                </div>
+              </div>
+            )}
+
             <Button type="submit" form="template-form" className="justify-self-start">Add</Button>
           </form>
         </CardContent>
@@ -115,7 +132,6 @@ export function TemplatesView({ slug }: { slug: string }) {
               {t.name}
             </button>
             <span className="text-xs text-muted-foreground">{t.format}</span>
-            {t.kind !== "body" && <Badge variant="outline" className="text-xs">{t.kind}</Badge>}
             <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>

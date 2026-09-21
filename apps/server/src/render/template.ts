@@ -1,10 +1,13 @@
-// Load templates from DB (per format × kind), fall back to default. Fill tokens + escape HTML.
-// kinds: first = cover page ({{image}} token), last = CTA page, body = middle slides.
+// Load the active template PACKAGE from DB (one row = body + cover + CTA), fall back to default.
+// Fill tokens + escape HTML.
 import { sql } from '../db/pool.ts';
 import type { Platform, Format } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 
 export type SlideHtml = string; // single-slide html, ready for puppeteer
+
+// A template package: body slides + optional cover/CTA pages (null → body fallback).
+export type TemplateSet = { body: string; first: string | null; last: string | null };
 
 // Tokens: {{headline}} {{body}} {{image}} {{index}} {{total}} — text values escaped.
 // {{image}} is a data: URI — NOT escaped (base64 has no escapable chars; skipping keeps htmls small).
@@ -34,40 +37,32 @@ const DEFAULT_IG = `<!doctype html>
 // Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
 
-// Active template for (format, kind) — falls back to kind='body' when the specific
-// kind isn't configured (backward compatible: zero first/last templates = old behavior).
-export async function getTemplateHtml(format: Format, platform: Platform, groupId: string, kind: 'body' | 'first' | 'last' = 'body'): Promise<string> {
+// Active template package for a format. Cover flow: html_first present on the row
+// AND a cover image available → slide 1 uses it. Everything null-safe.
+export async function getTemplateSet(format: Format, platform: Platform, groupId: string): Promise<TemplateSet> {
   // db format: ig-carousel | li-carousel | reel — pdf (LI) uses li-carousel
   const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
-  if (kind !== 'body') {
-    const rows = await sql`select html from templates
-      where format = ${dbFormat} and kind = ${kind} and is_active and group_id = ${groupId}
-      order by updated_at desc limit 1`;
-    if (rows.length > 0) return rows[0]!.html as string;
-    // no template of this kind → caller falls back to body behavior
-  }
-  const rows = await sql`select html from templates
-    where format = ${dbFormat} and kind = 'body' and is_active and group_id = ${groupId}
+  const [t] = await sql`select html, html_first, html_last from templates
+    where format = ${dbFormat} and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
-  if (rows.length > 0) return rows[0]!.html as string;
-  return platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;
+  if (t) {
+    return {
+      body: t.html as string,
+      first: (t.html_first as string | null) ?? null,
+      last: (t.html_last as string | null) ?? null,
+    };
+  }
+  const fallback = platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;
+  return { body: fallback, first: null, last: null };
 }
 
-// Whether a non-body template exists for the format (decides if slide 1 / last get special treatment).
-export async function hasKindTemplate(format: Format, platform: Platform, groupId: string, kind: 'first' | 'last'): Promise<boolean> {
-  const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
-  const rows = await sql`select 1 from templates
-    where format = ${dbFormat} and kind = ${kind} and is_active and group_id = ${groupId} limit 1`;
-  return rows.length > 0;
-}
-
-// Build HTML per slide with the kind sequence:
-//   slide 1 → first template (ONLY when coverImage is provided — a cover page without
+// Build HTML per slide with the package sequence:
+//   slide 1 → html_first (ONLY when a cover image is provided — a cover page without
 //             its image is a broken promise; fail-safe renders it as a normal body slide)
-//   last    → last template (when configured; no image dependency)
-//   middle  → body template
+//   last    → html_last (when present; no image dependency)
+//   middle  → body html
 export function buildSlides(
-  templates: { body: string; first?: string; last?: string },
+  templates: { body: string; first?: string | null; last?: string | null },
   c: CarouselOut,
   coverImage?: Buffer,
 ): SlideHtml[] {

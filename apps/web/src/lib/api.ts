@@ -85,9 +85,9 @@ export const api = {
     req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'PATCH', body: JSON.stringify(s) }),
   templates: (slug: string) => req<Template[]>(`${g(slug)}/templates`),
   template: (slug: string, id: string) => req<TemplateDetail>(`${g(slug)}/templates/${id}`),
-  patchTemplate: (slug: string, id: string, t: { name: string; html: string }) =>
+  patchTemplate: (slug: string, id: string, t: { name: string; html: string; html_first: string | null; html_last: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/templates/${id}`, { method: 'PATCH', body: JSON.stringify(t) }),
-  addTemplate: (slug: string, t: { name: string; format: string; html: string; is_active?: boolean }) =>
+  addTemplate: (slug: string, t: { name: string; format: string; html: string; html_first?: string | null; html_last?: string | null; is_active?: boolean }) =>
     req<{ ok: true }>(`${g(slug)}/templates`, { method: 'POST', body: JSON.stringify(t) }),
   activateTemplate: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/templates/${id}/activate`, { method: 'POST' }),
   delTemplate: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/templates/${id}`, { method: 'DELETE' }),

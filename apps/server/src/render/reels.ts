@@ -34,10 +34,9 @@ const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 async function getReelTemplate(groupId: string): Promise<string> {
-  // kind='body' filter: reels have no first/last concept — a stray active reel-first
-  // template must not shadow the body template for every scene.
+  // reels are scene-based: one html per template, html_first/html_last unused
   const rows = await sql`select html from templates
-    where format = 'reel' and kind = 'body' and is_active and group_id = ${groupId}
+    where format = 'reel' and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
   return rows.length > 0 ? (rows[0]!.html as string) : DEFAULT_REEL;
 }

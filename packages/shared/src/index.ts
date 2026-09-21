@@ -15,13 +15,6 @@ export type Format = z.infer<typeof Format>;
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
-// Template role in the page sequence: first = cover page ({{image}} token),
-// last = CTA page, body = middle slides. Render falls back to body when
-// first/last templates are absent (backward compatible).
-// NOTE: reel render ignores first/last — cover pages are a carousel/pdf concept.
-export const TemplateKind = z.enum(['body', 'first', 'last']);
-export type TemplateKind = z.infer<typeof TemplateKind>;
-
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
@@ -177,30 +170,37 @@ export const Template = z.object({
   id: z.string().uuid(),
   name: z.string(),
   format: TemplateFormat,
-  kind: TemplateKind,
   is_active: z.boolean(),
   updated_at: z.string(),
 });
 export type Template = z.infer<typeof Template>;
 
 // Detail view incl. HTML (list excludes it — payloads stay small).
-export const TemplateDetail = Template.extend({ html: z.string() });
+// One template = one visual package: html = body slides, html_first = cover page
+// ({{image}} token, optional), html_last = CTA page (optional). null → falls back to body.
+export const TemplateDetail = Template.extend({
+  html: z.string(),
+  html_first: z.string().nullable(),
+  html_last: z.string().nullable(),
+});
 export type TemplateDetail = z.infer<typeof TemplateDetail>;
 
 export const TemplateInput = z.object({
   name: z.string().min(1),
   format: TemplateFormat,
-  kind: TemplateKind.default('body'),
   html: z.string().min(1),
+  html_first: z.string().min(1).nullable().default(null),
+  html_last: z.string().min(1).nullable().default(null),
   is_active: z.boolean().default(false),
 });
 export type TemplateInput = z.infer<typeof TemplateInput>;
 
-// Edit: name + html only. format is immutable (one-active-per-format constraint
-// would need deactivating juggling — delete + recreate instead); is_active via activate.
+// Edit: name + html parts. null on a part = remove it (falls back to body).
 export const TemplateEdit = z.object({
   name: z.string().min(1),
   html: z.string().min(1),
+  html_first: z.string().min(1).nullable(),
+  html_last: z.string().min(1).nullable(),
 });
 export type TemplateEdit = z.infer<typeof TemplateEdit>;
 
@@ -248,9 +248,10 @@ export const CalendarRun = z.object({
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
 
-// Template tokens per format × kind — for UI hints + FE validation.
-// {{image}} only exists on first-kind templates (generated cover image).
-export const TEMPLATE_TOKENS: Record<TemplateFormat, Record<TemplateKind, string[]>> = {
+// Template tokens per format — for UI hints + FE validation.
+// {{image}} (generated cover, data-URI) only on the html_first part of carousel formats.
+// Reels are scene-based: html only, no first/last parts.
+export const TEMPLATE_TOKENS: Record<TemplateFormat, { body: string[]; first?: string[]; last?: string[] }> = {
   'ig-carousel': {
     first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
     body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
@@ -262,9 +263,7 @@ export const TEMPLATE_TOKENS: Record<TemplateFormat, Record<TemplateKind, string
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
   reel: {
-    first: ['{{overlay}}', '{{index}}', '{{total}}'],
     body: ['{{overlay}}', '{{index}}', '{{total}}'],
-    last: ['{{overlay}}', '{{index}}', '{{total}}'],
   },
 };
 
