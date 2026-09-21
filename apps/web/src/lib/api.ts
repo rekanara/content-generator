@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -84,6 +84,12 @@ export const api = {
   overrideImageUrl: (slug: string, id: string, file: string) => `${g(slug)}/overrides/${id}/images/${file}`,
   cancelOverride: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/overrides/${id}/cancel`, { method: 'POST' }),
   delOverride: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/overrides/${id}`, { method: 'DELETE' }),
+
+  // plans
+  plans: (slug: string) => req<Plan[]>(`${g(slug)}/plans`),
+  addPlan: (slug: string, p: PlanInput) => req<Plan>(`${g(slug)}/plans`, { method: 'POST', body: JSON.stringify(p) }),
+  cancelPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}/cancel`, { method: 'POST' }),
+  delPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}`, { method: 'DELETE' }),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),

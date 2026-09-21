@@ -126,9 +126,19 @@ Bot Telegram (polling):
 
 - **Konten manual yang menggantikan pipeline di tanggal tertentu** (per group, `overrides` table): type `mix` (tepat 1 gambar + teks) | `image_only` (1-10 gambar + caption) | `text_only` (teks saja). Gambar disimpan `overrides/<id>/img-NN.<ext>` di MinIO. `template_id` opsional — tersimpan untuk render di masa depan (ponytail), delivery saat ini kirim raw.
 - **Satu override per (group, tanggal)** — DB unique index, `cancelled` membebaskan tanggal. `templates.type` (`regular` default | tipe override) memfilter pilihan template di form (dashboard + Telegram).
-- **Redirect di runGenerate** (satu corong: cron/bot/FE): tanggal punya override `scheduled` → kirim override (rotasi TIDAK maju); `sent` → skip generate; `cancelled`/kosong → pipeline normal. Delivery: text_only → sendMessage; 1 gambar → sendPhoto; multi → sendMediaGroup.
+- **Redirect di runGenerate** (satu corong: cron/bot/FE): lihat **Plans** di bawah — override otomatis membuat plan row.
+- Delivery: text_only → sendMessage; 1 gambar → sendPhoto; multi → sendMediaGroup.
 - **Watchdog**: slot dengan override terkirim dianggap ter-cover (tidak false-alarm). Override scheduled yang belum terkirim tetap alert.
 - Dashboard: tab **Overrides** (list + thumbnail, create multipart multi-upload, cancel, delete). Delivery failure → alert Telegram, override tetap scheduled (retry via /gen).
+
+### Plans (date-scoped source of truth)
+
+- **`plans` table**: apa yang jalan di tanggal tertentu, per group. **Plans adalah pengecualian (exception), bukan schedule** — tanpa plan row = rotasi natural (state-based, self-healing; schedule pre-computed akan drift). Tidak ada code path yang pre-generate plan untuk horizon tanggal.
+- **type `slot_override`**: run di tanggal itu pakai spec yang di-pin — `platform`/`format`/`pillar_id`/`template_id` (semua nullable → fallback natural per-field; pillar harus masih aktif; template by-id dirender walau tidak active). Pipeline normal jalan (rotasi maju setelah `sent`). Use case: "rekomendasi repo github" di-pin ke template `image_only`, tanggal tertentu.
+- **type `override_content`**: dibuat OTOMATIS oleh flow override (override + plan atomik dalam satu transaksi) — konten override yang dikirim, rotasi tidak maju.
+- **Satu plan aktif per (group, tanggal)** — partial unique index; `cancelled` membebaskan tanggal. Create override di tanggal yang sudah ada plan slot → konflik → friendly error.
+- **runGenerate konsult plan dulu** (sebelum resolve slot): override_content → deliver override / skip; slot_override → `plannedSlot` (pure) + templateId ke render; kosong/cancelled → natural (forced `/gen` args diabaikan saat plan aktif — dengan info message).
+- Dashboard: **Next runs** menampilkan badge plan/override per tanggal + section **Plans** (form pin: date/platform/format/pillar/template + note, list, cancel). Calendar API merge plans (spec pinned menggantikan display slot natural).
 
 ### Cover image (halaman pertama carousel/PDF)
 
@@ -197,6 +207,7 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | POST | /api/g/:slug/posts/:id/rerender | re-render dengan template saat ini (konten sama; guard status + format) |
 | GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
 | GET/POST | /api/g/:slug/overrides, /:id/cancel, DELETE /:id, GET /:id/images/:file | override content (create = multipart multi-upload; image streaming whitelist) |
+| GET/POST | /api/g/:slug/plans, /:id/cancel, DELETE /:id | plans — pin spec tanggal (slot_override); override_content dibuat sistem |
 | GET/POST | /api/g/:slug/styles, PATCH/DELETE /:id | CRUD style samples (edit = title, body, platform) |
 | GET/POST | /api/g/:slug/templates, GET/PATCH/DELETE /:id, /:id/activate | CRUD + aktivasi template (detail termasuk html; edit = name + html, format immutable) |
 

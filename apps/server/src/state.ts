@@ -74,6 +74,24 @@ export function forcedSlot(
   return { platform, format: chosen, pillar_id };
 }
 
+// Planned slot from a plans row (slot_override): every spec field optional —
+// null/absent falls back to natural rotation for that field. A planned pillar
+// that is no longer active falls back to the natural pillar too (deleted/deactivated
+// pillars must not break the run).
+export function plannedSlot(
+  state: RotationState,
+  pillars: PillarLite[],
+  spec: { platform?: Platform | null; format?: Format | null; pillar_id?: string | null },
+): Slot {
+  const platform = spec.platform ?? OTHER[state.last_platform];
+  const format = spec.format ?? nextFormat(state, platform);
+  const pillarActive = spec.pillar_id != null && pillars.some((p) => p.id === spec.pillar_id);
+  const pillar_id = pillarActive
+    ? spec.pillar_id!
+    : nextPillar(pillars, state.last_pillar_id, true);
+  return { platform, format, pillar_id };
+}
+
 // New state after this slot is successfully sent.
 export function nextState(state: RotationState, slot: Slot): RotationState {
   return {

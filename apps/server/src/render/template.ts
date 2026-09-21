@@ -52,6 +52,19 @@ const DEFAULT_IG = `<!doctype html>
 // Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
 
+// Template package pinned by id (plan slot_override) — status-agnostic: a planned
+// template renders even if not "active" (the plan IS the authority for that date).
+export async function getTemplateSetById(groupId: string, templateId: string): Promise<TemplateSet | null> {
+  const [t] = await sql`select html, html_first, html_last from templates
+    where id = ${templateId} and group_id = ${groupId}`;
+  if (!t) return null;
+  return {
+    body: t.html as string,
+    first: (t.html_first as string | null) ?? null,
+    last: (t.html_last as string | null) ?? null,
+  };
+}
+
 // Active template package for a format. Cover flow: html_first present on the row
 // AND a cover image available → slide 1 uses it. Everything null-safe.
 export async function getTemplateSet(format: Format, platform: Platform, groupId: string): Promise<TemplateSet> {

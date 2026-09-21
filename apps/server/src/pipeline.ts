@@ -2,7 +2,7 @@
 // All queries group-scoped; LLM uses GroupCfg (group ?? env).
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
-import { nextSlot, forcedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
+import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName } from './schema.ts';
 import { ideationPrompt, writerPrompt, criticPrompt } from './prompts.ts';
@@ -51,6 +51,16 @@ export async function resolveSlot(
   const [state, pillars] = await Promise.all([getRotation(groupId), getActivePillars(groupId)]);
   if (forced) return forcedSlot(state, pillars, true, forced.platform, forced.format);
   return nextSlot(state, pillars, true);
+}
+
+// Slot from a plans slot_override row — every spec field falls back to natural
+// rotation when null (pinned pillar must still be active, else natural pillar).
+export async function resolvePlannedSlot(
+  groupId: string,
+  spec: { platform?: Platform | null; format?: Format | null; pillar_id?: string | null },
+): Promise<Slot> {
+  const [state, pillars] = await Promise.all([getRotation(groupId), getActivePillars(groupId)]);
+  return plannedSlot(state, pillars, spec);
 }
 
 // Full LLM phase: ideation → writer → critic. No render, no send.

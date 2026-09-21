@@ -11,7 +11,7 @@ import type { CarouselOut } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
 import { imagePrompt } from '../prompts.ts';
-import { getTemplateSet, buildSlides, isManualCoverMode } from './template.ts';
+import { getTemplateSet, getTemplateSetById, buildSlides, isManualCoverMode } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
@@ -33,6 +33,8 @@ export type RenderOpts = {
   coverRequired?: boolean;
   /** render WITHOUT generating a cover (skip button) — a stored cover.png is still reused */
   skipCover?: boolean;
+  /** pinned template (plans slot_override) — renders even if not active; falls back to the active set when deleted */
+  templateId?: string;
 };
 
 // Cover image for the post: reuse from MinIO, else generate + upload. null = no cover.
@@ -72,7 +74,8 @@ export async function renderCarousel(
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  const set = await getTemplateSet('carousel', platform, cfg.id);
+  const set = (opts.templateId ? await getTemplateSetById(cfg.id, opts.templateId) : null)
+    ?? (await getTemplateSet('carousel', platform, cfg.id));
   const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
   const htmls = buildSlides(set, draft, cover ?? undefined);
 

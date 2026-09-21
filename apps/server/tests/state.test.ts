@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  nextSlot, forcedSlot, nextState, previewSlots,
+  nextSlot, forcedSlot, nextState, previewSlots, plannedSlot,
   type RotationState, type PillarLite,
 } from '../src/state.ts';
 
@@ -142,4 +142,37 @@ test('previewSlots: n=0 → empty, cycle repeats', () => {
 
 test('previewSlots: no active pillars → throw (same as nextSlot)', () => {
   assert.throws(() => previewSlots(S({}), [], 3), /no active pillars/);
+});
+
+// ---------- plannedSlot (plans slot_override — pure) ----------
+
+test('plannedSlot: all fields pinned', () => {
+  const st = S({ last_platform: 'linkedin', last_pillar_id: "1" });
+  const ps = [P("1"), P("2"), P("3")];
+  const slot = plannedSlot(st, ps, { platform: 'instagram', format: 'reels', pillar_id: "3" });
+  assert.deepEqual(slot, { platform: 'instagram', format: 'reels', pillar_id: "3" });
+});
+
+test('plannedSlot: empty spec = natural rotation', () => {
+  const st = S({ last_platform: 'linkedin', last_pillar_id: "1" });
+  const ps = [P("1"), P("2")];
+  assert.deepEqual(plannedSlot(st, ps, {}), nextSlot(st, ps, true));
+});
+
+test('plannedSlot: per-field fallback (platform only / format only / pillar only)', () => {
+  const st = S({ last_platform: 'linkedin', last_ig_format: 'carousel', last_li_format: 'pdf', last_pillar_id: "1" });
+  const ps = [P("1"), P("2")];
+  // platform only → natural format for that platform (IG flips last_ig carousel→reels) + natural pillar
+  assert.deepEqual(plannedSlot(st, ps, { platform: 'instagram' }), { platform: 'instagram', format: 'reels', pillar_id: '2' });
+  // format only → natural platform (IG, flips last) + natural pillar
+  assert.deepEqual(plannedSlot(st, ps, { format: 'text' }), { platform: 'instagram', format: 'text', pillar_id: '2' });
+  // pillar only → natural platform+format + pinned pillar
+  assert.deepEqual(plannedSlot(st, ps, { pillar_id: "2" }), { platform: 'instagram', format: 'reels', pillar_id: '2' });
+});
+
+test('plannedSlot: pinned pillar no longer active → natural pillar fallback', () => {
+  const st = S({ last_platform: 'linkedin', last_pillar_id: "1" });
+  const ps = [P("1"), P("2")];
+  const slot = plannedSlot(st, ps, { pillar_id: "gone" });
+  assert.equal(slot.pillar_id, "2"); // natural rotation, no throw
 });

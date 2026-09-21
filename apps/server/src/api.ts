@@ -13,7 +13,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
@@ -24,7 +24,8 @@ import { listPosts, getPost, rejectPost } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
-import { listOverrides, getOverride, createOverride, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
+import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
+import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
@@ -497,7 +498,7 @@ g.post('/:slug/overrides', async (c) => {
       const ext = f.type === 'image/jpeg' ? 'jpg' : f.type === 'image/webp' ? 'webp' : 'png';
       staged.push({ fname: `img-${String(i + 1).padStart(2, '0')}.${ext}`, buf: Buffer.from(await f.arrayBuffer()) });
     }
-    const ov = await createOverride(group.id, { name, type, template_id, description, for_date, images: [] });
+    const ov = await createOverrideWithPlan(group.id, { name, type, template_id, description, for_date, images: [] });
     const names: string[] = [];
     for (const { fname, buf } of staged) {
       await uploadOverrideBuffer(ov.id, buf, fname);
@@ -508,8 +509,56 @@ g.post('/:slug/overrides', async (c) => {
   } catch (e) {
     const msg = (e as Error).message;
     if (msg.includes('overrides_group_date')) return c.json({ error: 'an override already exists for that date (cancel it first)' }, 400);
+    if (msg.includes('plans_group_date')) return c.json({ error: 'that date already has a plan (cancel the plan first)' }, 400);
     throw e;
   }
+});
+
+// ---------- plans (date-scoped source of truth) ----------
+g.get('/:slug/plans', async (c) => c.json(await listPlans(gr(c).id)));
+
+// create slot_override — pin platform/format/pillar/template for a date's pipeline run
+g.post('/:slug/plans', async (c) => {
+  const parsed = PlanInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const d = parsed.data;
+  if (d.template_id) {
+    const t = await getTemplate(gr(c).id, d.template_id);
+    if (!t) return c.json({ error: 'template not found' }, 404);
+  }
+  if (d.pillar_id) {
+    const exists = await listPillars(gr(c).id).then((ps) => ps.some((p) => p.id === d.pillar_id));
+    if (!exists) return c.json({ error: 'pillar not found' }, 404);
+  }
+  try {
+    const plan = await createPlan(gr(c).id, {
+      for_date: d.for_date, type: 'slot_override',
+      platform: d.platform ?? null, format: d.format ?? null,
+      pillar_id: d.pillar_id ?? null, template_id: d.template_id ?? null,
+      note: d.note,
+    });
+    return c.json(plan, 201);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.includes('plans_group_date')) return c.json({ error: 'that date already has an active plan or override (cancel it first)' }, 400);
+    throw e;
+  }
+});
+
+g.post('/:slug/plans/:id/cancel', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await cancelPlan(gr(c).id, id);
+  if (!ok) return c.json({ error: 'plan not found or not active' }, 400);
+  return c.json({ ok: true });
+});
+
+g.delete('/:slug/plans/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await deletePlan(gr(c).id, id);
+  if (!ok) return c.json({ error: 'plan not found' }, 404);
+  return c.json({ ok: true });
 });
 
 // stream an override image (list view thumbnails) — same shape guard + whitelist as posts

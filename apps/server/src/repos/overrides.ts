@@ -28,29 +28,28 @@ export async function listOverrides(groupId: string, limit = 100): Promise<Overr
   return rows.map(toOut);
 }
 
+// The override row by id — plan flow (plans.override_id) resolves through this.
 export async function getOverride(groupId: string, id: string): Promise<Override | null> {
   const [r] = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, status, created_at
     from overrides where id = ${id} and group_id = ${groupId}`;
   return r ? toOut(r) : null;
 }
 
-// The override (excluding cancelled) that owns the given date — runGenerate consults this:
-// scheduled → deliver it; sent → skip generate; cancelled/none → normal generate.
-export async function getOverrideByDate(groupId: string, forDate: string): Promise<Override | null> {
-  const [r] = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, status, created_at
-    from overrides where group_id = ${groupId} and for_date = ${forDate} and status <> 'cancelled' limit 1`;
-  return r ? toOut(r) : null;
-}
-
-export async function createOverride(groupId: string, d: {
+// Override + its plan row in ONE transaction — an override always owns its date's plan
+// (type override_content). A conflicting active plan (slot_override) rolls back both.
+export async function createOverrideWithPlan(groupId: string, d: {
   name: string; type: OverrideType; template_id: string | null;
   description: string; for_date: string; images: string[];
 }): Promise<Override> {
-  const [r] = await sql<OverrideRow[]>`insert into overrides (group_id, name, type, template_id, description, for_date, images)
-    values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${JSON.stringify(d.images)}::jsonb)
-    returning id, group_id, name, type, template_id, description, for_date, images, status, created_at`;
-  if (!r) throw new Error('insert override failed');
-  return toOut(r);
+  return sql.begin(async (tx) => {
+    const [r] = await tx<OverrideRow[]>`insert into overrides (group_id, name, type, template_id, description, for_date, images)
+      values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${JSON.stringify(d.images)}::jsonb)
+      returning id, group_id, name, type, template_id, description, for_date, images, status, created_at`;
+    if (!r) throw new Error('insert override failed');
+    await tx`insert into plans (group_id, for_date, type, override_id, note)
+      values (${groupId}, ${d.for_date}, 'override_content', ${r.id}, ${d.name})`;
+    return toOut(r);
+  });
 }
 
 export async function updateOverrideImages(id: string, images: string[]): Promise<void> {
@@ -61,10 +60,16 @@ export async function markOverrideSent(id: string): Promise<void> {
   await sql`update overrides set status = 'sent', sent_at = now() where id = ${id} and status = 'scheduled'`;
 }
 
+// Cancel the override AND its plan row (freeing the date) in one transaction —
+// a cancelled override with an active plan would block re-creating either.
 export async function cancelOverride(groupId: string, id: string): Promise<boolean> {
-  const r = await sql`update overrides set status = 'cancelled'
-    where id = ${id} and group_id = ${groupId} and status = 'scheduled' returning id`;
-  return r.length > 0;
+  return sql.begin(async (tx) => {
+    const r = await tx`update overrides set status = 'cancelled'
+      where id = ${id} and group_id = ${groupId} and status = 'scheduled' returning id`;
+    if (r.length === 0) return false;
+    await tx`update plans set status = 'cancelled' where override_id = ${id} and status = 'active'`;
+    return true;
+  });
 }
 
 export async function deleteOverride(groupId: string, id: string): Promise<boolean> {

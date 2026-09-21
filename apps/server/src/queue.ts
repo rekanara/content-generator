@@ -11,7 +11,9 @@ import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageW
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
 import { getGroupCfg, getGroupCfgById } from './groups.ts';
 import { addEvent } from './repos/events.ts';
-import { getOverrideByDate, markOverrideSent } from './repos/overrides.ts';
+import { getOverride, markOverrideSent } from './repos/overrides.ts';
+import { getPlanByDate } from './repos/plans.ts';
+import { resolvePlannedSlot } from './pipeline.ts';
 import { jakartaToday } from './cronmath.ts';
 import type { Override } from '@workspace/shared';
 
@@ -92,39 +94,59 @@ async function deliverOverride(cfg: Awaited<ReturnType<typeof getGroupCfg>>, ov:
 }
 
 // One full run: resolve slot → draft → render → send → markSent.
-// Approval gate (group flag): render → status awaiting_approval → Telegram approve/reject
-// buttons → stop. Rotation NOT consumed until approved & sent (spec #11 holds).
+// Approval gate (group flag): render → post awaits approval in Telegram/FE.
+// Rotation NOT consumed until approved & sent (spec #11 holds).
+// PLANS are the date-scoped source of truth (one funnel: cron/bot/FE):
+//   override_content plan → deliver the linked override (rotation never advances);
+//   slot_override plan    → pipeline runs with the pinned spec (rotation advances on sent);
+//   no plan               → natural rotation.
 async function runGenerate(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   forced?: { platform: Platform; format?: Format },
   notifyChat = true,
   source = 'cli',
 ): Promise<void> {
-  // Override content owns today's slot: scheduled → deliver it INSTEAD of generating
-  // (cron, /gen, FE — one funnel); already sent → skip (content exists for the day);
-  // cancelled/none → normal pipeline. Rotation never advances for overrides.
-  const ov = await getOverrideByDate(cfg.id, jakartaToday());
-  if (ov) {
-    try {
-      if (ov.status === 'sent') {
+  const today = jakartaToday();
+  const plan = await getPlanByDate(cfg.id, today);
+
+  // ——— override content plan: manual content replaces the pipeline ———
+  if (plan?.type === 'override_content') {
+    if (!plan.override_id) {
+      console.warn(`[queue] plan ${plan.id} has no override link — running natural pipeline`);
+    } else {
+      const ov = await getOverride(cfg.id, plan.override_id);
+      // cancelled/missing override = inert plan → natural pipeline (date freed)
+      if (ov && ov.status === 'sent') {
         console.log(`[queue] generate skipped (${cfg.slug}) — override "${ov.name}" already sent today`);
         await sendMessage(cfg, `Generate di-skip — override "${ov.name}" sudah terkirim hari ini.`).catch(() => {});
         return;
       }
-      console.log(`[queue] run ${cfg.slug}: override "${ov.name}" (${ov.type}) replaces pipeline source=${source}`);
-      await deliverOverride(cfg, ov);
-    } catch (e) {
-      // override delivery failing must not be silent — same alert discipline as pipeline runs
-      const msg = `Override delivery failed — ${cfg.slug}: ${(e as Error).message}`;
-      console.error(`[queue] ${msg}`);
-      await sendMessage(cfg, `${msg}\nOverride tetap scheduled — /gen untuk coba lagi.`).catch(() => {});
-      throw e;
+      if (ov && ov.status === 'scheduled') {
+        try {
+          console.log(`[queue] run ${cfg.slug}: override "${ov.name}" (${ov.type}) replaces pipeline source=${source}`);
+          await deliverOverride(cfg, ov);
+        } catch (e) {
+          const msg = `Override delivery failed — ${cfg.slug}: ${(e as Error).message}`;
+          console.error(`[queue] ${msg}`);
+          await sendMessage(cfg, `${msg}\nOverride tetap scheduled — /gen untuk coba lagi.`).catch(() => {});
+          throw e;
+        }
+        return;
+      }
     }
-    return;
   }
 
-  const slot = await resolveSlot(cfg.id, forced);
-  console.log(`[queue] run ${cfg.slug}: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}`);
+  // ——— slot resolution: pinned spec (slot_override) / forced (/gen args) / natural ———
+  const planned = plan?.type === 'slot_override';
+  const slot = planned
+    ? await resolvePlannedSlot(cfg.id, plan)
+    : await resolveSlot(cfg.id, forced);
+  const renderOpts = { coverRequired: true, templateId: planned ? (plan.template_id ?? undefined) : undefined };
+  console.log(`[queue] run ${cfg.slug}: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}${planned ? ` (plan ${plan!.id.slice(0, 8)}${plan!.note ? ` "${plan!.note.slice(0, 40)}"` : ''})` : ''}`);
+  if (planned && forced) {
+    // the plan owns the date — say so instead of silently ignoring the /gen args
+    await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
+  }
   const r = await generateDraft(cfg, slot, source);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
@@ -134,8 +156,8 @@ async function runGenerate(
       await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft));
       return;
     }
-    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot, { coverRequired: true });
-    else await deliver(cfg, r.postId, slot, notifyChat, { coverRequired: true });
+    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot, renderOpts);
+    else await deliver(cfg, r.postId, slot, notifyChat, renderOpts);
   } catch (e) {
     // cover generation failed with a model configured → same manual flow, but say why
     if (e instanceof CoverGenerationError) {
@@ -251,7 +273,7 @@ async function prepareForApproval(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   postId: string,
   slot: Slot,
-  coverOpts: { coverRequired?: boolean; skipCover?: boolean } = {},
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean; templateId?: string } = {},
 ): Promise<void> {
   const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; status: string }[]>`select platform, format, topic, caption, body, status, artifact_prefix
     from posts where id = ${postId} and group_id = ${cfg.id}`;
@@ -391,7 +413,7 @@ async function deliver(
   postId: string,
   slot: Slot,
   notifyChat: boolean,
-  coverOpts: { coverRequired?: boolean; skipCover?: boolean } = {},
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean; templateId?: string } = {},
 ): Promise<void> {
   const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
     from posts where id = ${postId} and group_id = ${cfg.id}`;

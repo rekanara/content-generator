@@ -25,6 +25,11 @@ export type TemplateType = z.infer<typeof TemplateType>;
 export const OverrideType = z.enum(['mix', 'image_only', 'text_only']);
 export type OverrideType = z.infer<typeof OverrideType>;
 
+// Plan types: slot_override = pinned pipeline spec for a date; override_content = link
+// to an override row (system-created by the override flow).
+export const PlanType = z.enum(['slot_override', 'override_content']);
+export type PlanType = z.infer<typeof PlanType>;
+
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_cover', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
@@ -250,6 +255,7 @@ export type GenerateInput = z.infer<typeof GenerateInput>;
 // ---------- calendar preview ----------
 // One upcoming run: slot sequence from pure rotation + (optional) scheduled fire time
 // from the group's cron expr. scheduled_at null when cron is off or beyond computed fires.
+// planned carries the plan owning that date (if any) — pinned spec or override content.
 // ponytail: in-flight queue runs are NOT reflected — rotation advances only after `sent`.
 export const CalendarRun = z.object({
   scheduled_at: z.string().nullable(),
@@ -257,6 +263,13 @@ export const CalendarRun = z.object({
   format: Format,
   pillar_id: z.string().uuid(),
   pillar_name: z.string(),
+  planned: z.object({
+    type: PlanType,
+    note: z.string(),
+    platform: z.enum(['instagram', 'linkedin']).nullable(),
+    format: Format.nullable(),
+    template_name: z.string().nullable(),
+  }).nullable(),
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
 
@@ -284,6 +297,44 @@ export const OverrideInput = z.object({
   for_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 export type OverrideInput = z.infer<typeof OverrideInput>;
+
+// ---------- plans ----------
+// Date-scoped source of truth: what runs on a given day. Plans are EXCEPTIONS —
+// no plan row = natural rotation. slot_override pins the pipeline spec for that
+// date (platform/format/pillar/template, each field optional → natural fallback);
+// override_content rows are created automatically by the override flow.
+export const Plan = z.object({
+  id: z.string().uuid(),
+  for_date: z.string(),
+  type: PlanType,
+  platform: z.enum(['instagram', 'linkedin']).nullable(),
+  format: Format.nullable(),
+  pillar_id: z.string().uuid().nullable(),
+  template_id: z.string().uuid().nullable(),
+  override_id: z.string().uuid().nullable(),
+  note: z.string(),
+  status: z.enum(['active', 'cancelled']),
+  created_at: z.string(),
+});
+export type Plan = z.infer<typeof Plan>;
+
+// create slot_override via API (override_content plans are system-created)
+export const PlanInput = z.object({
+  for_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  platform: z.enum(['instagram', 'linkedin']).nullish(),
+  format: Format.nullish(),
+  pillar_id: z.string().uuid().nullish(),
+  template_id: z.string().uuid().nullish(),
+  note: z.string().default(''),
+}).refine((d) => {
+  // format must match platform when both given
+  if (d.platform && d.format) {
+    if (d.platform === 'instagram' && (d.format === 'pdf' || d.format === 'text')) return false;
+    if (d.platform === 'linkedin' && (d.format === 'carousel' || d.format === 'reels')) return false;
+  }
+  return true;
+}, { message: 'format does not match platform (IG: carousel|reels, LI: pdf|text)' });
+export type PlanInput = z.infer<typeof PlanInput>;
 
 // Template tokens per format — for UI hints + FE validation.
 // {{image}} (generated cover, data-URI) only on the html_first part of carousel formats.

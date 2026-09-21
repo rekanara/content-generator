@@ -1,7 +1,7 @@
 // Small data-fetch hooks — no react-query, stdlib fetch + useEffect.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan } from '@workspace/shared';
 
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -31,5 +31,6 @@ export const usePost = (slug: string, id: string | null) => useApi<PostDetail>((
 export const useStyles = (slug: string) => useApi<StyleSample[]>(() => api.styles(slug), [slug]);
 export const useTemplates = (slug: string) => useApi<Template[]>(() => api.templates(slug), [slug]);
 export const useOverrides = (slug: string) => useApi<Override[]>(() => api.overrides(slug), [slug]);
+export const usePlans = (slug: string) => useApi<Plan[]>(() => api.plans(slug), [slug]);
 export const useTemplate = (slug: string, id: string | null) => useApi<TemplateDetail>(() => id ? api.template(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
 export const useCron = (slug: string) => useApi<CronSettings>(() => api.cron(slug), [slug]);

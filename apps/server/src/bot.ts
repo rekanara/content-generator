@@ -13,7 +13,7 @@ import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
 import { rejectPost } from './repos/posts.ts';
 import { addEvent } from './repos/events.ts';
-import { createOverride, updateOverrideImages } from './repos/overrides.ts';
+import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { jakartaToday } from './cronmath.ts';
 import { config } from './config.ts';
@@ -488,7 +488,7 @@ async function commitOverride(chatId: string, s: OvSession, forDate: string): Pr
       const ext = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff ? 'jpg' : 'png';
       staged.push({ fname: `img-${String(i + 1).padStart(2, '0')}.${ext}`, buf });
     }
-    const ov = await createOverride(cfg.id, {
+    const ov = await createOverrideWithPlan(cfg.id, {
       name, type, template_id: null, description: s.description ?? '', for_date: forDate, images: [],
     });
     const names: string[] = [];
@@ -512,8 +512,8 @@ async function commitOverride(chatId: string, s: OvSession, forDate: string): Pr
     const msg = (e as Error).message;
     overrideSessions.delete(chatId);
     // unique (group, for_date) violation = date already owned by another override
-    if (msg.includes('overrides_group_date')) {
-      await replyGlobal(chatId, `Tanggal ${forDate} sudah dipakai override lain (grup ini) — batalkan/hapus dulu dari dashboard, atau pilih tanggal lain.`);
+    if (msg.includes('overrides_group_date') || msg.includes('plans_group_date')) {
+      await replyGlobal(chatId, `Tanggal ${forDate} sudah dipakai override/plan lain (grup ini) — batalkan/hapus dulu dari dashboard, atau pilih tanggal lain.`);
     } else {
       await replyGlobal(chatId, `Gagal menyimpan override: ${msg.slice(0, 200)}`);
     }
