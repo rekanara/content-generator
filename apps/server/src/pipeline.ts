@@ -40,10 +40,9 @@ async function getPillar(id: string): Promise<PillarFull> {
 }
 
 // RSS context: null → skip (non-news pillar OR feed failure → non-news fallback).
-// Build step order 9; null stub for now so the pipeline runs first.
-async function getNewsContext(): Promise<string | null> {
-  return null; // ponytail: filled in build step rss.ts
-}
+// Implemented in rss.ts (feeds_cache + freshness filter).
+export { getNewsContext } from './rss.ts';
+import { getNewsContext } from './rss.ts';
 
 export async function resolveSlot(
   groupId: string,

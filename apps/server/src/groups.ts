@@ -128,6 +128,15 @@ export async function deleteGroup(slug: string): Promise<boolean> {
   return r.length > 0;
 }
 
+export async function getGroupOwner(slug: string): Promise<{ id: string; user_id: string | null } | null> {
+  const [row] = await sql<{ id: string; user_id: string | null }[]>`select id, user_id from groups where slug = ${slug}`;
+  return row ?? null;
+}
+
+export async function saveCron(groupId: string, expr: string, enabled: boolean): Promise<void> {
+  await sql`update groups set cron_expr = ${expr}, cron_enabled = ${enabled} where id = ${groupId}`;
+}
+
 // Serialize to the Group schema (@workspace/shared): secrets become *_set flags.
 export function groupOut(row: GroupRow) {
   return {

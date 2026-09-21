@@ -4,7 +4,6 @@
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { sql } from './db/pool.ts';
 import { enqueue, queueStatus } from './queue.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
@@ -14,6 +13,7 @@ import {
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
+  getGroupOwner, saveCron,
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar } from './repos/pillars.ts';
 import { listPosts, getPost } from './repos/posts.ts';
@@ -173,8 +173,8 @@ api.patch('/groups/:slug', async (c) => {
 
 api.delete('/groups/:slug', async (c) => {
   const slug = c.req.param('slug');
-  const [row] = await sql`select id, user_id from groups where slug = ${slug}`;
-  if (!row || !canSee(c.get('user'), row.user_id as string | null)) return c.json({ error: 'group not found' }, 404);
+  const row = await getGroupOwner(slug);
+  if (!row || !canSee(c.get('user'), row.user_id)) return c.json({ error: 'group not found' }, 404);
   await deleteGroup(slug);
   await refreshCron(row.id as string); // stop the job
   return c.json({ ok: true });
@@ -238,7 +238,7 @@ g.post('/:slug/cron', async (c) => {
   if (!valid) {
     return c.json({ error: 'invalid cron expression (needs 5/6 fields, e.g. "0 7 * * *")' }, 400);
   }
-  await sql`update groups set cron_expr = ${expr}, cron_enabled = ${enabled} where id = ${group.id}`;
+  await saveCron(group.id, expr, enabled);
   await refreshCron(group.id);
   return c.json(cronStatus(group.id));
 });
