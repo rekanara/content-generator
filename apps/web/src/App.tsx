@@ -6,6 +6,7 @@ import { PostsView } from "@/views/posts.tsx"
 import { StylesView } from "@/views/styles.tsx"
 import { TemplatesView } from "@/views/templates.tsx"
 import { TemplateDetailView } from "@/views/template-detail.tsx"
+import { OverridesView } from "@/views/overrides.tsx"
 import { PostDetailView } from "@/views/post-detail.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
@@ -86,6 +87,7 @@ export function App() {
               {route.view === "posts" && <PostsView slug={route.slug} />}
               {route.view === "styles" && <StylesView slug={route.slug} />}
               {route.view === "templates" && <TemplatesView slug={route.slug} />}
+              {route.view === "overrides" && <OverridesView slug={route.slug} />}
               {route.view === "settings" && <SettingsView slug={route.slug} />}
             </>
           )}

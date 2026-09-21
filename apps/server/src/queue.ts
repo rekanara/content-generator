@@ -7,10 +7,13 @@ import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
 import { getTemplateSet, isManualCoverMode } from './render/template.ts';
 import { artifactExists } from './storage.ts';
 import { renderReelsAndSave } from './render/reels.ts';
-import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons } from './telegram.ts';
+import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons, sendPhoto } from './telegram.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
 import { getGroupCfg, getGroupCfgById } from './groups.ts';
 import { addEvent } from './repos/events.ts';
+import { getOverrideByDate, markOverrideSent } from './repos/overrides.ts';
+import { jakartaToday } from './cronmath.ts';
+import type { Override } from '@workspace/shared';
 
 type Job =
   | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
@@ -69,6 +72,25 @@ async function drain(): Promise<void> {
   }
 }
 
+// Deliver an override: raw content straight to Telegram — text_only → message,
+// mix → 1 photo + caption, image_only → 1 photo or album + caption.
+// Status → sent. Rotation untouched (override is not a rotation product).
+// ponytail: template-based rendering of override content (template_id is stored,
+// unused by delivery for now).
+async function deliverOverride(cfg: Awaited<ReturnType<typeof getGroupCfg>>, ov: Override): Promise<void> {
+  const keys = ov.images.map((f) => `overrides/${ov.id}/${f}`);
+  const caption = ov.description || ov.name;
+  if (ov.type === 'text_only' || keys.length === 0) {
+    await withRetry(() => sendMessage(cfg, caption.slice(0, 4000)));
+  } else if (keys.length === 1) {
+    await withRetry(() => sendPhoto(cfg, keys[0]!, caption));
+  } else {
+    await withRetry(() => sendMediaGroupPhoto(cfg, keys, caption));
+  }
+  await markOverrideSent(ov.id);
+  console.log(`[queue] override "${ov.name}" delivered (${cfg.slug}, ${ov.type}, ${keys.length} image(s)) — rotation untouched`);
+}
+
 // One full run: resolve slot → draft → render → send → markSent.
 // Approval gate (group flag): render → status awaiting_approval → Telegram approve/reject
 // buttons → stop. Rotation NOT consumed until approved & sent (spec #11 holds).
@@ -78,6 +100,29 @@ async function runGenerate(
   notifyChat = true,
   source = 'cli',
 ): Promise<void> {
+  // Override content owns today's slot: scheduled → deliver it INSTEAD of generating
+  // (cron, /gen, FE — one funnel); already sent → skip (content exists for the day);
+  // cancelled/none → normal pipeline. Rotation never advances for overrides.
+  const ov = await getOverrideByDate(cfg.id, jakartaToday());
+  if (ov) {
+    try {
+      if (ov.status === 'sent') {
+        console.log(`[queue] generate skipped (${cfg.slug}) — override "${ov.name}" already sent today`);
+        await sendMessage(cfg, `Generate di-skip — override "${ov.name}" sudah terkirim hari ini.`).catch(() => {});
+        return;
+      }
+      console.log(`[queue] run ${cfg.slug}: override "${ov.name}" (${ov.type}) replaces pipeline source=${source}`);
+      await deliverOverride(cfg, ov);
+    } catch (e) {
+      // override delivery failing must not be silent — same alert discipline as pipeline runs
+      const msg = `Override delivery failed — ${cfg.slug}: ${(e as Error).message}`;
+      console.error(`[queue] ${msg}`);
+      await sendMessage(cfg, `${msg}\nOverride tetap scheduled — /gen untuk coba lagi.`).catch(() => {});
+      throw e;
+    }
+    return;
+  }
+
   const slot = await resolveSlot(cfg.id, forced);
   console.log(`[queue] run ${cfg.slug}: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}`);
   const r = await generateDraft(cfg, slot, source);

@@ -15,6 +15,16 @@ export type Format = z.infer<typeof Format>;
 export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
+// Template role: 'regular' = pipeline rendering (default), the others mark a template
+// as designed for override content of that type (override forms filter by this).
+export const TemplateType = z.enum(['regular', 'mix', 'image_only', 'text_only']);
+export type TemplateType = z.infer<typeof TemplateType>;
+
+// Override content types: mix = exactly 1 image + description; image_only = 1..10 images
+// (+ caption); text_only = description only (no images).
+export const OverrideType = z.enum(['mix', 'image_only', 'text_only']);
+export type OverrideType = z.infer<typeof OverrideType>;
+
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_cover', 'awaiting_approval', 'sent', 'failed', 'rejected']);
 export type PostStatus = z.infer<typeof PostStatus>;
 
@@ -170,6 +180,7 @@ export const Template = z.object({
   id: z.string().uuid(),
   name: z.string(),
   format: TemplateFormat,
+  type: TemplateType,
   is_active: z.boolean(),
   updated_at: z.string(),
 });
@@ -188,6 +199,7 @@ export type TemplateDetail = z.infer<typeof TemplateDetail>;
 export const TemplateInput = z.object({
   name: z.string().min(1),
   format: TemplateFormat,
+  type: TemplateType.default('regular'),
   html: z.string().min(1),
   html_first: z.string().min(1).nullable().default(null),
   html_last: z.string().min(1).nullable().default(null),
@@ -247,6 +259,31 @@ export const CalendarRun = z.object({
   pillar_name: z.string(),
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
+
+// ---------- override content ----------
+// Manual content that replaces the automatic pipeline for a specific date.
+export const Override = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  type: OverrideType,
+  template_id: z.string().uuid().nullable(),
+  description: z.string(),
+  for_date: z.string(), // YYYY-MM-DD (Asia/Jakarta)
+  images: z.array(z.string()), // artifact file names (MinIO overrides/<id>/)
+  status: z.enum(['scheduled', 'sent', 'cancelled']),
+  created_at: z.string(),
+});
+export type Override = z.infer<typeof Override>;
+
+// text-field part of the create form (dashboard sends multipart: these + image files)
+export const OverrideInput = z.object({
+  name: z.string().min(1),
+  type: OverrideType,
+  template_id: z.string().uuid().nullable().default(null),
+  description: z.string().default(''),
+  for_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type OverrideInput = z.infer<typeof OverrideInput>;
 
 // Template tokens per format — for UI hints + FE validation.
 // {{image}} (generated cover, data-URI) only on the html_first part of carousel formats.

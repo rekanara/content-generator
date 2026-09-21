@@ -135,6 +135,9 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
         </Button>
         <h1 className="min-w-0 flex-1 truncate text-lg font-semibold">{data.name}</h1>
         <Badge variant="secondary">{data.format}</Badge>
+        {data.type !== "regular" && (
+          <Badge variant="secondary" className="bg-sky-500/15 text-sky-500 border-transparent">{data.type}</Badge>
+        )}
         <button onClick={activate} disabled={busy}>
           <Badge variant="secondary" className={data.is_active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
             {data.is_active ? "active" : "off"}

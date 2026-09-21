@@ -29,6 +29,15 @@ export async function uploadPostArtifact(slug: string, postId: string, localPath
   return key;
 }
 
+// Override images live under overrides/<overrideId>/ (separate namespace from posts —
+// no slug prefix: override id is already unique, and deletion cascades are simpler).
+export async function uploadOverrideBuffer(overrideId: string, buf: Buffer, filename: string): Promise<string> {
+  await ensureBucket();
+  const key = `overrides/${overrideId}/${filename}`;
+  await client.putObject(config.minio.bucket, key, buf, buf.length);
+  return key;
+}
+
 // Stream object for sending (telegram needs stream/size).
 export async function getArtifactStream(key: string): Promise<NodeJS.ReadableStream> {
   await ensureBucket();

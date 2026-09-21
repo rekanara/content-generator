@@ -17,14 +17,15 @@ import {
 import { api, ApiError } from "@/lib/api"
 import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
-import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
+import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateType } from "@workspace/shared"
 
 const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
+const TYPES: TemplateType[] = ["regular", "mix", "image_only", "text_only"]
 
 export function TemplatesView({ slug }: { slug: string }) {
   const { data, error, loading, reload } = useTemplates(slug)
   const [form, setForm] = useState({
-    name: "", format: "ig-carousel" as TemplateFormat,
+    name: "", format: "ig-carousel" as TemplateFormat, type: "regular" as TemplateType,
     html: "", html_first: "", html_last: "", is_active: false,
   })
   const [msg, setMsg] = useState<string | null>(null)
@@ -32,14 +33,14 @@ export function TemplatesView({ slug }: { slug: string }) {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addTemplate(slug, {
+      await api.addTemplate(slug, { type: form.type,
         name: form.name, format: form.format,
         html: form.html,
         html_first: form.format === "reel" || form.html_first === "" ? null : form.html_first,
         html_last: form.format === "reel" || form.html_last === "" ? null : form.html_last,
         is_active: form.is_active,
       })
-      setForm({ name: "", format: "ig-carousel", html: "", html_first: "", html_last: "", is_active: false })
+      setForm({ name: "", format: "ig-carousel", type: "regular", html: "", html_first: "", html_last: "", is_active: false })
       setMsg(null)
       reload()
     } catch (err) {
@@ -60,7 +61,7 @@ export function TemplatesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} id="template-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+            <div className="grid gap-3 md:grid-cols-[1fr_180px_170px_auto]">
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-name">Template name</Label>
                 <Input id="tpl-name" placeholder="template name" required value={form.name}
@@ -74,6 +75,15 @@ export function TemplatesView({ slug }: { slug: string }) {
                   </SelectTrigger>
                   <SelectContent>
                     {FORMATS.map((f) => <SelectItem key={f} value={f}>{f}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Type</Label>
+                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as TemplateType })}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -132,6 +142,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               {t.name}
             </button>
             <span className="text-xs text-muted-foreground">{t.format}</span>
+            {t.type !== "regular" && <Badge variant="outline" className="text-xs">{t.type}</Badge>}
             <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>

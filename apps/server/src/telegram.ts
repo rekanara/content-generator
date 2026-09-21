@@ -107,8 +107,10 @@ export async function registerCommands(token: string): Promise<void> {
     body: JSON.stringify({
       commands: [
         { command: 'gen', description: 'Generate the next post (natural rotation)' },
+        { command: 'override', description: 'Create override content for a date' },
         { command: 'rerender', description: 'Re-render latest post with current template' },
         { command: 'status', description: 'Schedule, rotation, latest post' },
+        { command: 'cancel', description: 'Abort the current override session' },
         { command: 'help', description: 'All commands' },
       ],
     }),
@@ -143,6 +145,21 @@ export async function sendMediaGroupPhoto(cfg: GroupCfg, keys: string[], caption
     fd.set(`f${i}`, await objectAsBlob(use[i]!, 'image/png'), `slide-${i + 1}.png`);
   }
   await postForm(cfg, 'sendMediaGroup', fd);
+}
+
+// Single photo with caption (override mix / image_only with one image — sendMediaGroup
+// requires 2+ items). Content type detected from bytes so JPEG uploads render correctly.
+export async function sendPhoto(cfg: GroupCfg, key: string, caption: string): Promise<void> {
+  const stream = await getArtifactStream(key);
+  const chunks: Uint8Array[] = [];
+  for await (const c of stream) chunks.push(c as Buffer);
+  const buf = Buffer.concat(chunks);
+  const isJpeg = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+  const fd = new FormData();
+  fd.set('chat_id', cfg.telegram.chatId);
+  fd.set('photo', new Blob([buf], { type: isJpeg ? 'image/jpeg' : 'image/png' }), isJpeg ? 'photo.jpg' : 'photo.png');
+  fd.set('caption', caption.slice(0, 1024));
+  await postForm(cfg, 'sendPhoto', fd);
 }
 
 // sendDocument for PDF (LinkedIn). Input file can be >10MB — telegram limit is 50MB, safe.

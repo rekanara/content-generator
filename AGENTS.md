@@ -42,6 +42,7 @@ One process: Hono server + scheduler (`cron` package's `CronJob` — NOT node-cr
 - **Boot cleanup**: queued/draft/rendered posts at daemon start → `failed` (crash orphans) + one alert per affected group. `awaiting_approval` is deliberate — survives.
 - **Health**: `GET /health` (root, unauthed) — DB ping + queue liveness + stuck-run detection (running && idle >30min → 503).
 - **RSS**: fail-safe (allSettled per feed, cache TTL 30min in `feeds_cache`). Total failure → null → pipeline falls back to non-news pillar. News pillar + no RSS + no non-news pillar → throw.
+- **Override content** (per group, per date): manual content replaces the pipeline for a date — `overrides` table, type mix (1 image + text) / image_only (1-10 images + caption) / text_only (text). runGenerate consults `getOverrideByDate(today Jakarta)` FIRST: scheduled → deliver (rotation NEVER advances), sent → skip, cancelled/none → normal. One per (group, date) — partial unique index; cancelled frees the date. Images in MinIO `overrides/<id>/`. Telegram `/override` guided flow (session 30min, `/cancel`); dashboard Overrides tab (multipart create). Watchdog treats a sent override as slot coverage. `templates.type` ('regular' + override types) filters template choices in override forms. Delivery failure → Telegram alert, stays scheduled (retry /gen).
 - **Calendar** (`usecases/calendar.ts`): N upcoming slots via pure `previewSlots` + cron fire dates. In-flight runs NOT reflected (rotation advances after `sent`).
 
 ## Workflow for any change

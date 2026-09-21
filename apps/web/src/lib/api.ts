@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun } from '@workspace/shared';
+import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -21,7 +21,7 @@ function onUnauthorized() {
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
-    headers: init?.body ? { 'content-type': 'application/json' } : undefined,
+    headers: init?.body && !(init.body instanceof FormData) ? { 'content-type': 'application/json' } : undefined,
     ...init,
   });
   if (!res.ok) {
@@ -76,6 +76,14 @@ export const api = {
   rerender: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/rerender`, { method: 'POST' }),
   skipCover: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/skip-cover`, { method: 'POST' }),
   calendar: (slug: string, n = 7) => req<CalendarRun[]>(`${g(slug)}/calendar?n=${n}`),
+
+  // overrides
+  overrides: (slug: string) => req<Override[]>(`${g(slug)}/overrides`),
+  addOverride: (slug: string, form: FormData) =>
+    req<Override>(`${g(slug)}/overrides`, { method: 'POST', body: form }),
+  overrideImageUrl: (slug: string, id: string, file: string) => `${g(slug)}/overrides/${id}/images/${file}`,
+  cancelOverride: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/overrides/${id}/cancel`, { method: 'POST' }),
+  delOverride: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/overrides/${id}`, { method: 'DELETE' }),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),
@@ -88,7 +96,7 @@ export const api = {
   template: (slug: string, id: string) => req<TemplateDetail>(`${g(slug)}/templates/${id}`),
   patchTemplate: (slug: string, id: string, t: { name: string; html: string; html_first: string | null; html_last: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/templates/${id}`, { method: 'PATCH', body: JSON.stringify(t) }),
-  addTemplate: (slug: string, t: { name: string; format: string; html: string; html_first?: string | null; html_last?: string | null; is_active?: boolean }) =>
+  addTemplate: (slug: string, t: { name: string; format: string; type?: string; html: string; html_first?: string | null; html_last?: string | null; is_active?: boolean }) =>
     req<{ ok: true }>(`${g(slug)}/templates`, { method: 'POST', body: JSON.stringify(t) }),
   activateTemplate: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/templates/${id}/activate`, { method: 'POST' }),
   delTemplate: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/templates/${id}`, { method: 'DELETE' }),

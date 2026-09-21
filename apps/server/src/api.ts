@@ -10,9 +10,10 @@ import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
 import { getPostArtifact } from './usecases/artifacts.ts';
+import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
@@ -23,6 +24,8 @@ import { listPosts, getPost, rejectPost } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
+import { listOverrides, getOverride, createOverride, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
+import { uploadOverrideBuffer } from './storage.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
   touchSession, destroySession, revokeUserSessions, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
@@ -441,6 +444,106 @@ g.delete('/:slug/templates/:id', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await deleteTemplate(gr(c).id, id);
+  return c.json({ ok: true });
+});
+
+// ---------- override content ----------
+// GET list / POST create (multipart: name,type,template_id,description,for_date + images[] files)
+g.get('/:slug/overrides', async (c) => c.json(await listOverrides(gr(c).id)));
+
+g.post('/:slug/overrides', async (c) => {
+  const group = gr(c);
+  let body: Record<string, string | File | (string | File)[]>;
+  try {
+    body = await c.req.parseBody({ all: true }) as Record<string, string | File | (string | File)[]>;
+  } catch {
+    return c.json({ error: 'invalid form body (use multipart/form-data)' }, 400);
+  }
+  const field = (k: string): string => {
+    const v = body[k];
+    return typeof v === 'string' ? v : '';
+  };
+  const rawFiles = body['images'];
+  const files = (Array.isArray(rawFiles) ? rawFiles : rawFiles ? [rawFiles] : []).filter((f): f is File => f instanceof File);
+
+  const templateIdRaw = field('template_id');
+  const parsed = OverrideInput.safeParse({
+    name: field('name'),
+    type: field('type'),
+    template_id: templateIdRaw === '' ? null : templateIdRaw,
+    description: field('description'),
+    for_date: field('for_date'),
+  });
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const { name, type, description, for_date } = parsed.data;
+  const template_id = parsed.data.template_id;
+
+  // image count rules per type — enforced here so both FE and API callers get the same guard
+  if (type === 'text_only' && files.length > 0) return c.json({ error: 'text_only must not have images' }, 400);
+  if (type === 'mix' && files.length !== 1) return c.json({ error: 'mix needs exactly 1 image' }, 400);
+  if (type === 'image_only' && (files.length < 1 || files.length > 10)) return c.json({ error: 'image_only needs 1-10 images' }, 400);
+  const ALLOWED = ['image/jpeg', 'image/png', 'image/webp'];
+  for (const f of files) {
+    if (!ALLOWED.includes(f.type)) return c.json({ error: `unsupported image type: ${f.type}` }, 400);
+    if (f.size > 10 * 1024 * 1024) return c.json({ error: 'image exceeds 10MB' }, 400);
+  }
+
+  try {
+    // upload images BEFORE creating the row — a failed upload must not leave an
+    // orphan scheduled override owning the date. Buffer the files, insert last.
+    const staged: { fname: string; buf: Buffer }[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i]!;
+      const ext = f.type === 'image/jpeg' ? 'jpg' : f.type === 'image/webp' ? 'webp' : 'png';
+      staged.push({ fname: `img-${String(i + 1).padStart(2, '0')}.${ext}`, buf: Buffer.from(await f.arrayBuffer()) });
+    }
+    const ov = await createOverride(group.id, { name, type, template_id, description, for_date, images: [] });
+    const names: string[] = [];
+    for (const { fname, buf } of staged) {
+      await uploadOverrideBuffer(ov.id, buf, fname);
+      names.push(fname);
+    }
+    if (names.length > 0) await updateOverrideImages(ov.id, names);
+    return c.json({ ...ov, images: names }, 201);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.includes('overrides_group_date')) return c.json({ error: 'an override already exists for that date (cancel it first)' }, 400);
+    throw e;
+  }
+});
+
+// stream an override image (list view thumbnails) — same shape guard + whitelist as posts
+g.get('/:slug/overrides/:id/images/:file', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const file = c.req.param('file');
+  if (!/^img-\d{2,3}\.(png|jpg|webp)$/.test(file)) return c.json({ error: 'invalid file' }, 400);
+  const ov = await getOverride(gr(c).id, id);
+  if (!ov || !ov.images.includes(file)) return c.json({ error: 'image not found' }, 404);
+  const key = `overrides/${id}/${file}`;
+  const size = await statArtifact(key).catch(() => null);
+  if (size === null) return c.json({ error: 'image not found' }, 404);
+  const ext = file.split('.').pop()!;
+  const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+  const stream = Readable.from(await getArtifactStream(key));
+  return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
+    headers: { 'content-type': mime, 'content-length': String(size), 'cache-control': 'private, no-store' },
+  });
+});
+
+g.post('/:slug/overrides/:id/cancel', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await cancelOverride(gr(c).id, id);
+  if (!ok) return c.json({ error: 'override not found or not scheduled' }, 400);
+  return c.json({ ok: true });
+});
+
+g.delete('/:slug/overrides/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await deleteOverride(gr(c).id, id);
+  if (!ok) return c.json({ error: 'override not found' }, 404);
   return c.json({ ok: true });
 });
 

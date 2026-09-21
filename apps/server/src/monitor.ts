@@ -8,7 +8,7 @@
 // Alert goes to the group's own Telegram chat (per-group cfg, env fallback). Never throws.
 import { CronJob } from 'cron';
 import { sql } from './db/pool.ts';
-import { prevFire } from './cronmath.ts';
+import { prevFire, toJakartaDate } from './cronmath.ts';
 import { sendMessage } from './telegram.ts';
 import { getGroupCfgById } from './groups.ts';
 
@@ -22,9 +22,14 @@ async function checkGroup(g: { id: string; slug: string; cron_expr: string; cron
   const prev = prevFire(g.cron_expr, new Date());
   if (!prev) return;
   if (Date.now() - prev.getTime() < GRACE_MS) return;
+  // slot coverage: any post created since fire time, OR a delivered override owning
+  // that slot's date (overrides replace the pipeline — a sent override IS the content)
   const [row] = await sql<{ n: number }[]>`select count(*)::int as n from posts
     where group_id = ${g.id} and created_at >= ${prev}`;
   if ((row?.n ?? 0) > 0) return; // run happened (any status) — slot covered
+  const [ov] = await sql<{ n: number }[]>`select count(*)::int as n from overrides
+    where group_id = ${g.id} and for_date = ${toJakartaDate(prev)} and status = 'sent'`;
+  if ((ov?.n ?? 0) > 0) return; // override delivered for that date — slot covered
   if (alerted.get(g.id) === prev.getTime()) return; // already alerted for this slot
   alerted.set(g.id, prev.getTime());
 

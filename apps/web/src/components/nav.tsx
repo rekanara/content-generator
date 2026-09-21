@@ -11,6 +11,7 @@ const TABS = [
   { id: "posts", label: "Posts" },
   { id: "styles", label: "Styles" },
   { id: "templates", label: "Templates" },
+  { id: "overrides", label: "Overrides" },
   { id: "settings", label: "Settings" },
 ] as const
 

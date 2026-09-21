@@ -8,7 +8,7 @@ export type Route =
   | { name: 'postDetail'; slug: string; id: string }      // /app/:slug/posts/:id
   | { name: 'groupView'; slug: string; view: string };    // /app/:slug/:view
 
-const GROUP_VIEWS = ['dashboard', 'pillars', 'posts', 'styles', 'templates', 'settings'];
+const GROUP_VIEWS = ['dashboard', 'pillars', 'posts', 'styles', 'templates', 'overrides', 'settings'];
 
 export function parseRoute(pathname: string): Route {
   if (pathname === '/login' || pathname === '/app/login') return { name: 'login' };

@@ -119,7 +119,16 @@ Bot Telegram (polling):
 - `/gen [group] [platform] [format]` — tanpa group = group pertama; tanpa format → ikut rotasi.
 - `/status [group]` — jadwal, cron aktif?, posisi rotasi, post terakhir.
 - `/rerender [group]` — re-render post TERAKHIR dengan template saat ini (konten sama, tanpa LLM). Status `sent` → kirim ulang artefak baru (rotasi tak disentuh); `awaiting_approval` → awaiting + tombol approval baru (rotasi tetap menunggu approve); `rendered` → ikut gerbang approval (gate on → awaiting+tombol; gate off → deliver + rotasi maju — first send). Paritas FE: tombol rerender di Posts tab + `POST /api/g/:slug/posts/:id/rerender`.
-- Menu command bot ter-register otomatis saat boot (`setMyCommands`): /gen, /rerender, /status, /help — muncul sebagai tombol menu "/" di chat.
+- `/override [group]` — buat override content via flow terpandu: pilih type (tombol) → gambar (mix: 1 foto auto-lanjut; image_only: multi + tombol Selesai; text_only: skip) → description → tanggal (YYYY-MM-DD / DD-MM-YYYY) → commit (gambar di-download ke MinIO). `/cancel` membatalkan sesi. Sesi 30 menit, per chat.
+- Menu command bot ter-register otomatis saat boot (`setMyCommands`): /gen, /override, /rerender, /status, /cancel, /help — muncul sebagai tombol menu "/" di chat.
+
+### Override content
+
+- **Konten manual yang menggantikan pipeline di tanggal tertentu** (per group, `overrides` table): type `mix` (tepat 1 gambar + teks) | `image_only` (1-10 gambar + caption) | `text_only` (teks saja). Gambar disimpan `overrides/<id>/img-NN.<ext>` di MinIO. `template_id` opsional — tersimpan untuk render di masa depan (ponytail), delivery saat ini kirim raw.
+- **Satu override per (group, tanggal)** — DB unique index, `cancelled` membebaskan tanggal. `templates.type` (`regular` default | tipe override) memfilter pilihan template di form (dashboard + Telegram).
+- **Redirect di runGenerate** (satu corong: cron/bot/FE): tanggal punya override `scheduled` → kirim override (rotasi TIDAK maju); `sent` → skip generate; `cancelled`/kosong → pipeline normal. Delivery: text_only → sendMessage; 1 gambar → sendPhoto; multi → sendMediaGroup.
+- **Watchdog**: slot dengan override terkirim dianggap ter-cover (tidak false-alarm). Override scheduled yang belum terkirim tetap alert.
+- Dashboard: tab **Overrides** (list + thumbnail, create multipart multi-upload, cancel, delete). Delivery failure → alert Telegram, override tetap scheduled (retry via /gen).
 
 ### Cover image (halaman pertama carousel/PDF)
 
@@ -187,6 +196,7 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | POST | /api/g/:slug/posts/:id/approve, /:id/reject | approval gate (approve via queue; reject langsung + status guard) |
 | POST | /api/g/:slug/posts/:id/rerender | re-render dengan template saat ini (konten sama; guard status + format) |
 | GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
+| GET/POST | /api/g/:slug/overrides, /:id/cancel, DELETE /:id, GET /:id/images/:file | override content (create = multipart multi-upload; image streaming whitelist) |
 | GET/POST | /api/g/:slug/styles, PATCH/DELETE /:id | CRUD style samples (edit = title, body, platform) |
 | GET/POST | /api/g/:slug/templates, GET/PATCH/DELETE /:id, /:id/activate | CRUD + aktivasi template (detail termasuk html; edit = name + html, format immutable) |
 

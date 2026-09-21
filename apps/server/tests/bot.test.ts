@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseCmd, parseCallback } from '../src/bot.ts';
+import { parseCmd, parseCallback, parseOverrideDate } from '../src/bot.ts';
 
 const SLUGS = ['default', 'brand2'];
 
@@ -106,4 +106,58 @@ test('parseCallback: unknown action → null', () => {
   assert.equal(parseCallback(`delete:${UUID}`), null);
   assert.equal(parseCallback(UUID), null);
   assert.equal(parseCallback(''), null);
+});
+
+// ---------- parseCallback: override flow buttons ----------
+
+test('parseCallback: ovtype:mix / image_only / text_only', () => {
+  assert.deepEqual(parseCallback('ovtype:mix'), { t: 'ovtype', value: 'mix' });
+  assert.deepEqual(parseCallback('ovtype:image_only'), { t: 'ovtype', value: 'image_only' });
+  assert.deepEqual(parseCallback('ovtype:text_only'), { t: 'ovtype', value: 'text_only' });
+});
+
+test('parseCallback: ovdone', () => {
+  assert.deepEqual(parseCallback('ovdone'), { t: 'ovdone' });
+});
+
+test('parseCallback: invalid ovtype value → null', () => {
+  assert.equal(parseCallback('ovtype:video'), null);
+  assert.equal(parseCallback('ovtype:'), null);
+});
+
+// ---------- parseOverrideDate (pure) ----------
+
+test('parseOverrideDate: ISO format', () => {
+  assert.deepEqual(parseOverrideDate('2026-10-01', '2026-09-21'), { date: '2026-10-01', past: false });
+});
+
+test('parseOverrideDate: DD-MM-YYYY (Indonesian) maps to same date', () => {
+  assert.deepEqual(parseOverrideDate('01-10-2026', '2026-09-21'), { date: '2026-10-01', past: false });
+  assert.deepEqual(parseOverrideDate('25-12-2026', '2026-09-21'), { date: '2026-12-25', past: false });
+});
+
+test('parseOverrideDate: past detection', () => {
+  assert.deepEqual(parseOverrideDate('2026-01-01', '2026-09-21'), { date: '2026-01-01', past: true });
+  assert.deepEqual(parseOverrideDate('2026-09-21', '2026-09-21'), { date: '2026-09-21', past: false }); // today ok
+});
+
+test('parseOverrideDate: invalid shapes → null', () => {
+  assert.equal(parseOverrideDate('tomorrow', '2026-09-21'), null);
+  assert.equal(parseOverrideDate('2026/10/01', '2026-09-21'), null);
+  assert.equal(parseOverrideDate('01/10/2026', '2026-09-21'), null);
+  assert.equal(parseOverrideDate('', '2026-09-21'), null);
+});
+
+test('parseOverrideDate: calendar-rollover dates rejected (31-02)', () => {
+  assert.equal(parseOverrideDate('31-02-2026', '2026-09-21'), null); // Feb never has 31 days
+  assert.equal(parseOverrideDate('2026-02-31', '2026-09-21'), null);
+});
+
+test('parseCmd: /override with and without slug', () => {
+  assert.deepEqual(parseCmd('/override', SLUGS), { t: 'override', slug: undefined });
+  assert.deepEqual(parseCmd('/override brand2', SLUGS), { t: 'override', slug: 'brand2' });
+});
+
+test('parseCmd: /cancel', () => {
+  assert.deepEqual(parseCmd('/cancel', SLUGS), { t: 'cancel' });
 });

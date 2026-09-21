@@ -5,6 +5,17 @@ import { CronTime } from 'cron';
 
 export const TZ = 'Asia/Jakarta';
 
+// Today's date in Asia/Jakarta as YYYY-MM-DD — overrides are date-scoped by the
+// group's operating timezone, not the host clock.
+export function jakartaToday(now = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+// Date (any tz) → Jakarta YYYY-MM-DD (for mapping a cron fire time to its slot date).
+export function toJakartaDate(d: Date): string {
+  return jakartaToday(d);
+}
+
 // Next n fire times strictly after `from`. Invalid expr → [].
 export function nextFires(expr: string, from: Date, n: number): Date[] {
   if (n <= 0) return [];
