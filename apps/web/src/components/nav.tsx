@@ -27,7 +27,8 @@ export function Nav({ route, me, onNavigate, onLogout }: {
 
   return (
     <header className="sticky top-0 z-10 border-b bg-background/95 backdrop-blur">
-      <div className="mx-auto flex max-w-4xl items-center gap-1 p-3">
+      {/* keep header aligned with the content width (template detail renders wider) */}
+      <div className={"mx-auto flex items-center gap-1 p-3 " + (route.name === "templateDetail" ? "max-w-6xl" : "max-w-4xl")}>
         <button
           className="mr-2 text-sm font-semibold tracking-tight hover:underline"
           onClick={() => navigate("/app")}

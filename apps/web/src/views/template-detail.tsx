@@ -118,8 +118,9 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
 
       {msg && <p className="text-sm text-muted-foreground">{msg}</p>}
 
-      <div className="grid gap-4 lg:grid-cols-[1fr_auto]">
-        <Card>
+      {/* minmax(0,1fr): editor takes all remaining width, never overflows the container */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <Card className="min-w-0">
           <CardContent className="p-4">
             <form onSubmit={save} className="grid gap-3">
               <div className="space-y-1.5">
@@ -132,7 +133,8 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
               </p>
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-html">HTML template</Label>
-                <Textarea id="tpl-html" className="min-h-96 font-mono text-xs" required value={html}
+                <Textarea id="tpl-html" className="min-h-[32rem] font-mono text-xs leading-relaxed" required value={html}
+                  spellCheck={false}
                   onChange={(e) => { setHtml(e.target.value); setTouched(true) }} />
               </div>
               <div className="flex gap-2">

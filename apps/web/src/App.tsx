@@ -71,7 +71,8 @@ export function App() {
             navigate("/login")
           }}
         />
-        <main className="mx-auto max-w-4xl p-4 md:p-6">
+        {/* editor pages (template detail) need the extra width for side-by-side preview */}
+        <main className={route.name === "templateDetail" ? "mx-auto max-w-6xl p-4 md:p-6" : "mx-auto max-w-4xl p-4 md:p-6"}>
           {route.name === "groups" && <GroupsView />}
           {route.name === "users" && me.role === "admin" && <UsersView />}
           {route.name === "resetPassword" && me.role === "admin" && <ResetPasswordView id={route.id} />}
