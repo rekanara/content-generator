@@ -100,7 +100,7 @@ Status lifecycle: `queued → draft → rendered → awaiting_approval →(appro
 
 Migrasi 001–009 (009 = approval gate). Watchdog pakai `cronmath.ts` (prevFire/nextFires di atas CronTime `cron` package, TZ Asia/Jakarta).
 
-Boot cleanup: post berstatus `queued`/`draft`/`rendered` saat daemon start → tandai `failed` (orphan dari crash). Migrate runner men-seed admin default (`ADMIN_USER`/`ADMIN_PASSWORD` env atau default) jika tabel users kosong.
+Boot cleanup: post berstatus `queued`/`draft`/`rendered` saat daemon start → tandai `failed` (orphan dari crash). Migrate runner men-seed admin default (username `admin`, password dari `CG_ADMIN_PASSWORD` env atau random+dicetak sekali) jika tabel users kosong.
 
 ## 5. Commands & Entry
 
@@ -202,6 +202,8 @@ SPA fallback: route non-/api tak dikenal → `apps/web/dist/index.html`. `/api/*
 
 ## 10. Config & Secrets
 
+Env file dibaca dari CWD process — script npm workspace jalan di `apps/server`, jadi `.env` harus di `apps/server/.env` (bukan repo root). Loader: `config.ts` (`file:.env` + `.env.local`).
+
 ```
 DB_HOST=localhost DB_PORT=5432 DB_USER=... DB_PASSWORD=... DB_NAME=content_generator
 MINIO_ENDPOINT=localhost MINIO_PORT=9000 MINIO_ACCESS_KEY=... MINIO_SECRET_KEY=...
@@ -211,7 +213,7 @@ LLM_MODEL_CRITIC=...                                   # kosong = pakai LLM_MODE
 TTS_PROVIDER=edge TTS_VOICE=id-ID-ArdiNeural           # edge default, opsi openai
 TTS_BASE_URL=... TTS_API_KEY=... TTS_MODEL=...
 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=...
-ADMIN_USER=admin ADMIN_PASSWORD=...                    # seed admin saat migrate (sekali)
+CG_ADMIN_PASSWORD=...                                   # seed admin saat migrate (sekali, username admin)
 PORT=8787
 ```
 

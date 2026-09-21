@@ -55,7 +55,7 @@ One process: Hono server + scheduler (`cron` package's `CronJob` — NOT node-cr
 
 | Command | Where | Purpose |
 |---|---|---|
-| `npm run migrate` | root or apps/server | Apply pending migrations + seed admin (`ADMIN_USER`/`ADMIN_PASSWORD` env, only if users table empty) |
+| `npm run migrate` | root or apps/server | Apply pending migrations + seed admin (user `admin`, password from `CG_ADMIN_PASSWORD` env or random+printed, only if users table empty) |
 | `npm run serve` | root or apps/server | Run daemon: API `:8787` + cron + bot + queue, serves built SPA |
 | `npm run daily -- [--group slug] [--dry\|--no-render] [--platform X] [--format Y]` | apps/server | One pipeline run. `--no-render` = stop at draft. `--dry` = full render + MinIO upload but NO telegram send, NO rotation update |
 | `npm run user:add -- <name> [--admin]` | apps/server | Create user (password via arg/stdin) |
@@ -66,7 +66,7 @@ One process: Hono server + scheduler (`cron` package's `CronJob` — NOT node-cr
 
 Dev utilities in `apps/server/scripts/` (run via tsx): `reset-db.ts`, `check-db.ts`, `test-login.ts`, `test-rss.ts` (live feed check).
 
-Setup: `cp .env.example .env` — Postgres + MinIO + LLM + Telegram required (full list SPEC §10).
+Setup: `cp .env.example apps/server/.env` — Postgres + MinIO + LLM + Telegram required (full list SPEC §10). NOTE: workspace scripts run with CWD `apps/server`, so the daemon reads `.env` from there, not repo root.
 
 ## Frontend gotchas
 
