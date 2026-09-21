@@ -1,27 +1,27 @@
 # content-generator
 
-Daemon yang otomatis menghasilkan **satu konten per hari per group** untuk audiens developer (bahasa Indonesia) — Instagram (carousel / reels dengan voiceover) atau LinkedIn (PDF / teks), bergilir otomatis. Hasil dikirim ke chat Telegram untuk di-upload manual. Bukan auto-posting, bukan multi-agent.
+A daemon that auto-generates **one developer-audience post per day per group** (Indonesian language) — Instagram (carousel / voiceover reels) or LinkedIn (PDF / text), alternating automatically. Output is delivered to a Telegram chat for manual uploading. Not auto-posting, not multi-agent.
 
-Satu process: HTTP API + SPA admin + scheduler cron per group + bot Telegram (polling) + queue FIFO + pipeline (ideation → writer → critic → render → send).
+One process: HTTP API + admin SPA + per-group cron scheduler + Telegram bot (polling) + FIFO queue + pipeline (ideation → writer → critic → render → send).
 
-Detail lengkap: [SPEC.md](SPEC.md) · Brief untuk AI agent: [AGENTS.md](AGENTS.md)
+Full detail: [SPEC.md](SPEC.md) · AI agent brief: [AGENTS.md](AGENTS.md)
 
-## Fitur utama
+## Key features
 
-- **Rotasi otomatis** — platform IG ↔ LinkedIn, format bergilir per platform (carousel ↔ reels, PDF ↔ teks), pilar topik round-robin. Hari terlewat tidak merusak pola (state-based).
-- **Multi-group, multi-user** — tiap group punya config sendiri (LLM, TTS, Telegram, cron, pilar, template) + auth session (admin / user biasa).
-- **Approval gate (opsional per group)** — post berhenti di `awaiting_approval` sebelum dikirim; approve/reject via tombol inline di Telegram atau dari web.
-- **Watchdog** — slot cron yang terlewat (daemon mati, run tak jalan) → alert ke Telegram saat boot + heartbeat tiap 6 jam. Run gagal juga alert — tidak ada failure senyap.
-- **Calendar preview** — lihat N slot ke depan (platform/format/pilar + jadwalnya) tanpa menjalankan pipeline.
-- **Audit trail** — semua peristiwa per post tersimpan (`post_events`).
-- Konten berita tech dari RSS segar (Hacker News, dev.to) dengan fallback aman kalau feed mati.
+- **Automatic rotation** — platform alternates IG ↔ LinkedIn, format alternates per platform (carousel ↔ reels, PDF ↔ text), topic pillars round-robin. Missed days never break the pattern (state-based).
+- **Multi-group, multi-user** — each group has its own config (LLM, TTS, Telegram, cron, pillars, templates) + session auth (admin / regular user).
+- **Approval gate (optional, per group)** — posts pause at `awaiting_approval` before sending; approve/reject via inline buttons in Telegram or from the web.
+- **Watchdog** — a missed cron slot (daemon down, run never started) triggers a Telegram alert at boot + every 6h heartbeat. Failed runs alert too — no silent failures.
+- **Calendar preview** — see the next N slots (platform/format/pillar + schedule) without running the pipeline.
+- **Audit trail** — every post event is recorded (`post_events`).
+- Fresh tech-news content from RSS (Hacker News, dev.to) with a safe fallback when feeds die.
 
 ## Requirements
 
 - Node ≥ 20
 - PostgreSQL 16+
-- MinIO (artefact PNG/PDF/MP4)
-- LLM API (OpenAI-compatible — base URL + API key bebas, mis. OpenRouter)
+- MinIO (PNG/PDF/MP4 artifacts)
+- An LLM API (OpenAI-compatible — any base URL + key, e.g. OpenRouter)
 - Telegram bot token + chat ID
 
 ## Setup
@@ -29,78 +29,78 @@ Detail lengkap: [SPEC.md](SPEC.md) · Brief untuk AI agent: [AGENTS.md](AGENTS.m
 ```bash
 npm install
 
-# env dibaca dari CWD apps/server (script npm workspace jalan di situ)
+# env is read from the CWD apps/server (npm workspace scripts run there)
 cp .env.example apps/server/.env
-# isi: DB_*, MINIO_*, LLM_*, TELEGRAM_* — lihat file untuk daftar lengkap
+# fill in: DB_*, MINIO_*, LLM_*, TELEGRAM_* — see the file for the full list
 
-# terapkan migrasi SQL + seed user admin
+# apply SQL migrations + seed the admin user
 npm run migrate
 ```
 
-Seeding admin: hanya jalan kalau tabel `users` kosong. Username `admin`, password dari `CG_ADMIN_PASSWORD` di env — kalau tidak diisi, password random dibuat dan **dicetak sekali** di console saat migrate.
+Admin seeding only runs when the `users` table is empty. Username `admin`, password from the `CG_ADMIN_PASSWORD` env var — if unset, a random one is generated and **printed once** to the console during migrate.
 
-MinIO: bucket default `content-generator` (buat manual atau lewat console MinIO).
+MinIO: default bucket `content-generator` (create it manually or via the MinIO console).
 
-## Menjalankan
+## Running
 
 ```bash
-# build SPA dulu (daemon menyajikan apps/web/dist — wajib sebelum serve)
-npm run build            # dari root (turbo) atau di apps/web
+# build the SPA first (the daemon serves apps/web/dist — required before serve)
+npm run build            # from repo root (turbo) or in apps/web
 
-# jalankan daemon (API :8787 + cron + bot polling + queue)
+# run the daemon (API :8787 + cron + bot polling + queue)
 npm run serve
 ```
 
-Buka `http://localhost:8787` → login → admin SPA.
+Open `http://localhost:8787` → log in → admin SPA.
 
-Catatan frontend: **tidak ada Vite dev proxy.** `npm run dev` (Vite :5173) akan gagal semua panggilan API — loop pengembangan FE adalah `npm run build` (web) → refresh halaman. Health check daemon: `GET /health` (tanpa auth).
+Frontend note: **there is no Vite dev proxy.** `npm run dev` (Vite :5173) will fail every API call — the FE dev loop is `npm run build` (web) → refresh the page. Daemon health check: `GET /health` (unauthenticated).
 
-## Perintah harian
+## Everyday commands
 
-| Perintah | Fungsi |
+| Command | Purpose |
 |---|---|
-| `npm run migrate` | Migrasi SQL pending + seed admin |
-| `npm run serve` | Jalankan daemon |
-| `npm test` | Test unit (server, zero-dep `node:test`) |
-| `npm run typecheck` | Typecheck semua workspace (turbo) |
-| `npm run lint` | Lint (web + ui; ada 2 error pre-existing di packages/ui, shadcn pattern) |
+| `npm run migrate` | Apply pending SQL migrations + seed admin |
+| `npm run serve` | Run the daemon |
+| `npm test` | Unit tests (server, zero-dep `node:test`) |
+| `npm run typecheck` | Typecheck all workspaces (turbo) |
+| `npm run lint` | Lint (web + ui; 2 pre-existing errors in packages/ui, shadcn pattern) |
 
-CLI di `apps/server`:
+CLI in `apps/server`:
 
-| Perintah | Fungsi |
+| Command | Purpose |
 |---|---|
-| `npm run daily -- [--group slug] [--dry\|--no-render] [--platform X] [--format Y]` | Satu run pipeline. `--no-render` berhenti di draft; `--dry` render + upload MinIO tapi **tidak** kirim Telegram & tidak majukan rotasi |
-| `npm run user:add -- <name> [--admin]` | Buat user (password via arg/stdin) |
-| `npm run user:pass -- <name>` | Reset password + revoke semua session |
-| `npm run user:list` | Daftar user |
+| `npm run daily -- [--group slug] [--dry\|--no-render] [--platform X] [--format Y]` | One pipeline run. `--no-render` stops at draft; `--dry` renders + uploads to MinIO but does **not** send to Telegram and does not advance rotation |
+| `npm run user:add -- <name> [--admin]` | Create a user (password via arg/stdin) |
+| `npm run user:pass -- <name>` | Reset password + revoke all sessions |
+| `npm run user:list` | List users |
 
-## Bot Telegram
+## Telegram bot
 
-Chat langsung dengan bot (token dari env global). Bot polling — tidak perlu public URL/webhook.
+Talk to the bot directly (global env token). Polling-based — no public URL or webhook needed.
 
 ```
-/gen [group] [platform] [format]   — generate manual (tanpa arg = group pertama, rotasi natural)
-/status [group]                    — jadwal, posisi rotasi, post terakhir
-/help                              — bantuan
+/gen [group] [platform] [format]   — manual generate (no args = first group, natural rotation)
+/status [group]                    — schedule, rotation position, latest post
+/help                              — help
 ```
 
-Kalau group mengaktifkan approval gate, hasil generate dikirim dengan tombol **Approve / Reject** — approve = kirim sekarang + rotasi maju, reject = dibuang tanpa mengonsumsi rotasi.
+When a group enables the approval gate, generated posts arrive with **Approve / Reject** buttons — approve = send now + advance rotation, reject = discard without consuming the slot's rotation.
 
-## Struktur
+## Structure
 
 ```
 apps/server        daemon — Hono API, postgres.js, cron, bot, queue, pipeline, render (Puppeteer + ffmpeg)
-apps/web           SPA admin — React 19 + Vite (state-based view switcher, tanpa router URL)
-packages/shared    kontrak FE↔BE tunggal (zod v4)
-packages/ui        komponen (tailwind v4 + shadcn-style)
+apps/web           admin SPA — React 19 + Vite (state-based view switcher, no URL router)
+packages/shared    single FE↔BE contract (zod v4)
+packages/ui        components (tailwind v4 + shadcn-style)
 ```
 
-Aturan arsitektur ketat (layering, SQL parameterized, zod di boundary, PK UUID v7) — lihat [AGENTS.md](AGENTS.md) sebelum kontribusi.
+Strict architecture rules (layering, parameterized SQL, zod at boundaries, UUID v7 PKs) — read [AGENTS.md](AGENTS.md) before contributing.
 
-Menambah komponen shadcn (dari root, repo ini npm bukan pnpm):
+Adding shadcn components (from repo root — this repo uses npm, not pnpm):
 
 ```bash
 npx shadcn@latest add <name> -c apps/web
 ```
 
-Komponen mendarat di `packages/ui/src/components`, di-import sebagai `@workspace/ui/components/<name>`.
+Components land in `packages/ui/src/components`, imported as `@workspace/ui/components/<name>`.
