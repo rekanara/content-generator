@@ -1,17 +1,18 @@
 // Rotation state repository (per group) + commitSent transaction.
+// NOTE: column lists are inlined literally — postgres.js `sql('str')` builds a single
+// quoted Identifier (not a fragment), which broke queries when nested (bit us in e887922).
 import { sql } from '../db/pool.ts';
 import type { RotationState, Slot } from '../state.ts';
 
-const ROT_COLS = `last_platform, last_ig_format, last_li_format, last_pillar_id`;
-
 export async function getRotation(groupId: string): Promise<RotationState> {
-  const rows = await sql`select ${sql(ROT_COLS)} from rotation_state where group_id = ${groupId}`;
+  const rows = await sql`select last_platform, last_ig_format, last_li_format, last_pillar_id
+    from rotation_state where group_id = ${groupId}`;
   const r = rows[0] as any;
   if (!r) {
     // new group without state → seed an empty row (migration 005 default)
     const [created] = await sql`insert into rotation_state (group_id) values (${groupId})
       on conflict (group_id) do nothing
-      returning ${sql(ROT_COLS)}`;
+      returning last_platform, last_ig_format, last_li_format, last_pillar_id`;
     if (created) return created as any;
     throw new Error(`rotation_state group ${groupId} is empty`);
   }
@@ -21,15 +22,6 @@ export async function getRotation(groupId: string): Promise<RotationState> {
     last_li_format: r.last_li_format,
     last_pillar_id: r.last_pillar_id,
   };
-}
-
-export async function setRotation(groupId: string, next: RotationState): Promise<void> {
-  await sql`update rotation_state set
-    last_platform = ${next.last_platform},
-    last_ig_format = ${next.last_ig_format},
-    last_li_format = ${next.last_li_format},
-    last_pillar_id = ${next.last_pillar_id},
-    updated_at = now() where group_id = ${groupId}`;
 }
 
 export async function getActivePillars(groupId: string): Promise<{ id: string; is_news: boolean }[]> {

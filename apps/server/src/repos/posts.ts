@@ -1,11 +1,10 @@
 // Post repository (group-scoped) + body flattening for display.
+// NOTE: summary columns inlined literally — postgres.js `sql('str')` is an Identifier, not a fragment.
 import { sql } from '../db/pool.ts';
 import type { PostSummary, PostDetail } from '@workspace/shared';
 
-const SUMMARY_COLS = 'id, platform, format, topic, status, source, created_at, pillar_id';
-
 export async function listPosts(groupId: string, limit = 100): Promise<PostSummary[]> {
-  const rows = await sql`select ${sql(SUMMARY_COLS)}
+  const rows = await sql`select id, platform, format, topic, status, source, created_at, pillar_id
     from posts where group_id = ${groupId} order by id desc limit ${limit}`;
   return rows.map(toSummary);
 }
@@ -30,6 +29,14 @@ function toSummary(p: any): PostSummary {
     source: p.source as string, created_at: (p.created_at as string) ?? new Date().toISOString(),
     pillar_id: (p.pillar_id as string) ?? null,
   };
+}
+
+// Reject an awaiting_approval post → terminal `rejected` state. Rotation is NOT consumed
+// (same guarantee as failed — rotation only advances after `sent`).
+export async function rejectPost(groupId: string, id: string): Promise<boolean> {
+  const r = await sql`update posts set status = 'rejected'
+    where id = ${id} and group_id = ${groupId} and status = 'awaiting_approval' returning id`;
+  return r.length > 0;
 }
 
 // Flatten stored JSON body (per format) into plain display text. Pure — unit-testable.
