@@ -237,7 +237,7 @@ Postgres & MinIO = service eksternal. Log tidak pernah mencetak secret. Key hany
 - Retry LLM tanpa batas (maks 1 per langkah).
 - Secret ke log/DB/report.
 - Render reels paralel (CPU-bound — queue menjamin satu per waktu).
-- Webhook Telegram (polling saja).
+- Webhook Telegram (polling saja) — dan `getUpdates` wajib pass `allowed_updates=["message","callback_query"]` eksplisit: filter itu persisten per-bot di sisi Telegram; tanpa itu, filter `["message"]` lama dari consumer sebelumnya drop semua callback_query (tombol approval mati senyap — ketemu 2026-09-21).
 
 ## 12. Keputusan (locked)
 

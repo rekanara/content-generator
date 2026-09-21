@@ -17,8 +17,12 @@ async function tg(cfg: GroupCfg, method: string, body: Record<string, unknown>):
 }
 
 // Long-poll for the global bot (env token) — used by bot.ts. Env token, not per-group.
+// allowed_updates is EXPLICIT: Telegram persists this filter per-bot across calls —
+// inheriting a stale ["message"] from any previous consumer silently drops all
+// callback_query updates (approval buttons "did nothing" for exactly this reason).
 export async function getUpdates(token: string, offset: number): Promise<any[]> {
-  const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}`, {
+  const allowed = encodeURIComponent('["message","callback_query"]');
+  const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=${allowed}`, {
     signal: AbortSignal.timeout(30_000),
   });
   const j = await mustOk(res, 'getUpdates');

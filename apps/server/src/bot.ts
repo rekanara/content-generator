@@ -146,21 +146,26 @@ export async function startBot(): Promise<void> {
       const slugs = (await listGroups()).map((x) => x.slug);
       for (const u of updates) {
         offset = u.update_id + 1;
+        // per-update isolation: one bad update must never silently kill the rest of the batch
+        try {
+          // approval-gate inline keyboard buttons
+          if (u.callback_query) {
+            const cb = u.callback_query;
+            console.log(`[bot] callback "${cb.data}" from chat ${cb.message?.chat?.id}`);
+            await answerCallback(config.telegram.botToken, String(cb.id)).catch(() => {});
+            await handleCallback(String(cb.data ?? ''), String(cb.message?.chat?.id ?? config.telegram.chatId));
+            continue;
+          }
 
-        // approval-gate inline keyboard buttons
-        if (u.callback_query) {
-          const cb = u.callback_query;
-          await answerCallback(config.telegram.botToken, String(cb.id)).catch(() => {});
-          await handleCallback(String(cb.data ?? ''), String(cb.message?.chat?.id ?? config.telegram.chatId));
-          continue;
+          const text = u.message?.text;
+          if (!text) continue;
+          const cmd = parseCmd(text, slugs);
+          const reply = await handleCmd(cmd);
+          // reply via the global bot (env token) to the chat the command came from
+          await replyGlobal(String(u.message?.chat?.id ?? config.telegram.chatId), reply);
+        } catch (e) {
+          console.error(`[bot] update ${u.update_id} failed: ${(e as Error).message}`);
         }
-
-        const text = u.message?.text;
-        if (!text) continue;
-        const cmd = parseCmd(text, slugs);
-        const reply = await handleCmd(cmd);
-        // reply via the global bot (env token) to the chat the command came from
-        await replyGlobal(String(u.message?.chat?.id ?? config.telegram.chatId), reply);
       }
     } catch (e) {
       console.error(`[bot] polling error: ${(e as Error).message}`);
