@@ -139,6 +139,7 @@ export const PostDetail = PostSummary.extend({
   caption: z.string(),
   error: z.string().nullable(),
   body_text: z.string(), // body flattened to text (slides/scenes → text)
+  artifacts: z.array(z.string()), // artifact file names per format (exist once rendered)
 });
 export type PostDetail = z.infer<typeof PostDetail>;
 

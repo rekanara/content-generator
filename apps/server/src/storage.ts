@@ -34,3 +34,10 @@ export async function getArtifactStream(key: string): Promise<NodeJS.ReadableStr
   await ensureBucket();
   return client.getObject(config.minio.bucket, key);
 }
+
+// Object size or null when missing — artifact-existence check for HTTP serving.
+export async function statArtifact(key: string): Promise<number> {
+  await ensureBucket();
+  const info = await client.statObject(config.minio.bucket, key);
+  return info.size;
+}

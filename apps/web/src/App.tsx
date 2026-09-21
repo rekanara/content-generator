@@ -6,6 +6,7 @@ import { PostsView } from "@/views/posts.tsx"
 import { StylesView } from "@/views/styles.tsx"
 import { TemplatesView } from "@/views/templates.tsx"
 import { TemplateDetailView } from "@/views/template-detail.tsx"
+import { PostDetailView } from "@/views/post-detail.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
@@ -77,6 +78,7 @@ export function App() {
           {route.name === "users" && me.role === "admin" && <UsersView />}
           {route.name === "resetPassword" && me.role === "admin" && <ResetPasswordView id={route.id} />}
           {route.name === "templateDetail" && <TemplateDetailView slug={route.slug} id={route.id} />}
+          {route.name === "postDetail" && <PostDetailView slug={route.slug} id={route.id} />}
           {route.name === "groupView" && (
             <>
               {route.view === "dashboard" && <DashboardView slug={route.slug} />}
@@ -94,5 +96,5 @@ export function App() {
 }
 
 function slugOf(route: ReturnType<typeof parseRoute>): string {
-  return route.name === "groupView" || route.name === "templateDetail" ? route.slug : "default"
+  return route.name === "groupView" || route.name === "templateDetail" || route.name === "postDetail" ? route.slug : "default"
 }

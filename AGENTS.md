@@ -73,7 +73,7 @@ Setup: `cp .env.example apps/server/.env` — Postgres + MinIO + LLM + Telegram 
 ## Frontend gotchas
 
 - **No Vite API proxy.** `api.ts` uses relative `fetch(path)` — the SPA only works same-origin against the daemon, which serves `apps/web/dist`. Standalone `npm run dev` (Vite :5173) will fail every API call. FE loop: `npm run build` (web) → `npm run serve`.
-- SPA fallback: unknown non-`/api` route → `dist/index.html`; unknown `/api/*` → 404 JSON.
+- SPA fallback: unknown non-`/api` route → `dist/index.html`; unknown `/api/*` → 404 JSON. Detail pages: `/app/:slug/templates/:id`, `/app/:slug/posts/:id` (content rendered inline — slides/video/PDF via `/api/g/:slug/posts/:id/artifacts/:file`, whitelist per format, session cookie rides on same-origin subresource loads).
 - Add shadcn components from repo root: `npx shadcn@latest add <name> -c apps/web` (README says `pnpm dlx` — repo is npm). Components land in `packages/ui/src/components`.
 
 ## Skills

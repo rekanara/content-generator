@@ -4,10 +4,12 @@
 import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
+import { Readable } from 'node:stream';
 import { enqueue, queueStatus } from './queue.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
+import { getPostArtifact } from './usecases/artifacts.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
   GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit,
@@ -281,6 +283,23 @@ g.get('/:slug/posts/:id/events', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   return c.json(await listEvents(id, gr(c).id));
+});
+
+// artifact streaming (slides PNG / carousel PDF / reel MP4) — session-authed, group-scoped.
+// no-store: rerender overwrites the same keys — a cached image would show a stale template.
+// ponytail: HTTP range requests if video seeking ever matters (progressive playback works).
+g.get('/:slug/posts/:id/artifacts/:file', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const file = c.req.param('file');
+  const a = await getPostArtifact(gr(c).id, gr(c).slug, id, file).catch(() => null);
+  if (!a) return c.json({ error: 'artifact not found' }, 404);
+  return new Response(Readable.toWeb(a.stream) as unknown as ReadableStream, {    headers: {
+      'content-type': a.contentType,
+      'content-length': String(a.size),
+      'cache-control': 'private, no-store',
+    },
+  });
 });
 
 g.post('/:slug/posts/:id/resend', async (c) => {

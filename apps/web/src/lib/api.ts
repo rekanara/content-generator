@@ -67,6 +67,9 @@ export const api = {
     req<CronSettings>(`${g(slug)}/cron`, { method: 'POST', body: JSON.stringify({ expr, enabled }) }),
   posts: (slug: string) => req<PostSummary[]>(`${g(slug)}/posts`),
   post: (slug: string, id: string) => req<PostDetail>(`${g(slug)}/posts/${id}`),
+  postEvents: (slug: string, id: string) => req<{ id: string; event: string; error: string | null; created_at: string }[]>(`${g(slug)}/posts/${id}/events`),
+  /** artifact URL for direct <img>/<video>/<iframe> src — session cookie rides along (same-origin) */
+  artifactUrl: (slug: string, id: string, file: string) => `${g(slug)}/posts/${id}/artifacts/${file}`,
   resend: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/resend`, { method: 'POST' }),
   approve: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/approve`, { method: 'POST' }),
   reject: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/posts/${id}/reject`, { method: 'POST' }),

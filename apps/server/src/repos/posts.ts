@@ -18,7 +18,20 @@ export async function getPost(groupId: string, id: string): Promise<PostDetail |
     caption: (p.caption as string) ?? '',
     error: (p.error as string) ?? null,
     body_text: flattenBody(JSON.parse(p.body ?? 'null')),
+    artifacts: artifactNames(p.format as string, p.body),
   };
+}
+
+// Artifact file names per format (from the stored body — slide count lives there).
+// Names only — the objects exist in MinIO once the post is rendered.
+export function artifactNames(format: string, body: string | null): string[] {
+  if (format === 'carousel') {
+    const slides = (JSON.parse(body ?? 'null') as { slides?: unknown[] })?.slides?.length ?? 0;
+    return Array.from({ length: slides }, (_, i) => `slide-${String(i + 1).padStart(2, '0')}.png`);
+  }
+  if (format === 'pdf') return ['carousel.pdf'];
+  if (format === 'reels') return ['reel.mp4'];
+  return [];
 }
 
 // Cast a raw posts row → PostSummary (shared by list + detail).

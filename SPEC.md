@@ -173,7 +173,8 @@ Semua route zod-validated (input) via `@workspace/shared`. `:id` param di-guard 
 | GET | /api/g/:slug/dashboard | cron + queue + rotation + next_slot + 10 post terakhir |
 | GET/POST | /api/g/:slug/pillars, /:id/toggle, PATCH /:id, DELETE /:id | CRUD pilar (edit = full-field: name, description, is_news, sort_order) |
 | GET/POST | /api/g/:slug/cron | status / simpan expr+enabled |
-| GET/POST | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail / kirim ulang |
+| GET/POST | /api/g/:slug/posts, /:id, POST /:id/resend | daftar / detail (termasuk `artifacts` — nama file artefak per format) / kirim ulang |
+| GET | /api/g/:slug/posts/:id/artifacts/:file | stream artefak dari MinIO (whitelist nama per format, session-auth, no-store) |
 | POST | /api/g/:slug/posts/:id/approve, /:id/reject | approval gate (approve via queue; reject langsung + status guard) |
 | POST | /api/g/:slug/posts/:id/rerender | re-render dengan template saat ini (konten sama; guard status + format) |
 | GET | /api/g/:slug/calendar?n=7 | preview N slot berikutnya + tanggal fire cron |
