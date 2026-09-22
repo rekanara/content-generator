@@ -125,6 +125,18 @@ export function SettingsView({ slug }: { slug: string }) {
 
       <Card>
         <CardContent className="space-y-1.5 p-4">
+          <Label htmlFor="caption-cta">Caption CTA</Label>
+          <Input id="caption-cta" placeholder="e.g. Follow untuk tips developer tiap hari 🚀"
+            value={patch["caption_cta"] ?? ""}
+            onChange={(e) => set("caption_cta", e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Replaces the AI-generated CTA line on every caption (consistent brand voice). Empty = use the AI's CTA.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-1.5 p-4">
           <Label htmlFor="caption-footer">Caption footer</Label>
           <Textarea id="caption-footer" placeholder="e.g. 💡 Tips developer tiap hari — follow untuk lanjutan"
             value={patch["caption_footer"] ?? ""}

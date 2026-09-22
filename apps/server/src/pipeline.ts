@@ -4,7 +4,7 @@ import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
-import { isIdeationOut, writerGuard, writerGuardName, assembleCaption } from './schema.ts';
+import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, type CaptionOut } from './schema.ts';
 import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
 import { ideationPrompt, writerPrompt, criticPrompt } from './prompts.ts';
 import type { StyleSample, PillarFull } from './prompts.ts';
@@ -122,13 +122,17 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     8000,
   );
   addUsage(usage, 'critic', criticModel(cfg), c.usage);
+  // tolerant-caption normalization: a string caption (old shape) → structured form
+  if ('caption' in (c.data as Record<string, unknown>)) {
+    (c.data as { caption: CaptionOut }).caption = toCaptionOut((c.data as { caption: unknown }).caption);
+  }
   console.log(`[critic] ok tokens=${c.usage.completion}`);
 
   // 4. persist post (status draft)
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${id.data.topic},
-      ${captionOf(c.data, cfg.captionFooter)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
+      ${captionOf(c.data, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
@@ -138,8 +142,8 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
 
 // Structured caption + group footer → final string, stored in posts.caption at
 // generate time (downstream: telegram sends, approval text, FE, resend — all unchanged).
-function captionOf(d: Draft, footer: string): string {
-  return 'caption' in d ? assembleCaption(d.caption, footer) : '';
+function captionOf(d: Draft, footer: string, ctaOverride: string): string {
+  return 'caption' in d ? assembleCaption(d.caption, footer, ctaOverride) : '';
 }
 function bodyOf(d: Draft): string {
   return JSON.stringify(d);

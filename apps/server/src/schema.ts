@@ -21,12 +21,22 @@ export function isIdeationOut(x: unknown): x is IdeationOut {
 }
 
 export function isCaptionOut(x: unknown): x is CaptionOut {
+  // tolerant: some models answer with the caption as a plain string (old shape) —
+  // normalize it into the structured form (title = the string, rest empty) so a
+  // good response is never thrown away over a shape nit
+  if (typeof x === 'string' && x.trim().length > 0) return true;
   return (
     obj(x) && str(x.title) && x.title.length > 0 &&
     str(x.subtitle) && str(x.cta) &&
     Array.isArray(x.tags) && x.tags.length <= 8 &&
     x.tags.every((t: unknown) => str(t) && t.trim().length > 0 && t.length <= 40)
   );
+}
+
+// Coerce a guard-passing caption into the structured shape (string → {title}).
+export function toCaptionOut(x: unknown): CaptionOut {
+  if (typeof x === 'string') return { title: x.trim(), subtitle: '', cta: '', tags: [] };
+  return x as CaptionOut;
 }
 
 function isSlide(x: unknown): x is Slide {
@@ -103,7 +113,7 @@ export function isPlannerOut(x: unknown): x is PlannerOut {
 // Order: title / subtitle / cta / footer / tags. Empty parts are skipped entirely
 // (no blank gaps); footer omitted when the group setting is blank.
 // Tags: whitespace-collapsed, '#' guaranteed exactly once, deduped, whitespace/oversized dropped.
-export function assembleCaption(c: CaptionOut, footer: string): string {
+export function assembleCaption(c: CaptionOut, footer: string, ctaOverride?: string): string {
   const lines: string[] = [];
   const push = (s: string | undefined) => {
     const v = (s ?? '').trim();
@@ -111,7 +121,8 @@ export function assembleCaption(c: CaptionOut, footer: string): string {
   };
   lines.push(c.title.trim());
   push(c.subtitle);
-  push(c.cta);
+  // group setting wins over the LLM's cta when set — consistent brand voice
+  push(ctaOverride && ctaOverride.trim() ? ctaOverride : c.cta);
   const f = footer.trim();
   if (f) lines.push('', f);
   const seen = new Set<string>();

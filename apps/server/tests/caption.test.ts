@@ -1,7 +1,7 @@
 // Caption assembly + guard (pure) — structured caption → final string.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assembleCaption, isCaptionOut, type CaptionOut } from '../src/schema.ts';
+import { assembleCaption, isCaptionOut, toCaptionOut, type CaptionOut } from '../src/schema.ts';
 
 const C = (o: Partial<CaptionOut> = {}): CaptionOut => ({
   title: 'Debug 30 Menit yang Mengubah Karier', subtitle: '', cta: '', tags: [], ...o,
@@ -57,4 +57,36 @@ test('assembleCaption: tags normalized — # guaranteed once, whitespace tags dr
 
 test('assembleCaption: title-only with everything else empty', () => {
   assert.equal(assembleCaption(C(), ''), 'Debug 30 Menit yang Mengubah Karier');
+});
+
+// ---------- cta override ----------
+
+test('assembleCaption: ctaOverride replaces the LLM cta when set', () => {
+  const out = assembleCaption(
+    { title: 'T', subtitle: 'S', cta: 'LLM cta', tags: [] },
+    '', 'Follow @jack untuk tips harian',
+  );
+  assert.equal(out, 'T\n\nS\n\nFollow @jack untuk tips harian');
+});
+
+test('assembleCaption: blank/whitespace ctaOverride falls back to the LLM cta', () => {
+  assert.equal(assembleCaption({ title: 'T', subtitle: 'S', cta: 'LLM cta', tags: [] }, '', '').includes('LLM cta'), true);
+  assert.equal(assembleCaption({ title: 'T', subtitle: 'S', cta: 'LLM cta', tags: [] }, '', '   ').includes('LLM cta'), true);
+});
+
+test('assembleCaption: override wins even when LLM cta is empty', () => {
+  const out = assembleCaption({ title: 'T', subtitle: '', cta: '', tags: [] }, '', 'Klik follow');
+  assert.equal(out, 'T\n\nKlik follow');
+});
+
+// ---------- tolerant caption guard (string shape from some models) ----------
+
+test('isCaptionOut: plain string accepted (old shape tolerated)', () => {
+  assert.equal(isCaptionOut('judul sebagai string'), true);
+  assert.equal(isCaptionOut(''), false); // empty string still rejected
+});
+
+test('toCaptionOut: string → structured {title}', () => {
+  assert.deepEqual(toCaptionOut('Judul string'), { title: 'Judul string', subtitle: '', cta: '', tags: [] });
+  assert.deepEqual(toCaptionOut({ title: 'T', subtitle: 'S', cta: 'C', tags: ['#x'] }), { title: 'T', subtitle: 'S', cta: 'C', tags: ['#x'] });
 });

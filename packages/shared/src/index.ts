@@ -46,6 +46,7 @@ const GROUP_CONFIG_FIELDS = {
   tts_model: z.string().nullable(),
   telegram_chat_id: z.string().nullable(),
   caption_footer: z.string().nullable(),
+  caption_cta: z.string().nullable(),
   llm_api_key_set: z.boolean(),
   tts_api_key_set: z.boolean(),
   telegram_bot_token_set: z.boolean(),
@@ -82,6 +83,7 @@ export const GroupInput = z.object({
   telegram_bot_token: z.string().nullable().default(null),
   telegram_chat_id: z.string().nullable().default(null),
   caption_footer: z.string().nullable().default(null),
+  caption_cta: z.string().nullable().default(null),
   approval_required: z.boolean().default(false),
   auto_plan: z.boolean().default(false),
 });
@@ -106,6 +108,7 @@ export const GroupPatch = z.object({
   telegram_bot_token: z.string().nullable().optional(),
   telegram_chat_id: z.string().nullable().optional(),
   caption_footer: z.string().nullable().optional(),
+  caption_cta: z.string().nullable().optional(),
   approval_required: z.boolean().optional(),
   auto_plan: z.boolean().optional(),
 });
