@@ -14,6 +14,7 @@ Multi-group: setiap group = satu "akun konten" dengan konfigurasi sendiri (LLM, 
 
 1. Cron jalan sesuai jadwal per group (`groups.cron_expr`), toggle on/off via FE, tanpa restart daemon.
 2. Satu run = satu post per group. Platform dibalik dari run terakhir sukses (LinkedIn ↔ Instagram). Format bergilir per platform: IG carousel ↔ reels; LinkedIn teks ↔ PDF. Pilar juga bergilir. Hari terlewat tidak merusak pola (state-based, bukan paritas tanggal).
+2a. **Caption terstruktur** (carousel/reels/pdf): writer menghasilkan caption `{title, subtitle, cta, tags[]}` → dirakit saat generate oleh `assembleCaption` (title → subtitle → cta → footer → tags; bagian kosong dilompati) → string final di `posts.caption` (downstream tak berubah: kirim Telegram, approval, FE, resend). Footer dari settings per group (`groups.caption_footer`, kosong = tidak tampil). Tag dinormalisasi: # tunggal, dedup, tanpa spasi, maks 8.
 3. Output per slot:
    - IG carousel: N PNG 1080×1350 + caption.
    - IG reels: 1 MP4 1080×1920, 15–30 detik, **voiceover TTS**, teks overlay per scene, tanpa musik + caption.

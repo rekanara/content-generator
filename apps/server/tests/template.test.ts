@@ -6,7 +6,7 @@ import { imagePrompt } from '../src/prompts.ts';
 import type { CarouselOut } from '../src/schema.ts';
 
 const DRAFT: CarouselOut = {
-  caption: 'cap',
+  caption: { title: 'T', subtitle: '', cta: '', tags: [] },
   slides: [
     { headline: 'Cover <Hook>', body: 'first body' },
     { headline: 'Mid', body: 'mid body' },
@@ -43,7 +43,7 @@ test('buildSlides: first template WITHOUT cover image → falls back to body (fa
 });
 
 test('buildSlides: single-slide post never gets the last template as slide 1', () => {
-  const one: CarouselOut = { caption: '', slides: [{ headline: 'Only', body: 'x' }] };
+  const one: CarouselOut = { caption: { title: 'T', subtitle: '', cta: '', tags: [] }, slides: [{ headline: 'Only', body: 'x' }] };
   const htmls = buildSlides(T, one, Buffer.from('p'));
   assert.ok(htmls[0]!.startsWith('<body>FIRST')); // first wins on slide 1; last skipped (total < 2)
 });

@@ -7,6 +7,7 @@ import { createUser, resetPassword, listUsers } from './auth/users.ts';
 import { sql } from './db/pool.ts';
 import type { Platform, Format } from './state.ts';
 import type { CarouselOut } from './schema.ts';
+import { assembleCaption } from './schema.ts';
 
 const args = process.argv.slice(2);
 const flag = (n: string) => args.includes(`--${n}`);

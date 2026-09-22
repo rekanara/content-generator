@@ -1,6 +1,6 @@
 // Prompt builder — pure functions, unit-testable. Output language follows the pillar.
 import type { Format, Platform } from './state.ts';
-import type { Slide, Scene } from './schema.ts';
+import type { Slide, Scene, CarouselOut, ReelsOut } from './schema.ts';
 
 type Msg = { role: 'system' | 'user'; content: string };
 
@@ -65,10 +65,10 @@ export function writerPrompt(
 
   const fmt = {
     carousel: `Carousel ${platform === 'instagram' ? 'IG 5-8 slides' : 'LinkedIn 6-10 pages'}. Slide 1 = hook. Last slide = light CTA.
-JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces>"]}, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
 headline: scroll-stopper, short and punchy. body: one idea per slide, short sentences.`,
     reels: `Reels 15-30 seconds, 4-6 scenes, total narration MAX 55 words (speech pace ±2 words/second — more than that the duration explodes). Each narration MAX 12 words. Scene 1 = 5-second hook. Last scene = CTA.
-JSON: {"caption": string, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>"}]}
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>"}]}
 narration: natural spoken language, not written prose. overlay_text: short phrase, not a full sentence.`,
     pdf: `LinkedIn carousel as PDF, 6-10 pages. Page 1 = hook. Last page = CTA/discussion prompt.
 JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}`,
@@ -105,13 +105,13 @@ export function criticPrompt(
 ): Msg[] {
   const back = (f: Format): string => {
     if (f === 'reels') {
-      const r = draft as { caption: string; scenes: Scene[] };
+      const r = draft as ReelsOut;
       return JSON.stringify(r);
     }
     if (f === 'text') {
       return JSON.stringify(draft as { body: string });
     }
-    const c = draft as { caption: string; slides: Slide[] };
+    const c = draft as CarouselOut;
     return JSON.stringify(c);
   };
   return [

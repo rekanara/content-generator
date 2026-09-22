@@ -5,8 +5,11 @@ export type IdeationOut = { topic: string; angle: string };
 export type Slide = { headline: string; body: string };
 export type Scene = { overlay_text: string; narration: string };
 
-export type CarouselOut = { caption: string; slides: Slide[] };
-export type ReelsOut = { caption: string; scenes: Scene[] };
+// Structured caption (writer output): title required, subtitle/cta optional,
+// tags 0-8 (with or without '#', normalized at assembly).
+export type CaptionOut = { title: string; subtitle: string; cta: string; tags: string[] };
+export type CarouselOut = { caption: CaptionOut; slides: Slide[] };
+export type ReelsOut = { caption: CaptionOut; scenes: Scene[] };
 export type TextOut = { body: string };
 
 const str = (x: unknown): x is string => typeof x === 'string';
@@ -15,6 +18,15 @@ const obj = (x: unknown): x is Record<string, unknown> =>
 
 export function isIdeationOut(x: unknown): x is IdeationOut {
   return obj(x) && str(x.topic) && str(x.angle) && x.topic.length > 0 && x.angle.length > 0;
+}
+
+export function isCaptionOut(x: unknown): x is CaptionOut {
+  return (
+    obj(x) && str(x.title) && x.title.length > 0 &&
+    str(x.subtitle) && str(x.cta) &&
+    Array.isArray(x.tags) && x.tags.length <= 8 &&
+    x.tags.every((t: unknown) => str(t) && t.trim().length > 0 && t.length <= 40)
+  );
 }
 
 function isSlide(x: unknown): x is Slide {
@@ -30,7 +42,7 @@ function isScene(x: unknown): x is Scene {
 
 export function isCarouselOut(x: unknown): x is CarouselOut {
   return (
-    obj(x) && str(x.caption) && x.caption.length > 0 &&
+    obj(x) && isCaptionOut(x.caption) &&
     Array.isArray(x.slides) && x.slides.length >= 4 && x.slides.length <= 12 &&
     x.slides.every(isSlide)
   );
@@ -38,7 +50,7 @@ export function isCarouselOut(x: unknown): x is CarouselOut {
 
 export function isReelsOut(x: unknown): x is ReelsOut {
   return (
-    obj(x) && str(x.caption) && x.caption.length > 0 &&
+    obj(x) && isCaptionOut(x.caption) &&
     Array.isArray(x.scenes) && x.scenes.length >= 4 && x.scenes.length <= 6 &&
     x.scenes.every(isScene)
   );
@@ -84,4 +96,31 @@ export function isPlannerOut(x: unknown): x is PlannerOut {
     if (p.format !== undefined && p.format !== null && !['carousel', 'reels', 'pdf', 'text'].includes(p.format as string)) return false;
     return true;
   });
+}
+
+// ——— caption assembly (pure) ———
+// Structured caption + group footer → the final caption string stored in posts.caption.
+// Order: title / subtitle / cta / footer / tags. Empty parts are skipped entirely
+// (no blank gaps); footer omitted when the group setting is blank.
+// Tags: whitespace-collapsed, '#' guaranteed exactly once, deduped, whitespace/oversized dropped.
+export function assembleCaption(c: CaptionOut, footer: string): string {
+  const lines: string[] = [];
+  const push = (s: string | undefined) => {
+    const v = (s ?? '').trim();
+    if (v) lines.push('', v);
+  };
+  lines.push(c.title.trim());
+  push(c.subtitle);
+  push(c.cta);
+  const f = footer.trim();
+  if (f) lines.push('', f);
+  const seen = new Set<string>();
+  const tags = (c.tags ?? [])
+    .map((t) => {
+      const v = t.trim().replace(/^#+/, '');
+      return v && !/\s/.test(v) && v.length <= 30 ? `#${v}` : '';
+    })
+    .filter((t) => t && !seen.has(t) && seen.add(t));
+  if (tags.length > 0) lines.push('', tags.join(' '));
+  return lines.join('\n').replace(/^\n+/, '').trim();
 }

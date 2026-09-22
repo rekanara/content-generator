@@ -3,6 +3,7 @@ import { Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
+import { Textarea } from "@workspace/ui/components/textarea"
 import { Label } from "@workspace/ui/components/label"
 import { Switch } from "@workspace/ui/components/switch"
 import { api, ApiError } from "@/lib/api"
@@ -119,6 +120,18 @@ export function SettingsView({ slug }: { slug: string }) {
               })
             }}
           />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-1.5 p-4">
+          <Label htmlFor="caption-footer">Caption footer</Label>
+          <Textarea id="caption-footer" placeholder="e.g. 💡 Tips developer tiap hari — follow untuk lanjutan"
+            value={patch["caption_footer"] ?? ""}
+            onChange={(e) => set("caption_footer", e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Appended after the CTA of every generated caption (title / subtitle / CTA / footer / tags). Empty = not shown.
+          </p>
         </CardContent>
       </Card>
 
