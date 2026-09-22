@@ -51,7 +51,10 @@ export function PromotionsView({ slug }: { slug: string }) {
     e.preventDefault()
     setBusy(true); setMsg(null)
     try {
-      const p = await api.addPromotion(slug, { brief })
+      const p = await api.addPromotion(slug, {
+        brief,
+        template_id: form.template_id === "none" ? null : form.template_id,
+      } as never)
       navigate(`/app/${slug}/promotions/${p.id}`)
     } catch (err) {
       setMsg(err instanceof ApiError ? err.message : "AI brief failed")
@@ -82,6 +85,14 @@ export function PromotionsView({ slug }: { slug: string }) {
             <div className="space-y-1.5">
               <Label htmlFor="brief">Brief kasar — AI akan draft data promo lengkap</Label>
               <Textarea id="brief" className="min-h-24" required placeholder="e.g. jasa audit & refactor codebase, target startup, harga 1.5jt, pernah 10+ proyek…" value={brief} onChange={(e) => setBrief(e.target.value)} />
+            </div>
+            <div className="max-w-xs space-y-1.5">
+              <Label htmlFor="brief-tpl">Template (promo format)</Label>
+              <select id="brief-tpl" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm" value={form.template_id} onChange={(e) => setForm({ ...form, template_id: e.target.value })}>
+                <option value="none">default</option>
+                {promoTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.format}</option>)}
+              </select>
+              <p className="text-xs text-muted-foreground">AI draft datanya; konten slide nulis di template ini.</p>
             </div>
             <Button type="submit" disabled={busy || !brief.trim()}>{busy ? "drafting…" : "Draft with AI"}</Button>
           </form>

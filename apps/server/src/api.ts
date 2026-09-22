@@ -652,7 +652,13 @@ g.post('/:slug/promotions', async (c) => {
     if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
     data = parsed.data;
   }
-  const input = PromotionInput.parse(data); // normalize AI output through the same zod
+  // normalize through the same zod — but preserve the caller's template choice:
+  // the AI draft carries no template_id, and the FE dropdown is the source of truth
+  const templateIdRaw = (raw as Record<string, unknown>)?.template_id;
+  const input = PromotionInput.parse(data);
+  if (brief && typeof templateIdRaw === 'string' && templateIdRaw !== '') {
+    input.template_id = templateIdRaw;
+  }
   try {
     const p = await createPromotion(gr(c).id, input);
     return c.json(p, 201);
