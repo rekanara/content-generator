@@ -81,7 +81,7 @@ export function OverridesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_1fr]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_minmax(0,1fr)]">
               <div className="space-y-1.5">
                 <Label htmlFor="ov-name">Name</Label>
                 <Input id="ov-name" placeholder="override name" required value={form.name}
@@ -110,7 +110,7 @@ export function OverridesView({ slug }: { slug: string }) {
               {matchingTemplates.length > 0 && ` · ${matchingTemplates.length} matching template(s)`}
             </p>
 
-            <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
               <div className="space-y-1.5">
                 <Label htmlFor="ov-desc">Description</Label>
                 <Textarea id="ov-desc" className="min-h-24" placeholder="text content / caption"

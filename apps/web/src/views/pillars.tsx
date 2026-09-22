@@ -54,7 +54,7 @@ export function PillarsView({ slug }: { slug: string }) {
 
       {cron && <CronEditor cron={cron} onSave={saveCron} />}
 
-      <form onSubmit={submit} className="grid gap-3 md:grid-cols-[1fr_1fr_auto]">
+      <form onSubmit={submit} className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
         <div className="space-y-1.5">
           <Label htmlFor="pillar-name">Pillar name</Label>
           <Input id="pillar-name" placeholder="pillar name" required value={form.name}

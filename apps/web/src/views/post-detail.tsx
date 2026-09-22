@@ -109,14 +109,14 @@ export function PostDetailView({ slug, id }: { slug: string; id: string }) {
       </section>
 
       {data.error && (
-        <pre className="rounded bg-red-500/10 p-3 text-xs whitespace-pre-wrap text-red-500">{data.error}</pre>
+        <pre className="rounded bg-red-500/10 p-3 text-xs whitespace-pre-wrap break-words text-red-500">{data.error}</pre>
       )}
 
       {data.caption && (
         <Card>
           <CardContent className="p-4">
             <h3 className="mb-1 text-xs font-medium text-muted-foreground">Caption</h3>
-            <p className="text-sm whitespace-pre-wrap">{data.caption}</p>
+            <p className="text-sm whitespace-pre-wrap break-words">{data.caption}</p>
           </CardContent>
         </Card>
       )}
@@ -152,7 +152,7 @@ function PostContent({ slug, id, format, status, artifacts, bodyText }: {
       <Card>
         <CardContent className="p-4">
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">Post body</h3>
-          <pre className="text-sm whitespace-pre-wrap">{bodyText}</pre>
+          <pre className="text-sm whitespace-pre-wrap break-words">{bodyText}</pre>
         </CardContent>
       </Card>
     )
@@ -162,7 +162,7 @@ function PostContent({ slug, id, format, status, artifacts, bodyText }: {
       <Card>
         <CardContent className="p-4">
           <h3 className="mb-1 text-xs font-medium text-muted-foreground">Content</h3>
-          <pre className="text-sm whitespace-pre-wrap">{bodyText}</pre>
+          <pre className="text-sm whitespace-pre-wrap break-words">{bodyText}</pre>
           <p className="mt-2 text-xs text-muted-foreground">artifacts appear once the post is rendered</p>
         </CardContent>
       </Card>
@@ -175,7 +175,7 @@ function PostContent({ slug, id, format, status, artifacts, bodyText }: {
     return (
       <section className="space-y-2">
         <h3 className="text-xs font-medium text-muted-foreground">Slides ({artifacts.length})</h3>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-[repeat(2,minmax(0,1fr))] gap-3 sm:grid-cols-[repeat(3,minmax(0,1fr))] lg:grid-cols-[repeat(4,minmax(0,1fr))]">
           {artifacts.map((f, i) => (
             <figure key={f} className="space-y-1 overflow-hidden rounded-lg border">
               <img src={url(f)} alt={`slide ${i + 1}`} loading="lazy" className="w-full bg-muted" />

@@ -61,7 +61,7 @@ export function TemplatesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} id="template-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_170px_auto]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_170px_auto]">
               <div className="space-y-1.5">
                 <Label htmlFor="tpl-name">Template name</Label>
                 <Input id="tpl-name" placeholder="template name" required value={form.name}

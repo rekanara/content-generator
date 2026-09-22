@@ -96,7 +96,7 @@ export function App() {
             <span className="truncate text-sm font-medium text-muted-foreground">{view}</span>
           </header>
           {/* editor pages (template/post detail) get the extra width for side-by-side preview */}
-          <main className="flex-1 p-4 md:p-6">
+          <main className="min-w-0 flex-1 overflow-x-clip p-4 md:p-6">
             <div className={route.name === "templateDetail" || route.name === "postDetail" ? "mx-auto max-w-6xl" : "mx-auto max-w-4xl"}>
               {route.name === "groups" && <GroupsView />}
               {route.name === "users" && me.role === "admin" && <UsersView />}

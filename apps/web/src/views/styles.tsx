@@ -49,7 +49,7 @@ export function StylesView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="grid gap-3 p-4">
           <form onSubmit={submit} id="style-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px]">
               <div className="space-y-1.5">
                 <Label htmlFor="style-title">Title</Label>
                 <Input id="style-title" placeholder="title" required value={form.title}
@@ -93,7 +93,7 @@ export function StylesView({ slug }: { slug: string }) {
                   <Trash2 className="size-4" />
                 </Button>
               </div>
-              <p className="text-xs whitespace-pre-wrap text-muted-foreground">{s.body}</p>
+              <p className="text-xs whitespace-pre-wrap break-words text-muted-foreground">{s.body}</p>
             </CardContent>
           </Card>
         ))}
@@ -144,7 +144,7 @@ function EditStyleDialog({ slug, style, onClose, onSaved }: {
           <DialogDescription>8 newest samples are injected into writer + critic prompts</DialogDescription>
         </DialogHeader>
         <form onSubmit={save} className="grid gap-3">
-          <div className="grid gap-3 sm:grid-cols-[1fr_160px]">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_160px]">
             <div className="space-y-1.5">
               <Label htmlFor="edit-title">Title</Label>
               <Input id="edit-title" required value={form.title}
