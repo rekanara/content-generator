@@ -19,7 +19,8 @@ import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateType } from "@workspace/shared"
 
-const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
+const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel", "ig-carousel-promo", "li-carousel-promo"]
+const isPromoFormat = (f: TemplateFormat) => f.endsWith("-promo")
 const TYPES: TemplateType[] = ["regular", "mix", "image_only", "text_only"]
 
 export function TemplatesView({ slug }: { slug: string }) {
@@ -80,7 +81,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               </div>
               <div className="space-y-1.5">
                 <Label>Type</Label>
-                <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v as TemplateType })}>
+                <Select value={isPromoFormat(form.format) ? "regular" : form.type} onValueChange={(v) => setForm({ ...form, type: v as TemplateType })} disabled={isPromoFormat(form.format)}>
                   <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
@@ -98,9 +99,15 @@ export function TemplatesView({ slug }: { slug: string }) {
 
             <p className="text-xs text-muted-foreground">
               body token: {TEMPLATE_TOKENS[form.format].body.join(" ")}
-              {!isReel && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
-              {!isReel && form.html_last !== "" && <> · CTA: {TEMPLATE_TOKENS[form.format].last?.join(" ")}</>}
+              {!isReel && !isPromoFormat(form.format) && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
+              {!isReel && !isPromoFormat(form.format) && form.html_last !== "" && <> · CTA: {TEMPLATE_TOKENS[form.format].last?.join(" ")}</>}
             </p>
+            {isPromoFormat(form.format) && (
+              <p className="text-xs text-muted-foreground">
+                promo template = design system: full CSS (classes like .feature-item / .stack-item / .stat-item)
+                + a single {"{{content}}"} hole — the AI writes free-form slide html using your classes.
+              </p>
+            )}
 
             <div className="space-y-1.5">
               <Label htmlFor="tpl-html">Body HTML (middle slides)</Label>
@@ -108,7 +115,7 @@ export function TemplatesView({ slug }: { slug: string }) {
                 value={form.html} onChange={(e) => setForm({ ...form, html: e.target.value })} />
             </div>
 
-            {!isReel && (
+            {!isReel && !isPromoFormat(form.format) && (
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="tpl-first">Cover HTML (first slide, optional)</Label>
