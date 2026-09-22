@@ -12,7 +12,7 @@ export const Format = z.enum(['carousel', 'reels', 'pdf', 'text']);
 export type Format = z.infer<typeof Format>;
 
 // Template format (DB check constraint) — different domain from Format.
-export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel']);
+export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel', 'ig-carousel-promo', 'li-carousel-promo']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
 // Template role: 'regular' = pipeline rendering (default), the others mark a template
@@ -27,7 +27,7 @@ export type OverrideType = z.infer<typeof OverrideType>;
 
 // Plan types: slot_override = pinned pipeline spec for a date; override_content = link
 // to an override row (system-created by the override flow).
-export const PlanType = z.enum(['slot_override', 'override_content']);
+export const PlanType = z.enum(['slot_override', 'override_content', 'promotion']);
 export type PlanType = z.infer<typeof PlanType>;
 
 export const PostStatus = z.enum(['draft', 'queued', 'rendered', 'awaiting_cover', 'awaiting_approval', 'sent', 'failed', 'rejected']);
@@ -321,6 +321,7 @@ export const Plan = z.object({
   pillar_id: z.string().uuid().nullable(),
   template_id: z.string().uuid().nullable(),
   override_id: z.string().uuid().nullable(),
+  promotion_id: z.string().uuid().nullable(),
   note: z.string(),
   status: z.enum(['active', 'cancelled']),
   created_at: z.string(),
@@ -361,6 +362,12 @@ export const TEMPLATE_TOKENS: Record<TemplateFormat, { body: string[]; first?: s
   },
   reel: {
     body: ['{{overlay}}', '{{index}}', '{{total}}'],
+  },
+  'ig-carousel-promo': {
+    body: ['{{content}}', '{{image}}', '{{index}}', '{{total}}'],
+  },
+  'li-carousel-promo': {
+    body: ['{{content}}', '{{image}}', '{{index}}', '{{total}}'],
   },
 };
 
@@ -419,3 +426,42 @@ export const UsageReport = z.object({
   total: z.object({ cost: z.number(), promptTokens: z.number(), completionTokens: z.number() }),
 });
 export type UsageReport = z.infer<typeof UsageReport>;
+
+// ---------- promotions ----------
+export const PromoSlide = z.object({
+  html: z.string(),               // free-form slide html (uses the template's css classes)
+  image_prompt: z.string().default(''), // what image this slide wants ({{image}} present)
+});
+export type PromoSlide = z.infer<typeof PromoSlide>;
+
+export const Promotion = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  topic: z.string(),
+  features: z.array(z.string()),
+  stacks: z.array(z.string()),
+  stats: z.array(z.string()),
+  price: z.string(),
+  price_sale: z.string(),
+  template_id: z.string().uuid().nullable(),
+  content: z.array(PromoSlide).nullable(),
+  status: z.enum(['draft', 'content_ready', 'awaiting_images', 'ready', 'sent']),
+  created_at: z.string(),
+});
+export type Promotion = z.infer<typeof Promotion>;
+
+export const PromotionInput = z.object({
+  name: z.string().min(1),
+  topic: z.string().default(''),
+  features: z.array(z.string()).default([]),
+  stacks: z.array(z.string()).default([]),
+  stats: z.array(z.string()).default([]),
+  price: z.string().default(''),
+  price_sale: z.string().default(''),
+  template_id: z.string().uuid().nullable().default(null),
+});
+export type PromotionInput = z.infer<typeof PromotionInput>;
+
+// image slots a promotion's content needs (derived: slides whose html embeds {{image}})
+export const PromoImageSlot = z.object({ slide: z.number(), prompt: z.string(), file: z.string().nullable() });
+export type PromoImageSlot = z.infer<typeof PromoImageSlot>;

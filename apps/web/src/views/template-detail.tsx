@@ -23,6 +23,8 @@ const SAMPLES: Record<TemplateFormat, Record<string, string>> = {
   "ig-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8", image: GRAY_IMG },
   "li-carousel": { headline: esc("Cara deploy tanpa downtime"), body: esc("Contoh body untuk preview — ganti template di kiri, hasilnya langsung terlihat di sini."), index: "2", total: "8", image: GRAY_IMG },
   reel: { overlay: esc("Bug muncul pas demo"), index: "2", total: "5" },
+  'ig-carousel-promo': { index: '2', total: '8', image: GRAY_IMG },
+  'li-carousel-promo': { index: '2', total: '8', image: GRAY_IMG },
 }
 
 function fillTokens(html: string, format: TemplateFormat): string {

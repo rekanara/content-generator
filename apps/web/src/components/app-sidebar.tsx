@@ -14,6 +14,7 @@ import {
   MoonIcon,
   SunIcon,
   SparklesIcon,
+  MegaphoneIcon,
   CoinsIcon,
 } from "lucide-react"
 
@@ -43,6 +44,7 @@ const VIEWS: { id: string; label: string; icon: React.ReactNode }[] = [
   { id: "styles", label: "Styles", icon: <PaletteIcon /> },
   { id: "templates", label: "Templates", icon: <FileStackIcon /> },
   { id: "overrides", label: "Overrides", icon: <SparklesIcon /> },
+  { id: "promotions", label: "Promotions", icon: <MegaphoneIcon /> },
   { id: "settings", label: "Settings", icon: <SettingsIcon /> },
 ]
 

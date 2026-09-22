@@ -7,9 +7,10 @@ export type Route =
   | { name: 'resetPassword'; id: string }                 // /app/users/:id/reset-password
   | { name: 'templateDetail'; slug: string; id: string }  // /app/:slug/templates/:id
   | { name: 'postDetail'; slug: string; id: string }      // /app/:slug/posts/:id
+  | { name: 'promoDetail'; slug: string; id: string }     // /app/:slug/promotions/:id
   | { name: 'groupView'; slug: string; view: string };    // /app/:slug/:view
 
-const GROUP_VIEWS = ['dashboard', 'pillars', 'posts', 'styles', 'templates', 'overrides', 'settings'];
+const GROUP_VIEWS = ['dashboard', 'pillars', 'posts', 'styles', 'templates', 'overrides', 'promotions', 'settings'];
 
 export function parseRoute(pathname: string): Route {
   if (pathname === '/login' || pathname === '/app/login') return { name: 'login' };
@@ -23,6 +24,8 @@ export function parseRoute(pathname: string): Route {
   if (tm) return { name: 'templateDetail', slug: tm[1]!, id: tm[2]! };
   const pm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/posts\/([0-9a-f-]{36})\/?$/);
   if (pm) return { name: 'postDetail', slug: pm[1]!, id: pm[2]! };
+  const prm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/promotions\/([0-9a-f-]{36})\/?$/);
+  if (prm) return { name: 'promoDetail', slug: prm[1]!, id: prm[2]! };
   const m = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)(?:\/([a-z]+))?\/?$/);
   if (m) {
     const view = m[2] ?? 'dashboard';

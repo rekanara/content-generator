@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
+import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -88,6 +88,22 @@ export const api = {
 
   // plans
   plans: (slug: string) => req<Plan[]>(`${g(slug)}/plans`),
+
+  // promotions
+  promotions: (slug: string) => req<Promotion[]>(`${g(slug)}/promotions`),
+  promotion: (slug: string, id: string) => req<Promotion>(`${g(slug)}/promotions/${id}`),
+  addPromotion: (slug: string, p: PromotionInput | { brief: string }) => req<Promotion>(`${g(slug)}/promotions`, { method: 'POST', body: JSON.stringify(p) }),
+  patchPromotion: (slug: string, id: string, p: PromotionInput) => req<{ ok: true }>(`${g(slug)}/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
+  delPromotion: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/promotions/${id}`, { method: 'DELETE' }),
+  generatePromoContent: (slug: string, id: string) => req<{ ok: true; slides: number; imageSlots: { slide: number; prompt: string }[] }>(`${g(slug)}/promotions/${id}/generate-content`, { method: 'POST' }),
+  uploadPromoImage: (slug: string, id: string, slide: number, file: File) => {
+    const fd = new FormData();
+    fd.set('slide', String(slide));
+    fd.append('file', file, file.name);
+    return req<{ ok: true; allImagesPresent: boolean }>(`${g(slug)}/promotions/${id}/images`, { method: 'POST', body: fd });
+  },
+  sendPromotion: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/promotions/${id}/send`, { method: 'POST' }),
+  schedulePromotion: (slug: string, id: string, for_date: string) => req<Plan>(`${g(slug)}/promotions/${id}/schedule`, { method: 'POST', body: JSON.stringify({ for_date }) }),
   addPlan: (slug: string, p: PlanInput) => req<Plan>(`${g(slug)}/plans`, { method: 'POST', body: JSON.stringify(p) }),
   cancelPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}/cancel`, { method: 'POST' }),
   delPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}`, { method: 'DELETE' }),

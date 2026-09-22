@@ -9,6 +9,8 @@ import { TemplatesView } from "@/views/templates.tsx"
 import { TemplateDetailView } from "@/views/template-detail.tsx"
 import { PostDetailView } from "@/views/post-detail.tsx"
 import { OverridesView } from "@/views/overrides.tsx"
+import { PromotionsView } from "@/views/promotions.tsx"
+import { PromotionDetailView } from "@/views/promotion-detail.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
@@ -105,6 +107,7 @@ export function App() {
               {route.name === "resetPassword" && me.role === "admin" && <ResetPasswordView id={route.id} />}
               {route.name === "templateDetail" && <TemplateDetailView slug={route.slug} id={route.id} />}
               {route.name === "postDetail" && <PostDetailView slug={route.slug} id={route.id} />}
+              {route.name === "promoDetail" && <PromotionDetailView slug={route.slug} id={route.id} />}
               {route.name === "groupView" && (
                 <>
                   {route.view === "dashboard" && <DashboardView slug={route.slug} />}
@@ -113,6 +116,7 @@ export function App() {
                   {route.view === "styles" && <StylesView slug={route.slug} />}
                   {route.view === "templates" && <TemplatesView slug={route.slug} />}
                   {route.view === "overrides" && <OverridesView slug={route.slug} />}
+              {route.view === "promotions" && <PromotionsView slug={route.slug} />}
                   {route.view === "settings" && <SettingsView slug={route.slug} />}
                 </>
               )}
@@ -136,7 +140,7 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "groupView": {
       const label: Record<string, string> = {
         dashboard: "Dashboard", pillars: "Pillars & Schedule", posts: "Posts",
-        styles: "Style Samples", templates: "Templates", overrides: "Override Content", settings: "Settings",
+        styles: "Style Samples", templates: "Templates", overrides: "Override Content", promotions: "Promotions", settings: "Settings",
       }
       return label[route.view] ?? route.view
     }

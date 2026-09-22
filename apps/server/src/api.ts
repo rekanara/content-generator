@@ -14,10 +14,10 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput,
 } from '@workspace/shared';
 import {
-  listGroups, listGroupsForUser, getGroupRow, createGroup, patchGroup, deleteGroup, groupOut,
+  listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
   getGroupOwner, saveCron,
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar, updatePillar } from './repos/pillars.ts';
@@ -27,6 +27,8 @@ import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/style
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
+import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion } from './repos/promotions.ts';
+import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent } from './usecases/promotions.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
@@ -624,6 +626,115 @@ api.get('/usage', async (c) => {
 g.get('/:slug/usage', async (c) => {
   const days = Math.min(365, Math.max(1, Number(c.req.query('days')) || 30));
   return c.json(await getGroupUsage(gr(c).id, days));
+});
+
+// ---------- promotions ----------
+g.get('/:slug/promotions', async (c) => c.json(await listPromotions(gr(c).id)));
+
+g.get('/:slug/promotions/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const p = await getPromotion(gr(c).id, id);
+  if (!p) return c.json({ error: 'promotion not found' }, 404);
+  return c.json(p);
+});
+
+// create — manual data, or AI-drafted from a brief (brief field present)
+g.post('/:slug/promotions', async (c) => {
+  const raw = await c.req.json().catch(() => null);
+  const brief = typeof (raw as Record<string, unknown>)?.brief === 'string' ? (raw as { brief: string }).brief.trim() : '';
+  let data: unknown;
+  if (brief) {
+    try { data = await draftPromotionFromBrief(await getGroupCfg(gr(c).slug), brief); }
+    catch (e) { return c.json({ error: `AI brief failed: ${(e as Error).message}` }, 502); }
+  } else {
+    const parsed = PromotionInput.safeParse(raw);
+    if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+    data = parsed.data;
+  }
+  const input = PromotionInput.parse(data); // normalize AI output through the same zod
+  try {
+    const p = await createPromotion(gr(c).id, input);
+    return c.json(p, 201);
+  } catch (e) {
+    return c.json({ error: `failed to create promotion: ${(e as Error).message}` }, 400);
+  }
+});
+
+g.patch('/:slug/promotions/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = PromotionInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ok = await updatePromotion(gr(c).id, id, parsed.data);
+  if (!ok) return c.json({ error: 'promotion not found' }, 404);
+  return c.json({ ok: true });
+});
+
+g.delete('/:slug/promotions/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await deletePromotion(gr(c).id, id);
+  if (!ok) return c.json({ error: 'promotion not found' }, 404);
+  return c.json({ ok: true });
+});
+
+// AI writes the slides + reports image slots
+g.post('/:slug/promotions/:id/generate-content', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  try {
+    const r = await generatePromotionContent(await getGroupCfg(gr(c).slug), id);
+    await notifyImageSlots(await getGroupCfg(gr(c).slug), id);
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ error: `content generation failed: ${(e as Error).message}` }, 502);
+  }
+});
+
+// upload image for a slide slot (multipart: slide + file)
+g.post('/:slug/promotions/:id/images', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  let body: Record<string, string | File>;
+  try { body = await c.req.parseBody() as Record<string, string | File>; } catch { return c.json({ error: 'invalid form body' }, 400); }
+  const slide = Number(body['slide']);
+  const file = body['file'];
+  if (!Number.isInteger(slide) || slide < 1 || slide > 10 || !(file instanceof File)) {
+    return c.json({ error: 'need slide (number) + file' }, 400);
+  }
+  await storePromoImage(await getGroupCfg(gr(c).slug), id, slide, Buffer.from(await file.arrayBuffer()));
+  const ready = await allImagesPresent(await getGroupCfg(gr(c).slug), id);
+  return c.json({ ok: true, allImagesPresent: ready });
+});
+
+// send now (rotation untouched)
+g.post('/:slug/promotions/:id/send', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const p = await getPromotion(gr(c).id, id);
+  if (!p) return c.json({ error: 'promotion not found' }, 404);
+  if (!p.content) return c.json({ error: 'no content — generate content first' }, 400);
+  const platform = (await getTemplate(gr(c).id, p.template_id ?? ''))?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+  enqueue({ kind: 'promoSend', slug: gr(c).slug, promoId: id, platform });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+// schedule via plans (type promotion — the date's run delivers this promo)
+g.post('/:slug/promotions/:id/schedule', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const body = await c.req.json().catch(() => null);
+  const forDate = (body as { for_date?: string })?.for_date;
+  if (!forDate || !/^\d{4}-\d{2}-\d{2}$/.test(forDate)) return c.json({ error: 'for_date required (YYYY-MM-DD)' }, 400);
+  try {
+    const plan = await createPlan(gr(c).id, { for_date: forDate, type: 'promotion', promotion_id: id, note: `promo ${id.slice(0, 8)}` } as never);
+    return c.json(plan, 201);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.includes('plans_group_date')) return c.json({ error: 'that date already has a plan' }, 400);
+    throw e;
+  }
 });
 
 api.route('/g', g); // mount at the end — see note above

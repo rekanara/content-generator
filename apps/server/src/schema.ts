@@ -135,3 +135,31 @@ export function assembleCaption(c: CaptionOut, footer: string, ctaOverride?: str
   if (tags.length > 0) lines.push('', tags.join(' '));
   return lines.join('\n').replace(/^\n+/, '').trim();
 }
+
+// ——— promotion content (AI-authored slides) ———
+export type PromoSlideOut = { html: string; image_prompt: string };
+export type PromoContentOut = { slides: PromoSlideOut[] };
+
+export function isPromoContentOut(x: unknown): x is PromoContentOut {
+  if (!obj(x) || !Array.isArray(x.slides) || x.slides.length < 4 || x.slides.length > 10) return false;
+  return x.slides.every((s: unknown) => {
+    if (!obj(s) || !str(s.html) || s.html.length < 10) return false;
+    const ip = s.image_prompt;
+    return ip === undefined || str(ip);
+  });
+}
+
+// ——— promotion brief (AI drafts the promo DATA from a rough brief) ———
+export type PromoBriefOut = {
+  name: string; topic: string; features: string[]; stacks: string[];
+  stats: string[]; price: string; price_sale: string;
+};
+export function isPromoBriefOut(x: unknown): x is PromoBriefOut {
+  return (
+    obj(x) && str(x.name) && x.name.length > 0 && str(x.topic) &&
+    Array.isArray(x.features) && x.features.every(str) &&
+    Array.isArray(x.stacks) && x.stacks.every(str) &&
+    Array.isArray(x.stats) && x.stats.every(str) &&
+    str(x.price) && str(x.price_sale)
+  );
+}

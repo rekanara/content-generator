@@ -13,6 +13,9 @@ import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
 import { getGroupCfg, getGroupCfgById } from './groups.ts';
 import { addEvent } from './repos/events.ts';
 import { getOverride, markOverrideSent } from './repos/overrides.ts';
+import { getPromotion } from './repos/promotions.ts';
+import { deliverPromotion } from './usecases/promotions.ts';
+import { getTemplate } from './repos/templates.ts';
 import { getPlanByDate } from './repos/plans.ts';
 import { resolvePlannedSlot } from './pipeline.ts';
 import { jakartaToday } from './cronmath.ts';
@@ -23,7 +26,8 @@ type Job =
   | { kind: 'resend'; slug: string; postId: string }
   | { kind: 'approve'; slug: string; postId: string }
   | { kind: 'rerender'; slug: string; postId: string }
-  | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean };
+  | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean }
+  | { kind: 'promoSend'; slug: string; promoId: string; platform: 'instagram' | 'linkedin' };
 
 const jobs: Job[] = [];
 let running = false;
@@ -59,13 +63,14 @@ async function drain(): Promise<void> {
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
+        else if (job.kind === 'promoSend') await runPromoSend(cfg, job.promoId, job.platform);
         else await runResend(cfg, job.postId);
   } catch (e) {
     const msg = (e as Error).message;
     console.error(`[queue] job failed (${job.slug}): ${msg}`);
     try {
       // generate failures with a post row are evented in runGenerate; here only resend/approve/rerender (id always known)
-      if (cfg && job.kind !== 'generate') await addEvent(job.postId, cfg.id, 'failed', msg);
+      if (cfg && job.kind !== 'generate' && job.kind !== 'promoSend') await addEvent(job.postId, cfg.id, 'failed', msg);
     } catch { /* event write must never break the queue */ }
   }
       lastActivity = Date.now();
@@ -135,6 +140,31 @@ async function runGenerate(
         return;
       }
     }
+  }
+
+  // ——— promotion plan: deliver the linked promo (rotation untouched) ———
+  if (plan?.type === 'promotion' && plan.promotion_id) {
+    const promo = await getPromotion(cfg.id, plan.promotion_id);
+    if (promo?.status === 'sent') {
+      console.log(`[queue] generate skipped (${cfg.slug}) — promotion "${promo.name}" already sent`);
+      return;
+    }
+    if (promo && promo.content) {
+      const tpl = promo.template_id ? await getTemplate(cfg.id, promo.template_id) : null;
+      const platform: 'instagram' | 'linkedin' = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+      console.log(`[queue] run ${cfg.slug}: plan promotion "${promo.name}" (${platform}) source=${source}`);
+      try {
+        await deliverPromotion(cfg, promo.id, platform);
+      } catch (e) {
+        const msg = `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`;
+        console.error(`[queue] ${msg}`);
+        await sendMessage(cfg, msg).catch(() => {});
+        throw e;
+      }
+      return;
+    }
+    // promo missing (deleted) or has no content → fall through to natural pipeline
+    console.warn(`[queue] promotion plan ${plan.id} has no deliverable promo — running natural pipeline`);
   }
 
   // ——— slot resolution: pinned spec (slot_override) / forced (/gen args) / natural ———
@@ -535,5 +565,15 @@ export async function bootCleanup(): Promise<void> {
     try {
       await sendMessage(cfg, `Daemon restarted — ${n} in-flight post${n > 1 ? 's' : ''} marked failed (${cfg.slug}). Regenerate: /gen ${cfg.slug}`);
     } catch { /* alert is best-effort */ }
+  }
+}
+
+// Send a promo on demand (FE button) — rotation untouched.
+async function runPromoSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoId: string, platform: 'instagram' | 'linkedin'): Promise<void> {
+  try {
+    await deliverPromotion(cfg, promoId, platform);
+  } catch (e) {
+    await sendMessage(cfg, `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`).catch(() => {});
+    throw e;
   }
 }

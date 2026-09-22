@@ -196,3 +196,40 @@ export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], 
     },
   ];
 }
+
+// ——— promotions (pure) ———
+export type PromoData = {
+  name: string; topic: string; features: string[]; stacks: string[]; stats: string[];
+  price: string; price_sale: string;
+};
+
+export function promoBriefPrompt(brief: string): { role: 'system' | 'user'; content: string }[] {
+  return [
+    { role: 'system', content: 'You draft product promotion data for a developer-audience content account (Indonesian, casual-professional). From a rough brief, produce structured promo data. Prices as display text (e.g. "Rp 299rb", "GRATIS"). Reply ONLY with valid JSON.' },
+    { role: 'user', content: `Brief:\n${brief}\n\nReturn JSON: {"name": "<promo/product name>", "topic": "<one-line angle>", "features": ["<benefit, max 8 words>", ...3-6 items], "stacks": ["<tech>", ...2-5], "stats": ["<social proof, e.g. '10+ proyek selesai'>", ...0-3], "price": "<display text>", "price_sale": "<discounted display text, empty if none>"}` },
+  ];
+}
+
+export function promoContentPrompt(p: PromoData, cssVocab: string): { role: 'system' | 'user'; content: string }[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a slide art director for a product promotion (Indonesian, developer audience).',
+        'You write ONE COMPLETE HTML fragment per slide — free layout, free position, only these rules:',
+        '- Use ONLY the CSS classes available in the template (listed below) plus inline styles if needed. No <style> blocks, no <script>.',
+        '- Each slide is one fragment. Suggested flow (adapt if it improves the story):',
+        '  1 cover (product name + hook) → 2 pain point → 3 features (use feature-item list) →',
+        '  4 tech stack (stack-item list) → 5 price (show price_sale as the deal when present) →',
+        '  6 social proof (stat-item list) → 7 CTA (save/follow/check link).',
+        '- Where you want a photo/illustration on a slide, place the token {{image}} inside an <img src="{{image}}"> or as a background, and describe the image you need in that slide\'s image_prompt (Indonesian, concrete: subject + style + mood).',
+        '- Text in Indonesian. Big fonts only (readable on a phone). No lorem ipsum.',
+        'Reply ONLY with valid JSON.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Promo data:\n${JSON.stringify(p, null, 1)}\n\nTemplate CSS classes you may use:\n${cssVocab}\n\nReturn JSON: {"slides": [{"html": "<fragment>", "image_prompt": "<what image this slide needs, empty if none>"}, ... 6-8 slides]}`,
+    },
+  ];
+}
