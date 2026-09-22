@@ -722,7 +722,8 @@ g.post('/:slug/promotions/:id/send', async (c) => {
   const p = await getPromotion(gr(c).id, id);
   if (!p) return c.json({ error: 'promotion not found' }, 404);
   if (!p.content) return c.json({ error: 'no content — generate content first' }, 400);
-  const platform = (await getTemplate(gr(c).id, p.template_id ?? ''))?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+  const tpl = p.template_id ? await getTemplate(gr(c).id, p.template_id) : null; // null template_id → default (ig)
+  const platform = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
   enqueue({ kind: 'promoSend', slug: gr(c).slug, promoId: id, platform });
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });
