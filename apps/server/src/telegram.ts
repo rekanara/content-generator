@@ -107,6 +107,7 @@ export async function registerCommands(token: string): Promise<void> {
     body: JSON.stringify({
       commands: [
         { command: 'gen', description: 'Generate the next post (natural rotation)' },
+        { command: 'plan', description: 'AI-plan the upcoming week' },
         { command: 'override', description: 'Create override content for a date' },
         { command: 'rerender', description: 'Re-render latest post with current template' },
         { command: 'status', description: 'Schedule, rotation, latest post' },

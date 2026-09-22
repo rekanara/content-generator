@@ -9,6 +9,7 @@ import { startBot } from './bot.ts';
 import { queueLiveness } from './queue.ts';
 import { startCron } from './cron.ts';
 import { startMonitor } from './monitor.ts';
+import { startPlanner } from './usecases/planner.ts';
 import { api } from './api.ts';
 
 const app = new Hono();
@@ -39,4 +40,5 @@ serve({ fetch: app.fetch, port: config.port });
 console.log(`[server] daemon v2 running on :${config.port}`);
 await startCron();
 startMonitor(); // watchdog: boot missed-slot check + heartbeat (must run before bot's blocking loop)
+startPlanner(); // AI planner: daily 17:00 WIB for auto_plan groups
 await startBot();

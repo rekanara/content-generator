@@ -103,6 +103,25 @@ export function SettingsView({ slug }: { slug: string }) {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardContent className="flex items-center justify-between p-4">
+          <div>
+            <p className="text-sm font-medium">AI planner</p>
+            <p className="text-xs text-muted-foreground">
+              Daily at 17:00 WIB the AI reviews next week's runs and creates plans sparingly (special content with matching templates — cancelable anytime).
+            </p>
+          </div>
+          <Switch
+            checked={group.auto_plan}
+            onCheckedChange={(v) => {
+              api.patchGroup(slug, { auto_plan: v }).then(reload).catch((err) => {
+                setMsg(err instanceof ApiError ? err.message : "failed to save")
+              })
+            }}
+          />
+        </CardContent>
+      </Card>
+
       <form className="space-y-6" onSubmit={save}>
         <Section title="LLM">
           {LLM_FIELDS.map((f) => (

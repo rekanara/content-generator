@@ -135,6 +135,13 @@ Bot Telegram (polling):
 
 - **`plans` table**: apa yang jalan di tanggal tertentu, per group. **Plans adalah pengecualian (exception), bukan schedule** — tanpa plan row = rotasi natural (state-based, self-healing; schedule pre-computed akan drift). Tidak ada code path yang pre-generate plan untuk horizon tanggal.
 - **type `slot_override`**: run di tanggal itu pakai spec yang di-pin — `platform`/`format`/`pillar_id`/`template_id` (semua nullable → fallback natural per-field; pillar harus masih aktif; template by-id dirender walau tidak active). Pipeline normal jalan (rotasi maju setelah `sent`). Use case: "rekomendasi repo github" di-pin ke template `image_only`, tanggal tertentu.
+
+### AI planner
+
+- **Planner otomatis** (`usecases/planner.ts`): LLM meninjau next 7 runs (tanggal bebas-plan, > hari ini, cron on) + palet template + riwayat 30 topik → mengusulkan **0–3 plan slot_override** dengan justifikasi (note bahasa Indonesia). Guard `isPlannerOut` + validasi referensial (tanggal dari set yang ditawarkan, template/pillar nyata, compat platform-format, cap 3, dedup) sebelum insert.
+- **Discipline exception-model**: plan tetap pengecualian — prompt melarang merencanakan tiap hari; list kosong adalah jawaban valid. Cron-off group → planner no-op.
+- **Trigger**: cron harian 17:00 WIB untuk group dengan `groups.auto_plan` (default false, toggle di Settings; report dikirim kalau ada plan baru) + `/plan [group]` manual (fire-and-forget, hasil menyusul di chat). Failure planner = log-only (low-stakes — rotasi natural tetap jalan).
+- Plans yang dibuat planner: cancelable seperti manual (dashboard section Plans / calendar badge).
 - **type `override_content`**: dibuat OTOMATIS oleh flow override (override + plan atomik dalam satu transaksi) — konten override yang dikirim, rotasi tidak maju.
 - **Satu plan aktif per (group, tanggal)** — partial unique index; `cancelled` membebaskan tanggal. Create override di tanggal yang sudah ada plan slot → konflik → friendly error.
 - **runGenerate konsult plan dulu** (sebelum resolve slot): override_content → deliver override / skip; slot_override → `plannedSlot` (pure) + templateId ke render; kosong/cancelled → natural (forced `/gen` args diabaikan saat plan aktif — dengan info message).

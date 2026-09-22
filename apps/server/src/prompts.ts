@@ -145,3 +145,54 @@ export function imagePrompt(headline: string): string {
     'Absolutely no text, no letters, no words in the image. Composition centered, works cropped to 4:5.',
   ].join(' ');
 }
+
+// ——— AI planner (pure) ———
+// Input shape for the planner LLM: upcoming runs + template palette + recent topics.
+// The prompt enforces the EXCEPTION model: plan sparingly, justify every plan.
+export type PlannerRun = {
+  date: string; weekday: string;
+  platform: 'instagram' | 'linkedin';
+  format: 'carousel' | 'reels' | 'pdf' | 'text';
+  pillar: { id: string; name: string; description: string };
+};
+export type PlannerTemplate = { id: string; name: string; type: string; format: string };
+
+export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], recentTopics: string[]): { role: 'system' | 'user'; content: string }[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a content planner for a developer-audience social account (Indonesian content, casual-professional tone).',
+        'You look at the UPCOMING week\'s scheduled runs and decide if any date should carry SPECIAL planned content',
+        'instead of the regular pipeline output (e.g. a curated list post, a visual-only recap, a tools round-up).',
+        '',
+        'HARD RULES:',
+        '- Plan SPARINGLY: 0-3 plans total. An empty list is a valid, often the best answer. NEVER plan every day.',
+        '- for_date MUST be one of the given run dates. template_id MUST be one of the given template ids.',
+        '- pillar_id (optional) MUST be one of the given pillar ids when present.',
+        '- platform/format are optional overrides; when both given they must be compatible',
+        '  (instagram: carousel|reels, linkedin: pdf|text). Omit them unless the plan changes them deliberately.',
+        '- note (Indonesian, max 120 chars) explains the content idea and why that date/template fits.',
+        '- Avoid repeating recent topics listed in the history.',
+        '',
+        'Return JSON: { "plans": [ { "for_date": "YYYY-MM-DD", "template_id": "...", "pillar_id": "..." (optional),',
+        '"platform": "..." (optional), "format": "..." (optional), "note": "..." } ] }',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        `Scheduled runs for the next ${runs.length} slots:`,
+        JSON.stringify(runs),
+        '',
+        'Template palette (any may be pinned; types other than "regular" are designed for special content):',
+        JSON.stringify(templates),
+        '',
+        'Recent published topics (avoid repeating):',
+        JSON.stringify(recentTopics.slice(0, 30)),
+        '',
+        'Decide the plans for this week.',
+      ].join('\n'),
+    },
+  ];
+}

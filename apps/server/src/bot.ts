@@ -14,6 +14,7 @@ import { getGroupCfg, listGroups } from './groups.ts';
 import { rejectPost } from './repos/posts.ts';
 import { addEvent } from './repos/events.ts';
 import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
+import { runPlanner, formatPlannerReport } from './usecases/planner.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { jakartaToday } from './cronmath.ts';
 import { config } from './config.ts';
@@ -24,6 +25,7 @@ export type Cmd =
   | { t: 'gen'; slug?: string; platform?: Platform; format?: Format }
   | { t: 'rerender'; slug?: string }
   | { t: 'override'; slug?: string }
+  | { t: 'plan'; slug?: string }
   | { t: 'cancel' }
   | { t: 'status'; slug?: string }
   | { t: 'help' }
@@ -43,6 +45,10 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
   if (s.startsWith('/rerender')) {
     const arg = s.split(/\s+/)[1];
     return { t: 'rerender', slug: arg && slugs.includes(arg) ? arg : undefined };
+  }
+  if (s.startsWith('/plan')) {
+    const arg = s.split(/\s+/)[1];
+    return { t: 'plan', slug: arg && slugs.includes(arg) ? arg : undefined };
   }
   if (s.startsWith('/override')) {
     const arg = s.split(/\s+/)[1];
@@ -145,6 +151,7 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
         '/gen — generate the next post (first group, natural rotation)',
         '/gen <group> — force a group',
         '/gen <group> <platform> <format> — force group+platform+format',
+        '/plan [group] — AI plans the upcoming week (creates cancelable plans)',
         '/override [group] — create override content for a date (guided, step by step)',
         '/rerender [group] — re-render the latest post with the current template (content unchanged)',
         '/status [group] — schedule, rotation, latest post',
@@ -158,6 +165,22 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       const had = overrideSessions.size > 0;
       overrideSessions.clear();
       return had ? 'Override session dibatalkan.' : 'Tidak ada sesi override yang aktif.';
+    }
+    case 'plan': {
+      const slug = cmd.slug ?? (await defaultSlug());
+      const cfg = await getGroupCfg(slug).catch(() => null);
+      if (!cfg) return `group "${slug}" not found`;
+      // fire-and-forget: the LLM call can take a minute — polling must not block.
+      // Results (or the failure) arrive as a follow-up message in this chat.
+      const chatId = cfg.telegram.chatId;
+      console.log(`[bot] /plan ${slug} — planner started (manual)`);
+      void runPlanner(cfg)
+        .then((r) => {
+          console.log(`[bot] /plan ${slug} done — ${r.created.length} plan(s) created`);
+          return replyGlobal(chatId, formatPlannerReport(slug, r));
+        })
+        .catch((e) => replyGlobal(chatId, `Planner gagal: ${(e as Error).message.slice(0, 200)}`));
+      return `Planner berjalan (${slug}) — hasilnya menyusul di chat ini.`;
     }
     case 'override': {
       const slug = cmd.slug ?? (await defaultSlug());

@@ -60,3 +60,28 @@ export function writerGuardName(format: Format): string {
   if (format === 'text') return 'TextOut';
   return 'CarouselOut';
 }
+
+// ——— AI planner output ———
+export type PlannerProposal = {
+  for_date: string;          // YYYY-MM-DD
+  template_id: string;       // must exist in the offered palette
+  pillar_id?: string | null; // must be an active pillar when present
+  platform?: string | null;  // 'instagram' | 'linkedin'
+  format?: string | null;    // slot format
+  note: string;              // justification (Indonesian)
+};
+export type PlannerOut = { plans: PlannerProposal[] };
+
+export function isPlannerOut(x: unknown): x is PlannerOut {
+  if (!obj(x) || !Array.isArray(x.plans) || x.plans.length > 8) return false;
+  return x.plans.every((p: unknown) => {
+    if (!obj(p)) return false;
+    if (!str(p.for_date) || !/^\d{4}-\d{2}-\d{2}$/.test(p.for_date)) return false;
+    if (!str(p.template_id) || p.template_id.length === 0) return false;
+    if (!str(p.note) || p.note.length === 0) return false;
+    if (p.pillar_id !== undefined && p.pillar_id !== null && !str(p.pillar_id)) return false;
+    if (p.platform !== undefined && p.platform !== null && !['instagram', 'linkedin'].includes(p.platform as string)) return false;
+    if (p.format !== undefined && p.format !== null && !['carousel', 'reels', 'pdf', 'text'].includes(p.format as string)) return false;
+    return true;
+  });
+}

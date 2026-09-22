@@ -57,6 +57,7 @@ export const Group = z.object({
   cron_expr: z.string(),
   cron_enabled: z.boolean(),
   approval_required: z.boolean(),
+  auto_plan: z.boolean(),
   created_at: z.string(),
   ...GROUP_CONFIG_FIELDS,
 });
@@ -80,6 +81,7 @@ export const GroupInput = z.object({
   telegram_bot_token: z.string().nullable().default(null),
   telegram_chat_id: z.string().nullable().default(null),
   approval_required: z.boolean().default(false),
+  auto_plan: z.boolean().default(false),
 });
 export type GroupInput = z.infer<typeof GroupInput>;
 // Input version (fields with defaults become optional) — for request bodies from the FE.
@@ -102,6 +104,7 @@ export const GroupPatch = z.object({
   telegram_bot_token: z.string().nullable().optional(),
   telegram_chat_id: z.string().nullable().optional(),
   approval_required: z.boolean().optional(),
+  auto_plan: z.boolean().optional(),
 });
 export type GroupPatch = z.infer<typeof GroupPatch>;
 
