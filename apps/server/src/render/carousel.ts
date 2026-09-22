@@ -92,16 +92,35 @@ export async function renderCarousel(
       files.push(file);
     }
 
-    // PDF for LinkedIn: join slides into one document — per-page screenshots already exist,
-    // smallest approach: re-render all html into a single multi-page page.pdf.
+    // PDF for LinkedIn: one multi-page document from the per-slide htmls.
+    // Each html is a FULL document (<html><head><style>...<body>...) — combining them
+    // naively nests documents and every body ends up stacked on page 1. Extract each
+    // slide's <body> inner html, wrap it in a page-sized block (the slide css targets
+    // `body { width/height }` — repoint it to the wrapper), and break pages explicitly.
     let pdfPath: string | null = null;
     if (platform === 'linkedin') {
       pdfPath = `${outDir}/carousel.pdf`;
-      const combined = htmls
-        .map((h) => h.replace('</body></html>', ''))
-        .join('<div style="page-break-after: always"></div>')
-        .replace('<html><head>', '<html><head>');
-      // page.pdf needs one document: setContent combined, page size 1080x1350pt
+      const bodyInner = (h: string) => {
+        const m = h.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        return m?.[1] ?? h;
+      };
+      // slide templates style `body {width:1080px;height:1350px}` — for the combined
+      // document each slide lives in a .slide div; translate those body rules onto it.
+      const styleFor = (h: string) => {
+        const m = h.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+        return m?.[1]
+          ?.replace(/\bbody\s*\{/g, '.slide {')
+          .replace(/\bbody\s*,/g, '.slide,')
+          .replace(/,\s*body\s*\{/g, ', .slide {') ?? '';
+      };
+      const pages = htmls.map((h) =>
+        `<div class="slide">${bodyInner(h)}</div>`);
+      const combined = `<!doctype html><html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  .slide { width: ${IG_W}px; height: ${IG_H}px; overflow: hidden; page-break-after: always; break-after: page; }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+</style>${htmls.map((h) => `<style>${styleFor(h)}</style>`).join('')}</head>
+<body>${pages.join('')}</body></html>`;
       const pdfPage = await browser.newPage();
       try {
         await pdfPage.setContent(combined, { waitUntil: 'load' });
