@@ -1,5 +1,5 @@
-import { useRef, useState } from "react"
-import { ArrowLeft, CalendarClock, Send, Sparkles, Trash2 } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { ArrowLeft, CalendarClock, Check, Send, Sparkles, Trash2, Upload } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -16,9 +16,7 @@ const STATUS_BADGE: Record<string, string> = {
   sent: "bg-zinc-500/15 text-zinc-500 border-transparent",
 }
 
-// slides whose html embeds {{image}} → image slots to fill
-const slotOf = (p: { content: { html: string; image_prompt: string }[] | null }): { slide: number; prompt: string }[] =>
-  (p.content ?? []).map((s, i) => ({ i: i + 1, s })).filter((x) => x.s.html.includes("{{image}}")).map((x) => ({ slide: x.i, prompt: x.s.image_prompt }));
+type SlotStatus = { slide: number; prompt: string; present: boolean }
 
 export function PromotionDetailView({ slug, id }: { slug: string; id: string }) {
   const { data, error, loading, reload } = usePromotion(slug, id)
@@ -26,17 +24,41 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
   const [msg, setMsg] = useState<string | null>(null)
   const [scheduleDate, setScheduleDate] = useState("")
   const fileInputs = useRef<Record<number, HTMLInputElement | null>>({})
+  const [slots, setSlots] = useState<SlotStatus[] | null>(null)
+  const [uploadingSlide, setUploadingSlide] = useState<number | null>(null)
+
+  const refreshSlots = useCallback(() => {
+    if (!data?.content) { setSlots(null); return }
+    api.promoImageSlots(slug, id)
+      .then(setSlots)
+      .catch(() => setSlots(null))
+  }, [slug, id, data?.content])
+
+  useEffect(() => { refreshSlots() }, [refreshSlots])
 
   const act = async (fn: () => Promise<unknown>, label: string) => {
     setBusy(true); setMsg(null)
     try { await fn(); reload() } catch (e) { setMsg(e instanceof ApiError ? e.message : `${label} failed`) } finally { setBusy(false) }
   }
 
+  const uploadImage = async (slide: number, file: File) => {
+    setUploadingSlide(slide); setMsg(null)
+    try {
+      const r = await api.uploadPromoImage(slug, id, slide, file)
+      refreshSlots()
+      setMsg(r.allImagesPresent
+        ? `Slide ${slide} uploaded ✓ — semua gambar lengkap, promo siap dikirim.`
+        : `Slide ${slide} uploaded ✓.`)
+    } catch (e) {
+      setMsg(e instanceof ApiError ? e.message : `upload slide ${slide} failed`)
+    } finally {
+      setUploadingSlide(null)
+    }
+  }
+
   if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
   if (!data) return null
-
-  const slots = slotOf(data)
 
   return (
     <div className="space-y-4">
@@ -102,21 +124,37 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
         </CardContent></Card>
       )}
 
-      {slots.length > 0 && (
+      {(slots ?? []).length > 0 && (
         <Card><CardContent className="space-y-3 p-4">
-          <h3 className="text-xs font-medium text-muted-foreground">Images needed ({slots.length}) — slide yang pakai {"{{image}}"}</h3>
-          {slots.map((s) => (
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Images ({slots!.filter((s) => s.present).length}/{slots!.length} uploaded) — slide yang pakai {"{{image}}"}
+          </h3>
+          {slots!.map((s) => (
             <div key={s.slide} className="flex flex-wrap items-center gap-2">
               <span className="w-16 shrink-0 text-xs font-medium">slide {s.slide}</span>
               <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{s.prompt || "(no description)"}</span>
+              {s.present && (
+                <Badge variant="secondary" className="bg-emerald-500/15 text-emerald-500 border-transparent">
+                  <Check className="mr-1 size-3" />uploaded
+                </Badge>
+              )}
               <input ref={(el) => { fileInputs.current[s.slide] = el }} type="file" accept="image/*" className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0]
-                  if (f) act(() => api.uploadPromoImage(slug, id, s.slide, f), "upload")
+                  if (f) void uploadImage(s.slide, f)
+                  e.target.value = ""
                 }} />
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => fileInputs.current[s.slide]?.click()}>Upload</Button>
+              <Button size="sm" variant={s.present ? "ghost" : "outline"} disabled={uploadingSlide !== null}
+                onClick={() => fileInputs.current[s.slide]?.click()}>
+                {uploadingSlide === s.slide
+                  ? <><Upload className="size-4 animate-pulse" /> uploading…</>
+                  : s.present ? <><Upload className="size-4" /> Ganti</> : <><Upload className="size-4" /> Upload</>}
+              </Button>
             </div>
           ))}
+          {slots!.every((s) => s.present) && (
+            <p className="text-xs text-emerald-600">Semua gambar lengkap — promo siap dikirim.</p>
+          )}
         </CardContent></Card>
       )}
     </div>

@@ -29,6 +29,16 @@ export async function uploadPostArtifact(slug: string, postId: string, localPath
   return key;
 }
 
+// Upload local file → <slug>/promotions/<promoId>/<filename> (promo images live under
+// promotions/, NOT posts/ — a wrong-prefix upload once made every promo image invisible).
+export async function uploadPromotionImage(slug: string, promoId: string, localPath: string, filename: string): Promise<string> {
+  await ensureBucket();
+  const key = `${slug}/promotions/${promoId}/${filename}`;
+  const size = statSync(localPath).size;
+  await client.putObject(config.minio.bucket, key, createReadStream(localPath), size);
+  return key;
+}
+
 // Override images live under overrides/<overrideId>/ (separate namespace from posts —
 // no slug prefix: override id is already unique, and deletion cascades are simpler).
 export async function uploadOverrideBuffer(overrideId: string, buf: Buffer, filename: string): Promise<string> {

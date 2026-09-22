@@ -5,7 +5,7 @@ import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts
 import { getPromotion, setContent, imageSlots, markPromotionSent } from '../repos/promotions.ts';
 import { getTemplate } from '../repos/templates.ts';
 import { cssVocabOf, renderPromotion } from '../render/promotion.ts';
-import { artifactExists, uploadPostArtifact } from '../storage.ts';
+import { artifactExists, uploadPromotionImage } from '../storage.ts';
 import { sendMessage } from '../telegram.ts';
 import type { GroupCfg } from '../groups.ts';
 import type { Promotion } from '@workspace/shared';
@@ -80,27 +80,35 @@ function promoCaption(p: Promotion): string {
   return parts.join('\n').slice(0, 1024);
 }
 
-// store an uploaded image for a slide slot
+// store an uploaded image for a slide slot — CORRECT prefix: <slug>/promotions/<id>/
 export async function storePromoImage(cfg: GroupCfg, promoId: string, slide: number, buf: Buffer): Promise<void> {
   const ext = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff ? 'jpg' : 'png';
-  const file = 'slide-' + String(slide).padStart(2, '0') + '.' + ext;
+  const file = `slide-${String(slide).padStart(2, '0')}.${ext}`;
   const { writeFileSync, mkdirSync } = await import('node:fs');
-  mkdirSync('out/' + promoId, { recursive: true });
-  const tmp = 'out/' + promoId + '/' + file;
+  mkdirSync(`out/${promoId}`, { recursive: true });
+  const tmp = `out/${promoId}/${file}`;
   writeFileSync(tmp, buf);
-  await uploadPostArtifact(cfg.slug, promoId, tmp, file);
+  await uploadPromotionImage(cfg.slug, promoId, tmp, file);
 }
 
 // is the promo fully imaged (every {{image}} slot has a stored file)?
 export async function allImagesPresent(cfg: GroupCfg, promoId: string): Promise<boolean> {
+  const slots = await imageSlotStatus(cfg, promoId);
+  return slots.every((s) => s.present);
+}
+
+// Per-slot file status — drives the FE upload UI (upload ✓ per slot).
+export async function imageSlotStatus(cfg: GroupCfg, promoId: string): Promise<{ slide: number; prompt: string; present: boolean }[]> {
   const promo = await getPromotion(cfg.id, promoId);
-  if (!promo?.content) return false;
+  if (!promo?.content) return [];
+  const out: { slide: number; prompt: string; present: boolean }[] = [];
   for (const s of imageSlots(promo)) {
     let found = false;
     for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
       if (await artifactExists(`${cfg.slug}/promotions/${promoId}/slide-${String(s.slide).padStart(2, '0')}.${ext}`)) { found = true; break; }
+      if (await artifactExists(`${cfg.slug}/posts/${promoId}/slide-${String(s.slide).padStart(2, '0')}.${ext}`)) { found = true; break; } // legacy prefix
     }
-    if (!found) return false;
+    out.push({ slide: s.slide, prompt: s.prompt, present: found });
   }
-  return true;
+  return out;
 }

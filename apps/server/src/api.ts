@@ -28,7 +28,7 @@ import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTem
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion } from './repos/promotions.ts';
-import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent } from './usecases/promotions.ts';
+import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus } from './usecases/promotions.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
@@ -706,6 +706,13 @@ g.post('/:slug/promotions/:id/images', async (c) => {
   await storePromoImage(await getGroupCfg(gr(c).slug), id, slide, Buffer.from(await file.arrayBuffer()));
   const ready = await allImagesPresent(await getGroupCfg(gr(c).slug), id);
   return c.json({ ok: true, allImagesPresent: ready });
+});
+
+// per-slot image status (drives the FE upload UI)
+g.get('/:slug/promotions/:id/image-slots', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  return c.json(await imageSlotStatus(await getGroupCfg(gr(c).slug), id));
 });
 
 // send now (rotation untouched)

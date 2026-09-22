@@ -96,6 +96,7 @@ export const api = {
   patchPromotion: (slug: string, id: string, p: PromotionInput) => req<{ ok: true }>(`${g(slug)}/promotions/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
   delPromotion: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/promotions/${id}`, { method: 'DELETE' }),
   generatePromoContent: (slug: string, id: string) => req<{ ok: true; slides: number; imageSlots: { slide: number; prompt: string }[] }>(`${g(slug)}/promotions/${id}/generate-content`, { method: 'POST' }),
+  promoImageSlots: (slug: string, id: string) => req<{ slide: number; prompt: string; present: boolean }[]>(`${g(slug)}/promotions/${id}/image-slots`),
   uploadPromoImage: (slug: string, id: string, slide: number, file: File) => {
     const fd = new FormData();
     fd.set('slide', String(slide));

@@ -6,7 +6,7 @@ import puppeteer from 'puppeteer';
 import type { Promotion, PromoSlide } from '@workspace/shared';
 import type { GroupCfg } from '../groups.ts';
 import { getTemplate } from '../repos/templates.ts';
-import { uploadPostArtifact, getArtifactBuffer, artifactExists } from '../storage.ts';
+import { uploadPromotionImage, getArtifactBuffer, artifactExists } from '../storage.ts';
 import { imageMime } from './template.ts';
 
 const W = 1080, H = 1350;
@@ -76,9 +76,9 @@ export async function renderPromotion(
     }
     const keys: string[] = [];
     for (let i = 0; i < files.length; i++) {
-      keys.push(await uploadPostArtifact(cfg.slug, promo.id, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
+      keys.push(await uploadPromotionImage(cfg.slug, promo.id, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
     }
-    if (pdfPath) keys.push(await uploadPostArtifact(cfg.slug, promo.id, pdfPath, 'carousel.pdf'));
+    if (pdfPath) keys.push(await uploadPromotionImage(cfg.slug, promo.id, pdfPath, 'carousel.pdf'));
     return { files: keys, prefix, missingImages };
   } finally {
     await browser.close();
@@ -89,6 +89,10 @@ async function findImage(slug: string, promoId: string, slide: number) {
   for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
     const key = `${slug}/promotions/${promoId}/slide-${String(slide).padStart(2, '0')}.${ext}`;
     if (await artifactExists(key)) return { key, ext };
+    // fallback: uploads made before the prefix fix landed under posts/ — read them
+    // so users don't have to re-upload (remove once no legacy uploads remain)
+    const legacy = `${slug}/posts/${promoId}/slide-${String(slide).padStart(2, '0')}.${ext}`;
+    if (await artifactExists(legacy)) return { key: legacy, ext };
   }
   return null;
 }
