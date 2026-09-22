@@ -5,6 +5,7 @@ import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName, assembleCaption } from './schema.ts';
+import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
 import { ideationPrompt, writerPrompt, criticPrompt } from './prompts.ts';
 import type { StyleSample, PillarFull } from './prompts.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
@@ -13,11 +14,13 @@ import type { GroupCfg } from './groups.ts';
 export type Draft = CarouselOut | ReelsOut | TextOut;
 export type RunResult = { postId: string; slot: Slot; topic: string; draft: Draft };
 
-type UsageAcc = Record<string, { prompt: number; completion: number }>;
-const addUsage = (acc: UsageAcc, step: string, u: { prompt: number; completion: number }) => {
-  acc[step] = acc[step] ?? { prompt: 0, completion: 0 };
-  acc[step]!.prompt += u.prompt;
-  acc[step]!.completion += u.completion;
+// Per-step usage with the model + snapshot cost (llm-costs catalog) — stored in posts.llm_usage.
+type UsageAcc = Record<string, StepUsage>;
+const addUsage = (acc: UsageAcc, step: string, model: string, u: { prompt: number; completion: number }) => {
+  const prev = acc[step];
+  const prompt = (prev?.prompt ?? 0) + u.prompt;
+  const completion = (prev?.completion ?? 0) + u.completion;
+  acc[step] = stepUsage(model, prompt, completion);
 };
 
 async function getStyleSamples(platform: Platform, groupId: string): Promise<StyleSample[]> {
@@ -95,7 +98,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     isIdeationOut,
     6000,
   );
-  addUsage(usage, 'ideation', id.usage);
+  addUsage(usage, 'ideation', writerModel(cfg), id.usage);
   console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
 
   // 2. writer
@@ -107,7 +110,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     writerGuard(slot.format) as (x: unknown) => x is Draft,
     8000,
   );
-  addUsage(usage, 'writer', w.usage);
+  addUsage(usage, 'writer', writerModel(cfg), w.usage);
   console.log(`[writer] ok format=${slot.format} tokens=${w.usage.completion}`);
 
   // 3. critic (separate model) — same guard, structure must stay intact
@@ -118,14 +121,14 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     writerGuard(slot.format) as (x: unknown) => x is Draft,
     8000,
   );
-  addUsage(usage, 'critic', c.usage);
+  addUsage(usage, 'critic', criticModel(cfg), c.usage);
   console.log(`[critic] ok tokens=${c.usage.completion}`);
 
   // 4. persist post (status draft)
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${id.data.topic},
-      ${captionOf(c.data, cfg.captionFooter)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(usage)})
+      ${captionOf(c.data, cfg.captionFooter)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);

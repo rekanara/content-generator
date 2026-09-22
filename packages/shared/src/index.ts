@@ -388,3 +388,31 @@ export const UserInputBody = z.object({
   role: z.enum(['admin', 'user']),
 });
 export type UserInputBody = z.infer<typeof UserInputBody>;
+
+// ---------- usage reporting ----------
+export const UsageStepAgg = z.object({
+  model: z.string(),
+  prompt: z.number(),
+  completion: z.number(),
+  cost: z.number(),
+  runs: z.number(),
+});
+export type UsageStepAgg = z.infer<typeof UsageStepAgg>;
+
+export const GroupUsage = z.object({
+  group: z.object({ id: z.string().uuid(), slug: z.string(), name: z.string() }),
+  posts: z.number(),
+  plannerRuns: z.number(),
+  promptTokens: z.number(),
+  completionTokens: z.number(),
+  cost: z.number(),
+  byModel: z.array(UsageStepAgg),
+});
+export type GroupUsage = z.infer<typeof GroupUsage>;
+
+export const UsageReport = z.object({
+  sinceDays: z.number(),
+  groups: z.array(GroupUsage),
+  total: z.object({ cost: z.number(), promptTokens: z.number(), completionTokens: z.number() }),
+});
+export type UsageReport = z.infer<typeof UsageReport>;

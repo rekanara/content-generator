@@ -6,6 +6,7 @@ import type { Slot, Platform, Format } from './state.ts';
 import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
 import { getTemplateSet, isManualCoverMode } from './render/template.ts';
 import { artifactExists } from './storage.ts';
+import { postUsage, type PostUsage } from './llm-costs.ts';
 import { renderReelsAndSave } from './render/reels.ts';
 import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons, sendPhoto } from './telegram.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
@@ -171,6 +172,16 @@ async function runGenerate(
   }
 }
 
+// Attach the cover-image cost snapshot to a post's llm_usage (merge; keep existing steps).
+// Image generation happens at render time — this is the single bookkeeping point.
+async function attachCoverCost(postId: string, coverCost: number, coverModel: string | null): Promise<void> {
+  if (!coverCost || !coverModel) return;
+  const [row] = await sql<{ llm_usage: PostUsage | null }[]>`select llm_usage from posts where id = ${postId}`;
+  const u = row?.llm_usage ?? { steps: {}, totalCost: 0 };
+  const cover = { model: coverModel, images: (u.cover?.images ?? 0) + 1, cost: Math.round(((u.cover?.cost ?? 0) + coverCost) * 10000) / 10000 };
+  await sql`update posts set llm_usage = ${JSON.stringify(postUsage(u.steps, cover))}::jsonb where id = ${postId}`;
+}
+
 // Park the post at awaiting_cover + ask Telegram for the image (skip button included).
 // Two triggers: manual mode (blank/'empty' image model) or generation failure (genError).
 // Status guard covers draft (fresh generate) and rendered/awaiting_approval (rerender path
@@ -282,7 +293,8 @@ async function prepareForApproval(
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
-      await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg, coverOpts);
+      const ra = await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg, coverOpts);
+      await attachCoverCost(postId, ra.coverCost, ra.coverModel);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }
@@ -355,7 +367,8 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
     } else {
       // sent posts fail-safe on cover failure (parking a delivered post + re-approving would
       // double-advance rotation); awaiting/rendered posts park for the manual decision.
-      await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg, { coverRequired: wasStatus !== 'sent' });
+      const ra = await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg, { coverRequired: wasStatus !== 'sent' });
+      await attachCoverCost(postId, ra.coverCost, ra.coverModel);
     }
   } catch (e) {
     if (e instanceof CoverGenerationError) {
@@ -426,7 +439,8 @@ async function deliver(
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
       const draft = JSON.parse(post.body) as CarouselOut;
-      await renderAndSave(postId, slot.platform, draft, cfg, coverOpts);
+      const ra = await renderAndSave(postId, slot.platform, draft, cfg, coverOpts);
+    await attachCoverCost(postId, ra.coverCost, ra.coverModel);
     }
     await addEvent(postId, cfg.id, 'rendered');
   }

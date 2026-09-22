@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
+import type { UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -38,6 +38,7 @@ export const api = {
     req<{ ok: true; user: AuthMe }>(`${BASE}/auth/login`, { method: 'POST', body: JSON.stringify({ username, password }) }),
   logout: () => req<{ ok: true }>(`${BASE}/auth/logout`, { method: 'POST' }),
   me: () => req<AuthMe>(`${BASE}/auth/me`),
+  usage: (days = 30) => req<UsageReport>(`${BASE}/usage?days=${days}`),
   // groups (multi-akun)
   groups: () => req<Group[]>(`${BASE}/groups`),
   group: (slug: string) => req<Group>(`${BASE}/groups/${slug}`),

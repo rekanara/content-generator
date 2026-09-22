@@ -16,6 +16,7 @@ import { getRotationRow, getActivePillars } from '../repos/rotation.ts';
 import { listPillars } from '../repos/pillars.ts';
 import { listTemplates } from '../repos/templates.ts';
 import { listPlans, createPlan } from '../repos/plans.ts';
+import { recordLlmRun } from '../repos/llm-runs.ts';
 import { sendMessage } from '../telegram.ts';
 import type { Plan } from '@workspace/shared';
 
@@ -86,13 +87,16 @@ export async function runPlanner(cfg: GroupCfg): Promise<PlannerResult> {
   if (runs.length === 0) return { created: [], skipped: ['no unplanned future dates'] };
 
   const palette: PlannerTemplate[] = templates.map((t) => ({ id: t.id, name: t.name, type: t.type, format: t.format }));
+  const model = writerModel(cfg);
   const out = await chatJson<PlannerOut>(
     cfg,
-    writerModel(cfg),
+    model,
     plannerPrompt(runs, palette, recent.map((r) => r.topic)),
     isPlannerOut,
     2000,
   );
+  // usage + snapshot cost row (planner runs happen outside a post)
+  await recordLlmRun(cfg.id, 'planner', model, out.usage.prompt, out.usage.completion).catch(() => {});
 
   // validate proposals against the offered data before inserting anything
   const validDates = new Set(runs.map((r) => r.date));

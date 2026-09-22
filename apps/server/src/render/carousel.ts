@@ -10,13 +10,14 @@ import type { Platform } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
+import { imagePrice } from '../llm-costs.ts';
 import { imagePrompt } from '../prompts.ts';
 import { getTemplateSet, getTemplateSetById, buildSlides, isManualCoverMode } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
 
-export type CarouselArtifacts = { files: string[]; prefix: string };
+export type CarouselArtifacts = { files: string[]; prefix: string; coverCost: number; coverModel: string | null };
 
 // Thrown when cover generation is REQUIRED but failed — the queue catches it, parks the
 // post at awaiting_cover and asks Telegram (upload manually / render without cover).
@@ -38,13 +39,15 @@ export type RenderOpts = {
 };
 
 // Cover image for the post: reuse from MinIO, else generate + upload. null = no cover.
+// Returns the image + its snapshot cost (attached to the post's llm_usage by the caller —
+// render stays adapter-pure; cost bookkeeping belongs to the queue layer).
 // Caller must have created out/<id>/ already (staging dir doubles as upload source).
-async function getCover(cfg: GroupCfg, postId: string, topic: string, required: boolean, skip: boolean): Promise<Buffer | null> {
+async function getCover(cfg: GroupCfg, postId: string, topic: string, required: boolean, skip: boolean): Promise<{ buf: Buffer; cost: number } | null> {
   const key = `${cfg.slug}/posts/${postId}/cover.png`;
   if (await artifactExists(key)) {
     // even on skip: a stored cover (e.g. photo uploaded after skipping) is free — use it
     console.log(`[render] cover reused from ${key}`);
-    return getArtifactBuffer(key);
+    return { buf: await getArtifactBuffer(key), cost: 0 };
   }
   if (skip) return null; // explicit skip — never generate (the skip button must terminate the flow)
   if (isManualCoverMode(cfg.image.model)) return null; // manual flow paused earlier; reaching here = skip path
@@ -53,8 +56,9 @@ async function getCover(cfg: GroupCfg, postId: string, topic: string, required: 
     const tmp = `out/${postId}/cover.png`;
     writeFileSync(tmp, buf);
     await uploadPostArtifact(cfg.slug, postId, tmp, 'cover.png');
-    console.log(`[render] cover generated + saved (${buf.length}B, model=${cfg.image.model})`);
-    return buf;
+    const cost = imagePrice(cfg.image.model).perImage;
+    console.log(`[render] cover generated + saved (${buf.length}B, model=${cfg.image.model}, ~$${cost})`);
+    return { buf, cost };
   } catch (e) {
     if (required) throw new CoverGenerationError(e as Error); // queue parks + asks
     console.warn(`[render] cover generation failed — rendering without cover: ${(e as Error).message}`);
@@ -77,7 +81,7 @@ export async function renderCarousel(
   const set = (opts.templateId ? await getTemplateSetById(cfg.id, opts.templateId) : null)
     ?? (await getTemplateSet('carousel', platform, cfg.id));
   const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
-  const htmls = buildSlides(set, draft, cover ?? undefined);
+  const htmls = buildSlides(set, draft, cover?.buf);
 
   const browser = await puppeteer.launch();
   try {
@@ -144,7 +148,7 @@ export async function renderCarousel(
     }
     if (pdfPath) keys.push(await uploadPostArtifact(cfg.slug, postId, pdfPath, 'carousel.pdf'));
 
-    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/` };
+    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/`, coverCost: cover?.cost ?? 0, coverModel: cover ? cfg.image.model : null };
   } finally {
     await browser.close();
   }
@@ -152,9 +156,9 @@ export async function renderCarousel(
 
 // Render + persist status + artifact_prefix. "Persist" split out to keep it testable.
 export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, cfg: GroupCfg, opts: RenderOpts = {}): Promise<CarouselArtifacts> {
-  const { files, prefix } = await renderCarousel(postId, platform, draft, cfg, opts);
-  await sql`update posts set status = 'rendered', artifact_prefix = ${prefix}
+  const r = await renderCarousel(postId, platform, draft, cfg, opts);
+  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix}
     where id = ${postId}`;
-  console.log(`[render] post #${postId}: ${files.length} artifacts → ${prefix}`);
-  return { files, prefix };
+  console.log(`[render] post #${postId}: ${r.files.length} artifacts → ${r.prefix}`);
+  return r;
 }

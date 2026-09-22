@@ -14,6 +14,7 @@ import {
   MoonIcon,
   SunIcon,
   SparklesIcon,
+  CoinsIcon,
 } from "lucide-react"
 
 import {
@@ -145,6 +146,23 @@ export function AppSidebar({
             </SidebarGroup>
           </>
         )}
+
+        <SidebarSeparator />
+        <SidebarGroup>
+          <SidebarGroupLabel>Global</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild isActive={route.name === "usage"} tooltip="Usage & Cost">
+                  <a href="/app/usage" onClick={go("/app/usage")}>
+                    <CoinsIcon />
+                    <span>Usage &amp; Cost</span>
+                  </a>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
         {me.role === "admin" && (
           <>

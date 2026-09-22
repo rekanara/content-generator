@@ -9,6 +9,7 @@ import { enqueue, queueStatus } from './queue.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
+import { getGroupUsage, getAllGroupsUsage } from './usecases/usage.ts';
 import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
@@ -594,6 +595,35 @@ g.delete('/:slug/overrides/:id', async (c) => {
   const ok = await deleteOverride(gr(c).id, id);
   if (!ok) return c.json({ error: 'override not found' }, 404);
   return c.json({ ok: true });
+});
+
+// ---------- usage (token/cost reporting) ----------
+const round4 = (n: number): number => Math.round(n * 10000) / 10000;
+// global rollup — all visible groups (admin: everything; user: own groups)
+api.get('/usage', async (c) => {
+  const days = Math.min(365, Math.max(1, Number(c.req.query('days')) || 30));
+  const user = c.get('user');
+  const rows = user.role === 'admin'
+    ? await listGroups()
+    : await listGroupsForUser(user.id);
+  const all = await getAllGroupsUsage(days);
+  const visible = new Set(rows.map((g) => g.id));
+  const groups = all.filter((g) => visible.has(g.group.id));
+  return c.json({
+    sinceDays: days,
+    groups,
+    total: {
+      cost: round4(groups.reduce((a, g) => a + g.cost, 0)),
+      promptTokens: groups.reduce((a, g) => a + g.promptTokens, 0),
+      completionTokens: groups.reduce((a, g) => a + g.completionTokens, 0),
+    },
+  });
+});
+
+// per-group usage
+g.get('/:slug/usage', async (c) => {
+  const days = Math.min(365, Math.max(1, Number(c.req.query('days')) || 30));
+  return c.json(await getGroupUsage(gr(c).id, days));
 });
 
 api.route('/g', g); // mount at the end — see note above

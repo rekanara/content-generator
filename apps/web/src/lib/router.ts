@@ -2,6 +2,7 @@
 export type Route =
   | { name: 'login' }
   | { name: 'groups' }                                    // /app
+  | { name: 'usage' }                                      // /app/usage
   | { name: 'users' }                                     // /app/users
   | { name: 'resetPassword'; id: string }                 // /app/users/:id/reset-password
   | { name: 'templateDetail'; slug: string; id: string }  // /app/:slug/templates/:id
@@ -16,6 +17,7 @@ export function parseRoute(pathname: string): Route {
   const rm = pathname.match(/^\/app\/users\/([0-9a-f-]{36})\/reset-password\/?$/);
   if (rm) return { name: 'resetPassword', id: rm[1] };
   if (pathname === '/app/users' || pathname === '/app/users/') return { name: 'users' };
+  if (pathname === '/app/usage' || pathname === '/app/usage/') return { name: 'usage' };
   // detail routes must match before the generic group view (which only takes one segment)
   const tm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/templates\/([0-9a-f-]{36})\/?$/);
   if (tm) return { name: 'templateDetail', slug: tm[1]!, id: tm[2]! };

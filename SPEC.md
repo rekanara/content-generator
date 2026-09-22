@@ -233,6 +233,14 @@ SPA fallback: route non-/api tak dikenal → `apps/web/dist/index.html`. `/api/*
 - Komentar `ponytail:` untuk penyederhanaan disengaja.
 - Log terstruktur satu baris per langkah (`[ideation] topic=... tokens=...`).
 
+## 8b. Usage & Cost Tracking
+
+- **llm-costs.ts** (pure): katalog harga per model (USD/1M token prompt+completion, sumber harga publik gateway) + harga per gambar; fallback untuk model tak dikenal. Harga adalah ESTIMASI untuk reporting.
+- **Snapshot per run**: posts.llm_usage menyimpan {steps: {step: {model, prompt, completion, cost}}, cover?, totalCost} — harga di-snapshot saat run sehingga row lama tidak ikut berubah saat katalog di-update. Cost cover image di-attach oleh queue setelah render. Post ditolak/gagal tetap dihitung (token sudah terbakar).
+- **llm_runs table**: invokasi LLM di luar post (planner) — model, token, cost snapshot.
+- **Rollup** (usecases/usage.ts): per-group + global (GET /api/usage?days=, GET /api/g/:slug/usage) — tokens, cost, breakdown per model. Row format lama dinormalisasi (model current group, best-effort).
+- **FE**: halaman Usage & Cost (sidebar Global, /app/usage) — total semua group + kartu per group + tabel per model; filter 7/30/90/365 hari.
+
 ## 9. Testing Strategy
 
 - Runner `node:test` (zero dep). 43 test, all pass: state (13), bot (5), ffmpeg (7), auth/password (4), posts/flattenBody (4), rss (5) + shared schema tests.

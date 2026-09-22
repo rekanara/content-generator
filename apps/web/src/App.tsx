@@ -13,6 +13,7 @@ import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
 import { UsersView } from "@/views/users.tsx"
+import { UsageView } from "@/views/usage.tsx"
 import { ResetPasswordView } from "@/views/reset-password.tsx"
 import { api } from "@/lib/api"
 import { parseRoute, navigate } from "@/lib/router"
@@ -99,6 +100,7 @@ export function App() {
           <main className="min-w-0 flex-1 overflow-x-clip p-4 md:p-6">
             <div className={route.name === "templateDetail" || route.name === "postDetail" ? "mx-auto max-w-6xl" : "mx-auto max-w-4xl"}>
               {route.name === "groups" && <GroupsView />}
+              {route.name === "usage" && <UsageView />}
               {route.name === "users" && me.role === "admin" && <UsersView />}
               {route.name === "resetPassword" && me.role === "admin" && <ResetPasswordView id={route.id} />}
               {route.name === "templateDetail" && <TemplateDetailView slug={route.slug} id={route.id} />}
