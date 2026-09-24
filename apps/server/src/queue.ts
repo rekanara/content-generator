@@ -2,6 +2,7 @@
 // Job carries group slug — cfg resolved at run time (config edits don't wait for old jobs).
 import { sql } from './db/pool.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
+import { startRun, stage as runStage, postRef, endRun } from './progress.ts';
 import type { Slot, Platform, Format } from './state.ts';
 import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
 import { anyActiveCoverTemplate, isManualCoverMode } from './render/template.ts';
@@ -57,6 +58,7 @@ async function drain(): Promise<void> {
       const job = jobs.shift()!;
       lastActivity = Date.now();
       let cfg: Awaited<ReturnType<typeof getGroupCfg>> | null = null;
+      startRun(job.kind, job.slug); // live telemetry for /api/queue/live
       try {
         cfg = await getGroupCfg(job.slug);
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
@@ -65,8 +67,10 @@ async function drain(): Promise<void> {
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
         else if (job.kind === 'promoSend') await runPromoSend(cfg, job.promoId, job.platform);
         else await runResend(cfg, job.postId);
+        endRun();
   } catch (e) {
     const msg = (e as Error).message;
+    endRun(msg);
     console.error(`[queue] job failed (${job.slug}): ${msg}`);
     try {
       // generate failures with a post row are evented in runGenerate; here only resend/approve/rerender (id always known)
@@ -179,6 +183,7 @@ async function runGenerate(
     await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
   }
   const r = await generateDraft(cfg, slot, source);
+  postRef(r.postId);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
     // manual cover (no image model, cover part in template, no stored cover yet):
@@ -231,6 +236,7 @@ async function parkAwaitingCover(
     and status in ('draft','rendered','awaiting_approval') returning id`;
   if (upd.length === 0) throw new Error(`post ${postId} not in a cover-pausable state`);
   await addEvent(postId, cfg.id, 'awaiting_cover');
+  runStage('awaiting', `cover image — ${topic.slice(0, 50)}`); // human input needed (photo / skip)
   console.log(`[queue] post #${postId} awaiting cover image (${cfg.slug})${genError ? ' — generation failed' : ''}`);
   try {
     const lines = genError
@@ -318,6 +324,7 @@ async function prepareForApproval(
   const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; status: string }[]>`select platform, format, topic, caption, body, status, artifact_prefix
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
+  runStage('render', post.format === 'reels' ? 'rendering reel' : 'rendering slides');
   if (post.format !== 'text' && post.status !== 'rendered') {
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
@@ -331,6 +338,7 @@ async function prepareForApproval(
     where id = ${postId} and group_id = ${cfg.id} and status in ('draft','rendered','queued') returning id`;
   if (upd.length === 0) throw new Error(`post ${postId} not in a pre-approval state`);
   await addEvent(postId, cfg.id, 'awaiting_approval');
+  runStage('awaiting', post.topic.slice(0, 60)); // terminal for this run — human input needed
   console.log(`[queue] post #${postId} awaiting approval (${cfg.slug})`);
   // Approval request is best-effort: if Telegram flakes, the post stays awaiting — FE can approve.
   // ponytail: inline buttons only work for the env (polled) bot — groups with a token override
@@ -413,6 +421,7 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
   if (post.format === 'text') throw new Error('text format has no visual template — nothing to re-render');
 
   console.log(`[queue] rerender #${postId} (${cfg.slug}, was ${wasStatus}) with current template`);
+  runStage('render', post.topic.slice(0, 60));
   try {
     if (post.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
@@ -476,6 +485,7 @@ async function deliver(
   const ready = post.status === 'rendered' || post.status === 'awaiting_approval';
   if (!ready && slot.format !== 'text') {
     // not rendered yet → render first per format
+    runStage('render', post.topic.slice(0, 60));
     if (slot.format === 'reels') {
       await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
@@ -486,6 +496,7 @@ async function deliver(
     await addEvent(postId, cfg.id, 'rendered');
   }
 
+  runStage('deliver', post.topic.slice(0, 60)); // telegram send + rotation commit
   const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
   if (post.format === 'carousel') {
     const keys: string[] = [];
@@ -581,6 +592,7 @@ export async function bootCleanup(): Promise<void> {
 
 // Send a promo on demand (FE button) — rotation untouched.
 async function runPromoSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoId: string, platform: 'instagram' | 'linkedin'): Promise<void> {
+  runStage('deliver', `promo ${promoId.slice(0, 8)} (${platform})`);
   try {
     await deliverPromotion(cfg, promoId, platform);
   } catch (e) {

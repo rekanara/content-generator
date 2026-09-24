@@ -6,6 +6,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
 import { enqueue, queueStatus } from './queue.ts';
+import { readRun } from './progress.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
@@ -146,8 +147,10 @@ api.delete('/users/:id', async (c) => {
 });
 
 // ---------- groups (multi-account) ----------
-api.get('/groups', async (c) => {
-  const user = c.get('user');
+// live pipeline telemetry for the single active queue run (dashboard progress)
+api.get('/queue/live', async (c) => c.json({ run: readRun(), queue: queueStatus() }));
+
+api.get('/groups', async (c) => {  const user = c.get('user');
   const rows = user.role === 'admin' ? await listGroups() : await listGroupsForUser(user.id);
   return c.json(rows.map(groupOut));
 });

@@ -10,6 +10,7 @@ import {
 } from "@workspace/ui/components/select"
 import { api, ApiError } from "@/lib/api"
 import { useDashboard, useCalendar, usePlans, usePillars, useTemplates } from "@/lib/hooks"
+import { PipelineProgress } from "@/components/pipeline-progress.tsx"
 
 const STATUS_BADGE: Record<string, string> = {
   queued: "bg-blue-500/15 text-blue-500 border-transparent",
@@ -31,7 +32,7 @@ export function DashboardView({ slug }: { slug: string }) {
     setBusy(true); setMsg(null)
     try {
       await api.gen(slug, opts)
-      setMsg("generate queued — check the Posts tab")
+      setMsg("queued — pipeline progress below")
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : "failed")
     } finally {
@@ -57,6 +58,8 @@ export function DashboardView({ slug }: { slug: string }) {
       </section>
 
       {msg && <p className="text-muted-foreground text-sm">{msg}</p>}
+
+      <PipelineProgress onFinished={reload} />
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <Stat label="Cron" value={cron.enabled ? cron.expr : "off"} sub={cron.running ? "running" : "stopped"} mono />

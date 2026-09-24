@@ -3,6 +3,7 @@
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { claimIdea, markIdeaUsed } from './repos/ideas.ts';
+import { stage as runStage, postRef } from './progress.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, type CaptionOut } from './schema.ts';
@@ -107,14 +108,17 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   // 1. topic source: idea backlog (FIFO, human-submitted) → else ideation LLM.
   //    An idea row carries the topic itself — no ideation call, no dedup screening
   //    (the human already decided). marked used AFTER the draft persists.
+  runStage('slot', `${slot.platform}/${slot.format} · ${effPillar.name}`);
   const idea = await claimIdea(groupId);
   let topic: string;
   let angle: string;
   if (idea) {
     topic = idea.text.trim().slice(0, 400);
     angle = '';
+    runStage('writer', `idea backlog: ${topic.slice(0, 50)}`);
     console.log(`[pipeline] idea backlog #${idea.id.slice(0, 8)} claimed: "${topic.slice(0, 60)}"`);
   } else {
+    runStage('ideation');
     const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
     const id = await chatJson(
       cfg,
@@ -127,6 +131,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
     topic = id.data.topic;
     angle = id.data.angle;
+    runStage('writer', topic.slice(0, 60));
   }
 
   // 2. writer
@@ -145,6 +150,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   //    Quality gate: the critic scores its own revision 0-10; below threshold → ONE
   //    writer retry with the critique as feedback, then critic again. The better-
   //    scoring draft wins. Score absent (old-shape critic output) → gate off, ship.
+  runStage('critic');
   const runWriter = async (feedback?: string) =>
     chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples, feedback),
       writerGuard(slot.format) as (x: unknown) => x is Draft, 8000);
@@ -173,6 +179,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   }
   if (finalScore !== null) console.log(`[critic] ok score=${finalScore} tokens=${c.usage.completion}`);
   else console.log(`[critic] ok (no score) tokens=${c.usage.completion}`);
+  if (finalScore !== null) runStage('critic', `score ${finalScore}/10`);
   final = stripCriticMeta(final);
   // tolerant-caption normalization: a string caption (old shape) → structured form
   if ('caption' in (final as Record<string, unknown>)) {
@@ -187,6 +194,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     returning id`;
   if (!post) throw new Error('insert post failed');
   if (idea) await markIdeaUsed(idea.id); // consumed only once the draft exists
+  postRef(post.id);
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
   return { postId: post.id, slot, topic, draft: final };
