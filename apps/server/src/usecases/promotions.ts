@@ -4,7 +4,7 @@ import { isPromoContentOut, isPromoBriefOut, type PromoContentOut, type PromoBri
 import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts.ts';
 import { getPromotion, setContent, setContentWithTemplate, imageSlots, markPromotionSent } from '../repos/promotions.ts';
 import { getTemplate } from '../repos/templates.ts';
-import { cssVocabOf, renderPromotion } from '../render/promotion.ts';
+import { cssVocabOf, promoVocabOf, sanitizePromoFragment, defaultTemplate, renderPromotion } from '../render/promotion.ts';
 import { artifactExists, uploadPromotionImage } from '../storage.ts';
 import { sendMessage } from '../telegram.ts';
 import type { GroupCfg } from '../groups.ts';
@@ -16,7 +16,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
   const promo = await getPromotion(cfg.id, promoId);
   if (!promo) throw new Error(`promotion ${promoId} not found`);
   const tpl = promo.template_id ? await getTemplate(cfg.id, promo.template_id) : null;
-  const cssVocab = cssVocabOf(tpl?.html ?? '');
+  const cssVocab = promoVocabOf(tpl?.html ?? defaultTemplate('ig-carousel-promo'));
   const data: PromoData = {
     name: promo.name, topic: promo.topic, features: promo.features, stacks: promo.stacks,
     stats: promo.stats, price: promo.price, price_sale: promo.price_sale,
@@ -24,7 +24,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
-  const slides = out.data.slides.map((s) => ({ html: s.html, image_prompt: s.image_prompt ?? '' }));
+  const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContent(promoId, slides);
   console.log(`[promo] #${promoId} content generated — ${slides.length} slides`);
   return { slides: slides.length, imageSlots: imageSlots({ ...promo, content: slides }) };
@@ -53,7 +53,7 @@ export async function regeneratePromotionContent(
   const tpl = chosenId ? await getTemplate(cfg.id, chosenId) : null;
   if (chosenId && !tpl) throw new Error(`template ${chosenId} not found`);
   if (tpl && !tpl.format.endsWith('-promo')) throw new Error(`template ${tpl.name} is ${tpl.format} — regeneration needs a promo template`);
-  const cssVocab = cssVocabOf(tpl?.html ?? '');
+  const cssVocab = promoVocabOf(tpl?.html ?? defaultTemplate('ig-carousel-promo'));
   const data: PromoData = {
     name: promo.name, topic: promo.topic, features: promo.features, stacks: promo.stacks,
     stats: promo.stats, price: promo.price, price_sale: promo.price_sale,
@@ -61,7 +61,7 @@ export async function regeneratePromotionContent(
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
-  const slides = out.data.slides.map((s) => ({ html: s.html, image_prompt: s.image_prompt ?? '' }));
+  const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContentWithTemplate(promoId, slides, chosenId);
   const templateChanged = (chosenId ?? null) !== (promo.template_id ?? null);
   console.log(`[promo] #${promoId} content re-generated — ${slides.length} slides (template ${templateChanged ? 'switched' : 'kept'})`);

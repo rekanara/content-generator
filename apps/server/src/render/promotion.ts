@@ -97,7 +97,7 @@ async function findImage(slug: string, promoId: string, slide: number) {
   return null;
 }
 
-function defaultTemplate(format: string): string {
+export function defaultTemplate(format: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>
   * { margin: 0; box-sizing: border-box; }
   body { width: ${W}px; height: ${H}px; overflow: hidden; background: #0f1117; color: #e6e8ee;
@@ -117,5 +117,49 @@ function defaultTemplate(format: string): string {
 export function cssVocabOf(html: string): string {
   const classes = [...new Set((html.match(/\.([a-zA-Z][\w-]*)\s*[,{[]/g) ?? [])
     .map((m) => m.replace(/^[.\s]+/, '').replace(/[{,\[]$/, '').trim()))];
-  return classes.length ? classes.map((c) => `.${c}`).join(', ') : '(no custom classes — inline styles only)';
+  return classes.length ? classes.map((c) => `.${c}`).join(', ') : '(no custom classes)';
+}
+
+// The template's REAL color identity — custom properties first (usable via
+// var(--x) even in inline styles), then hex accents. Near-black/white canvas
+// colors are dropped: the AI must not repaint the canvas, only pick accents.
+export function templatePaletteOf(html: string): string[] {
+  const props = [...new Set((html.match(/--[\w-]+\s*:/g) ?? []).map((p) => p.replace(/\s*:$/, '')))];
+  const hexes = [...new Set((html.match(/#[0-9a-f]{6}\b/gi) ?? []).map((h) => h.toLowerCase()))];
+  const canvas = new Set(['#0a0c10', '#0f1117', '#10141b', '#0a0a12', '#ffffff', '#000000']);
+  return [...props, ...hexes.filter((h) => !canvas.has(h))].slice(0, 10);
+}
+
+// Full vocabulary for the content LLM: classes + palette. The palette line exists
+// so the AI matches the template's identity instead of defaulting to AI-slop
+// purple gradients.
+export function promoVocabOf(tplHtml: string): string {
+  const classes = cssVocabOf(tplHtml);
+  const palette = templatePaletteOf(tplHtml);
+  const pal = palette.length ? `\nTemplate palette (the ONLY accent colors you may use, via var(--x) or hex): ${palette.join(', ')}` : '';
+  return classes + pal;
+}
+
+// Strip canvas-owning declarations (background*, font-family) from the ROOT
+// element's inline style. The template owns the canvas — an opaque root
+// background covers its grid texture, logo and footer, erasing the deck's
+// identity. Child elements keep their styles (cards, chips, overlays are content).
+// Pure, conservative: no root style attr → unchanged.
+export function sanitizePromoFragment(html: string): string {
+  const root = html.match(/^\s*<([a-z][\w-]*)([^>]*)>/i); // first tag = fragment root
+  if (!root) return html;
+  const firstTag = root[0]!;
+  const sm = root[2]!.match(/style\s*=\s*(["'])([^"']*)\1/i);
+  if (!sm) return html;
+  const cleaned = sm[2]!
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((decl) => {
+      const prop = decl.split(':')[0]!.trim().toLowerCase();
+      return prop !== 'background' && prop !== 'background-color' && prop !== 'background-image' && prop !== 'font-family';
+    })
+    .join('; ');
+  const rebuilt = firstTag.replace(sm[0], `style=${sm[1]}${cleaned ? cleaned + '; ' : ''}${sm[1]}`);
+  return rebuilt + html.slice(firstTag.length);
 }
