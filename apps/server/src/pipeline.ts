@@ -36,6 +36,16 @@ async function getHistory(pillarId: string): Promise<string[]> {
   return rows.map((r: any) => r.topic);
 }
 
+// Recent topics across ALL pillars (same audience sees everything) — fed to ideation
+// so "git bisect" (Tips) doesn't land right after "git blame" (Drama) as a repeat.
+async function getRecentTopics(groupId: string): Promise<string[]> {
+  const rows = await sql`select topic from posts
+    where group_id = ${groupId} and status in ('sent','rendered','draft','awaiting_approval')
+      and created_at > now() - interval '7 days'
+    order by created_at desc limit 20`;
+  return rows.map((r: any) => r.topic);
+}
+
 async function getPillar(id: string): Promise<PillarFull> {
   const r = (await sql`select id, name, description, is_news from pillars where id = ${id}`)[0] as any;
   if (!r) throw new Error(`pillar ${id} not found`);
@@ -90,11 +100,11 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   }
 
   // 1. ideation
-  const history = await getHistory(effPillar.id);
+  const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
   const id = await chatJson(
     cfg,
     writerModel(cfg),
-    ideationPrompt(effPillar, history, newsCtx),
+    ideationPrompt(effPillar, history, newsCtx, recentTopics),
     isIdeationOut,
     6000,
   );

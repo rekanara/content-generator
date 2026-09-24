@@ -27,10 +27,20 @@ function rules(): string {
 - No fluff: every sentence carries information.`;
 }
 
-export function ideationPrompt(p: PillarFull, history: string[], newsContext: string | null): Msg[] {
+export function ideationPrompt(
+  p: PillarFull,
+  history: string[],
+  newsContext: string | null,
+  recentTopics: string[] = [],
+): Msg[] {
   const hist = history.length
     ? `Topics ALREADY used (do NOT resemble these):\n${history.map((h) => `- ${h}`).join('\n')}`
     : 'No topic history yet.';
+  // Cross-pillar freshness: same audience sees every post — "git bisect" (Tips) right after
+  // "git blame" (Drama) reads as a repeat even though the pillars differ.
+  const recent = recentTopics.length
+    ? `Topics this ACCOUNT published in the last days, ANY pillar (do NOT resemble these either — avoid the same tools/subject even with a different angle):\n${recentTopics.map((t) => `- ${t}`).join('\n')}`
+    : '';
   const news = newsContext
     ? `Fresh news material (pick one as the basis, write the angle as "what it means for developers"):\n${newsContext}`
     : '';
@@ -44,8 +54,9 @@ export function ideationPrompt(p: PillarFull, history: string[], newsContext: st
       content: `Content pillar: ${p.name}
 Pillar description: ${p.description}
 ${hist}
+${recent}
 ${news}
-Output JSON: {"topic": "<topic, 5-10 words>", "angle": "<1-2 sentences, why it's interesting"}`,
+Output JSON: {"topic": "<topic, 5-10 words>", "angle": "<1-2 sentences, why it's interesting>"}`,
     },
   ];
 }

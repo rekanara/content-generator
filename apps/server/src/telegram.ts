@@ -148,9 +148,13 @@ export async function sendMediaGroupPhoto(cfg: GroupCfg, keys: string[], caption
   await postForm(cfg, 'sendMediaGroup', fd);
 }
 
+// Inline keyboard shape shared by all button-capable sends (approval gate, cover flow).
+export type TgButtons = { text: string; callback_data: string }[][];
+
 // Single photo with caption (override mix / image_only with one image — sendMediaGroup
 // requires 2+ items). Content type detected from bytes so JPEG uploads render correctly.
-export async function sendPhoto(cfg: GroupCfg, key: string, caption: string): Promise<void> {
+// Optional buttons: Telegram media sends support reply_markup (media groups do NOT).
+export async function sendPhoto(cfg: GroupCfg, key: string, caption: string, buttons?: TgButtons): Promise<void> {
   const stream = await getArtifactStream(key);
   const chunks: Uint8Array[] = [];
   for await (const c of stream) chunks.push(c as Buffer);
@@ -160,20 +164,22 @@ export async function sendPhoto(cfg: GroupCfg, key: string, caption: string): Pr
   fd.set('chat_id', cfg.telegram.chatId);
   fd.set('photo', new Blob([buf], { type: isJpeg ? 'image/jpeg' : 'image/png' }), isJpeg ? 'photo.jpg' : 'photo.png');
   fd.set('caption', caption.slice(0, 1024));
+  if (buttons) fd.set('reply_markup', JSON.stringify({ inline_keyboard: buttons }));
   await postForm(cfg, 'sendPhoto', fd);
 }
 
 // sendDocument for PDF (LinkedIn). Input file can be >10MB — telegram limit is 50MB, safe.
-export async function sendDocument(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
+export async function sendDocument(cfg: GroupCfg, key: string, filename: string, caption: string, buttons?: TgButtons): Promise<void> {
   const fd = new FormData();
   fd.set('chat_id', cfg.telegram.chatId);
   fd.set('document', await objectAsBlob(key, 'application/pdf'), filename);
   fd.set('caption', caption.slice(0, 1024));
+  if (buttons) fd.set('reply_markup', JSON.stringify({ inline_keyboard: buttons }));
   await postForm(cfg, 'sendDocument', fd);
 }
 
 // sendVideo for reels MP4 — supports_streaming so Telegram shows a preview.
-export async function sendVideo(cfg: GroupCfg, key: string, filename: string, caption: string): Promise<void> {
+export async function sendVideo(cfg: GroupCfg, key: string, filename: string, caption: string, buttons?: TgButtons): Promise<void> {
   const stream = await getArtifactStream(key);
   const chunks: Uint8Array[] = [];
   for await (const c of stream) chunks.push(c as Buffer);
@@ -182,5 +188,6 @@ export async function sendVideo(cfg: GroupCfg, key: string, filename: string, ca
   fd.set('video', new Blob(chunks as BlobPart[], { type: 'video/mp4' }), filename);
   fd.set('caption', caption.slice(0, 1024));
   fd.set('supports_streaming', 'true');
+  if (buttons) fd.set('reply_markup', JSON.stringify({ inline_keyboard: buttons }));
   await postForm(cfg, 'sendVideo', fd);
 }

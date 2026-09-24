@@ -338,26 +338,43 @@ async function prepareForApproval(
   // get the message from their own bot whose callbacks we never receive; FE approve covers them.
   // (multi-bot polling = one getUpdates loop per token, when it ever matters)
   try {
-    await withRetry(() => sendMessageWithButtons(cfg, approvalText(cfg.slug, post), [
-      [
-        { text: 'Approve — send now', callback_data: `approve:${postId}` },
-        { text: 'Reject', callback_data: `reject:${postId}` },
-      ],
-    ]));
+    await sendApprovalRequest(cfg, postId, 'Approval needed');
   } catch (e) {
     console.warn(`[queue] approval request failed (${cfg.slug}): ${(e as Error).message}`);
     await addEvent(postId, cfg.id, 'failed', `approval request not delivered: ${(e as Error).message}`).catch(() => {});
   }
 }
 
-function approvalText(slug: string, post: { topic: string; platform: string; format: string; caption: string | null }): string {
-  return [
-    `Approval needed — ${slug}`,
-    `Topic: ${post.topic}`,
-    `${post.platform}/${post.format} · slot rotation unchanged until sent`,
-    '',
-    `Caption: ${post.caption ? post.caption.slice(0, 900) : '—'}`,
-  ].join('\n');
+// Approval request WITH visual preview: slide 1 PNG (carousel/pdf — pdf renders slide PNGs
+// too, previewing the PNG instead of the document avoids a duplicate PDF on approve), the
+// reel video itself, or the full text body. Buttons ride on the same message. Called AFTER
+// the post is rendered — artifact_prefix is set by then.
+async function sendApprovalRequest(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  header: string,
+): Promise<void> {
+  const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; artifact_prefix: string | null }[]>`select topic, platform, format, caption, body, artifact_prefix
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  const buttons = [[
+    { text: 'Approve — send now', callback_data: `approve:${postId}` },
+    { text: 'Reject', callback_data: `reject:${postId}` },
+  ]];
+  const meta = `${header} — ${cfg.slug}\nTopic: ${post.topic}\n${post.platform}/${post.format} · rotation unchanged until sent`;
+  if (post.format === 'text') {
+    // nothing visual — show the actual post body instead of just the caption
+    const body = (JSON.parse(post.body) as TextOut).body;
+    await withRetry(() => sendMessageWithButtons(cfg, `${meta}\n\n${body.slice(0, 1500)}`, buttons));
+    return;
+  }
+  const cap = `${meta}\n\n${(post.caption ?? '').slice(0, 700)}`.slice(0, 1000);
+  const prefix = post.artifact_prefix ?? `${cfg.slug}/posts/${postId}/`;
+  if (post.format === 'reels') {
+    await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, cap, buttons));
+  } else {
+    await withRetry(() => sendPhoto(cfg, `${prefix}slide-01.png`, cap, buttons));
+  }
 }
 
 // Approve an awaiting_approval post: send now + advance rotation. On send failure the post
@@ -431,18 +448,7 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
     where id = ${postId} and group_id = ${cfg.id} and status = 'rendered'`;
   await addEvent(postId, cfg.id, 'awaiting_approval');
   try {
-    await withRetry(() => sendMessageWithButtons(cfg, [
-      `Re-rendered with current template — ${cfg.slug}`,
-      `Topic: ${post.topic}`,
-      `${post.platform}/${post.format} · was ${wasStatus}`,
-      '',
-      `Caption: ${post.caption ? post.caption.slice(0, 900) : '—'}`,
-    ].join('\n'), [
-      [
-        { text: 'Approve — send now', callback_data: `approve:${postId}` },
-        { text: 'Reject', callback_data: `reject:${postId}` },
-      ],
-    ]));
+    await sendApprovalRequest(cfg, postId, `Re-rendered with current template (was ${wasStatus})`);
   } catch (e) {
     console.warn(`[queue] rerender approval request failed (${cfg.slug}): ${(e as Error).message}`);
   }
