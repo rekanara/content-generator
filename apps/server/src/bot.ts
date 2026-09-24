@@ -12,6 +12,7 @@ import { getRotation, getActivePillars } from './repos/rotation.ts';
 import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
 import { rejectPost } from './repos/posts.ts';
+import { addIdea, countUnusedIdeas } from './repos/ideas.ts';
 import { addEvent } from './repos/events.ts';
 import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
 import { runPlanner, formatPlannerReport } from './usecases/planner.ts';
@@ -23,6 +24,7 @@ import type { Platform, Format } from './state.ts';
 // ——— command parser (pure, unit-test) ———
 export type Cmd =
   | { t: 'gen'; slug?: string; platform?: Platform; format?: Format }
+  | { t: 'ide'; slug?: string; text: string }
   | { t: 'rerender'; slug?: string }
   | { t: 'override'; slug?: string }
   | { t: 'plan'; slug?: string }
@@ -53,6 +55,15 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
   if (s.startsWith('/override')) {
     const arg = s.split(/\s+/)[1];
     return { t: 'override', slug: arg && slugs.includes(arg) ? arg : undefined };
+  }
+  if (s.startsWith('/ide')) {
+    // case matters for idea text — parse from the RAW text, not the lowercased copy
+    const parts = text.trim().split(/\s+/).slice(1);
+    let slug: string | undefined;
+    if (parts[0] && slugs.includes(parts[0].toLowerCase())) slug = parts.shift()!.toLowerCase();
+    const ideaText = parts.join(' ').trim();
+    if (!ideaText) return { t: 'unknown', raw: 'usage: /ide [group] <idea text>' };
+    return { t: 'ide', slug, text: ideaText.slice(0, 400) };
   }
   if (s.startsWith('/gen')) {
     const parts = s.split(/\s+/).slice(1);
@@ -151,6 +162,7 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
         '/gen — generate the next post (first group, natural rotation)',
         '/gen <group> — force a group',
         '/gen <group> <platform> <format> — force group+platform+format',
+        '/ide [group] <ide> — simpan topik ke backlog (dipakai FIFO, skip ideation)',
         '/plan [group] — AI plans the upcoming week (creates cancelable plans)',
         '/override [group] — create override content for a date (guided, step by step)',
         '/rerender [group] — re-render the latest post with the current template (content unchanged)',
@@ -161,6 +173,15 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
     }
     case 'status':
       return handleStatus(cmd.slug);
+    case 'ide': {
+      const slug = cmd.slug ?? (await defaultSlug());
+      const cfg = await getGroupCfg(slug).catch(() => null);
+      if (!cfg) return `group "${slug}" not found`;
+      if (cmd.text.length < 3) return 'ideanya kependekan — min 3 karakter';
+      const idea = await addIdea(cfg.id, cmd.text, 'bot');
+      const n = await countUnusedIdeas(cfg.id);
+      return `Idea disimpan (#${idea.id.slice(0, 8)}) — posisi ${n} di antrian ${slug}.\nPipeline akan memakainya di run berikutnya (FIFO), sebelum ideation LLM.`;
+    }
     case 'cancel': {
       const had = overrideSessions.size > 0;
       overrideSessions.clear();

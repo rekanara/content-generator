@@ -2,6 +2,7 @@
 // All queries group-scoped; LLM uses GroupCfg (group ?? env).
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
+import { claimIdea, markIdeaUsed } from './repos/ideas.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, type CaptionOut } from './schema.ts';
@@ -103,24 +104,37 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     var newsCtx: string | null = null;
   }
 
-  // 1. ideation
-  const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
-  const id = await chatJson(
-    cfg,
-    writerModel(cfg),
-    ideationPrompt(effPillar, history, newsCtx, recentTopics),
-    isIdeationOut,
-    6000,
-  );
-  addUsage(usage, 'ideation', writerModel(cfg), id.usage);
-  console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
+  // 1. topic source: idea backlog (FIFO, human-submitted) → else ideation LLM.
+  //    An idea row carries the topic itself — no ideation call, no dedup screening
+  //    (the human already decided). marked used AFTER the draft persists.
+  const idea = await claimIdea(groupId);
+  let topic: string;
+  let angle: string;
+  if (idea) {
+    topic = idea.text.trim().slice(0, 400);
+    angle = '';
+    console.log(`[pipeline] idea backlog #${idea.id.slice(0, 8)} claimed: "${topic.slice(0, 60)}"`);
+  } else {
+    const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
+    const id = await chatJson(
+      cfg,
+      writerModel(cfg),
+      ideationPrompt(effPillar, history, newsCtx, recentTopics),
+      isIdeationOut,
+      6000,
+    );
+    addUsage(usage, 'ideation', writerModel(cfg), id.usage);
+    console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
+    topic = id.data.topic;
+    angle = id.data.angle;
+  }
 
   // 2. writer
   const samples = await getStyleSamples(slot.platform, groupId);
   const w = await chatJson(
     cfg,
     writerModel(cfg),
-    writerPrompt(slot.platform, slot.format, id.data.topic, id.data.angle, effPillar.name, samples),
+    writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples),
     writerGuard(slot.format) as (x: unknown) => x is Draft,
     8000,
   );
@@ -132,7 +146,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   //    writer retry with the critique as feedback, then critic again. The better-
   //    scoring draft wins. Score absent (old-shape critic output) → gate off, ship.
   const runWriter = async (feedback?: string) =>
-    chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, id.data.topic, id.data.angle, effPillar.name, samples, feedback),
+    chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples, feedback),
       writerGuard(slot.format) as (x: unknown) => x is Draft, 8000);
   const runCritic = async (d: Draft) =>
     chatJson(cfg, criticModel(cfg), criticPrompt(slot.platform, slot.format, d),
@@ -168,13 +182,14 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   // 4. persist post (status draft)
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
-    values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${id.data.topic},
+    values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${topic},
       ${captionOf(final, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
+  if (idea) await markIdeaUsed(idea.id); // consumed only once the draft exists
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
-  return { postId: post.id, slot, topic: id.data.topic, draft: final };
+  return { postId: post.id, slot, topic, draft: final };
 }
 
 // Structured caption + group footer → final string, stored in posts.caption at

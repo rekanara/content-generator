@@ -14,7 +14,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -24,6 +24,7 @@ import { listPillars, createPillar, togglePillar, deletePillar, updatePillar } f
 import { listPosts, getPost, rejectPost } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
+import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
@@ -406,6 +407,23 @@ g.patch('/:slug/styles/:id', async (c) => {
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const ok = await updateStyle(gr(c).id, id, parsed.data);
   if (!ok) return c.json({ error: 'style not found' }, 404);
+  return c.json({ ok: true });
+});
+
+// ---------- ideas ----------
+g.get('/:slug/ideas', async (c) => c.json(await listIdeas(gr(c).id)));
+
+g.post('/:slug/ideas', async (c) => {
+  const parsed = IdeaInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const idea = await addIdea(gr(c).id, parsed.data.text, 'fe');
+  return c.json(idea, 201);
+});
+
+g.delete('/:slug/ideas/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  await deleteIdea(gr(c).id, id);
   return c.json({ ok: true });
 });
 

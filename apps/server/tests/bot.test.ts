@@ -39,6 +39,29 @@ test('parseCmd: format without platform invalid', () => {
   assert.equal(c.t, 'unknown');
 });
 
+test('parseCmd: /ide plain text (case preserved)', () => {
+  assert.deepEqual(parseCmd('/ide Kenapa Sprint Estimation Selalu Meleset', SLUGS), { t: 'ide', slug: undefined, text: 'Kenapa Sprint Estimation Selalu Meleset' });
+});
+
+test('parseCmd: /ide with group slug', () => {
+  assert.deepEqual(parseCmd('/ide brand2 Heisenbug di production', SLUGS), { t: 'ide', slug: 'brand2', text: 'Heisenbug di production' });
+});
+
+test('parseCmd: /ide with NO text → usage unknown', () => {
+  const c = parseCmd('/ide', SLUGS);
+  assert.equal(c.t, 'unknown');
+});
+
+test('parseCmd: /ide clamps to 400 chars', () => {
+  const c = parseCmd('/ide ' + 'x'.repeat(500), SLUGS);
+  assert.equal(c.t, 'ide');
+  assert.equal(c.text!.length, 400);
+});
+
+test('parseCmd: /ide first word is not a slug → whole text is the idea', () => {
+  assert.deepEqual(parseCmd('/ide git bisect itu underrated', SLUGS), { t: 'ide', slug: undefined, text: 'git bisect itu underrated' });
+});
+
 test('parseCmd: invalid format', () => {
   const c = parseCmd('/gen instagram video', SLUGS);
   assert.equal(c.t, 'unknown');

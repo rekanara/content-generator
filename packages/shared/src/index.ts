@@ -170,6 +170,21 @@ export const PostDetail = PostSummary.extend({
 });
 export type PostDetail = z.infer<typeof PostDetail>;
 
+// ——— idea backlog ———
+export const Idea = z.object({
+  id: z.string().uuid(),
+  text: z.string(),
+  source: z.enum(['bot', 'fe']),
+  used_at: z.string().nullable(),
+  created_at: z.string(),
+});
+export type Idea = z.infer<typeof Idea>;
+
+export const IdeaInput = z.object({
+  text: z.string().trim().min(3).max(400),
+});
+export type IdeaInput = z.infer<typeof IdeaInput>;
+
 export const StyleSample = z.object({
   id: z.string().uuid(),
   title: z.string(),

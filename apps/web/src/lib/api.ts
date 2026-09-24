@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput } from '@workspace/shared';
+import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea } from '@workspace/shared';
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -116,6 +116,9 @@ export const api = {
   delStyle: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'DELETE' }),
   patchStyle: (slug: string, id: string, s: { title: string; body: string; platform: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'PATCH', body: JSON.stringify(s) }),
+  ideas: (slug: string) => req<Idea[]>(`${g(slug)}/ideas`),
+  addIdea: (slug: string, text: string) => req<Idea>(`${g(slug)}/ideas`, { method: 'POST', body: JSON.stringify({ text }) }),
+  delIdea: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/ideas/${id}`, { method: 'DELETE' }),
   templates: (slug: string) => req<Template[]>(`${g(slug)}/templates`),
   template: (slug: string, id: string) => req<TemplateDetail>(`${g(slug)}/templates/${id}`),
   patchTemplate: (slug: string, id: string, t: { name: string; html: string; html_first: string | null; html_last: string | null }) =>
