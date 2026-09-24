@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Ban, Plus, Trash2 } from "lucide-react"
+import { Ban, Check, Plus, Sparkles, Trash2, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -39,7 +39,27 @@ export function OverridesView({ slug }: { slug: string }) {
   const [files, setFiles] = useState<File[]>([])
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [polishing, setPolishing] = useState(false)
+  const [preview, setPreview] = useState<string | null>(null) // AI-polished text awaiting accept/keep
   const fileInput = useRef<HTMLInputElement>(null)
+
+  const polish = async () => {
+    if (form.description.trim().length < 5) return
+    setPolishing(true); setMsg(null); setPreview(null)
+    try {
+      const r = await api.polishOverride(slug, { name: form.name || "override", type: form.type, description: form.description })
+      setPreview(r.polished)
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : "polish failed")
+    } finally {
+      setPolishing(false)
+    }
+  }
+
+  const acceptPreview = () => {
+    if (preview) setForm((f) => ({ ...f, description: preview }))
+    setPreview(null)
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -112,10 +132,32 @@ export function OverridesView({ slug }: { slug: string }) {
 
             <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
               <div className="space-y-1.5">
-                <Label htmlFor="ov-desc">Description</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="ov-desc">Description</Label>
+                  <Button type="button" variant="ghost" size="sm" disabled={polishing || form.description.trim().length < 5}
+                    onClick={polish} title="AI mempercantik kata-kata & hook — kamu tetap memilih hasilnya">
+                    <Sparkles className="size-3.5 text-amber-400" /> {polishing ? "polishing…" : "Polish with AI"}
+                  </Button>
+                </div>
                 <Textarea id="ov-desc" className="min-h-24" placeholder="text content / caption"
                   required={form.type !== "image_only"} value={form.description}
                   onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                {preview && (
+                  <div className="ticks rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+                    <p className="readout mb-2 text-[0.65rem] uppercase tracking-widest text-amber-400">
+                      AI polish — preview
+                    </p>
+                    <p className="whitespace-pre-wrap break-words text-sm">{preview}</p>
+                    <div className="mt-3 flex gap-2">
+                      <Button type="button" size="sm" onClick={acceptPreview}>
+                        <Check className="size-3.5" /> Pakai ini
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" onClick={() => setPreview(null)}>
+                        <X className="size-3.5" /> Pertahankan punyaku
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label>Template (optional)</Label>

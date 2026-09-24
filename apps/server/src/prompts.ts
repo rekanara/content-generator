@@ -213,6 +213,43 @@ export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], 
   ];
 }
 
+// ——— override description polish (pure) ———
+// Manual override content: the human brings the MESSAGE, the AI brings the craft.
+// Keeps facts and meaning intact — fixes wording, sharpens the hook, kills fluff.
+// Style-anchored to the group's samples when available (consistent voice).
+export function overridePolishPrompt(
+  d: { name: string; type: string; description: string },
+  samples: StyleSample[],
+): { role: 'system' | 'user'; content: string }[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are an editor polishing a MANUAL social media post (Indonesian, developer audience).',
+        'The human wrote the message — you make it publish-worthy. Rules:',
+        '- Keep the meaning, facts, names, numbers, and language (Indonesian stays Indonesian) INTACT.',
+        '- First line must be a scroll-stopping hook (specific, concrete — no generic clickbait).',
+        '- Fix awkward wording, kill filler words and clichés, tighten every sentence.',
+        '- Match length to the platform role: this text lands as a caption/body next to images or standalone.',
+        `- Type is "${d.type}" — image types read like captions; text_only reads like a LinkedIn post (hook → insight → closing line).`,
+        '- Casual but sharp, like a developer sharing experience. Max 2 emoji.',
+        'Reply ONLY with valid JSON.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Post name: ${d.name}
+
+Raw draft (fix this):
+${d.description}
+
+${samples.length > 0 ? `Style reference (imitate the feel and rhythm, not the topics):\n${styleBlock(samples)}` : 'No style samples — write naturally.'}
+
+Return JSON: {"polished": "<the improved text>"}`,
+    },
+  ];
+}
+
 // ——— promotions (pure) ———
 export type PromoData = {
   name: string; topic: string; features: string[]; stacks: string[]; stats: string[];

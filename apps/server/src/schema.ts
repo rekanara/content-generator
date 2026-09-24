@@ -135,6 +135,15 @@ export function isPlannerOut(x: unknown): x is PlannerOut {
   });
 }
 
+// ——— override description polish ———
+export type PolishOut = { polished: string };
+export function isPolishOut(x: unknown): x is PolishOut {
+  // floor: a polish that returns LESS than the raw draft's half is almost certainly
+  // a refusal or a mistake, not an edit — reject and let the caller keep the raw text
+  if (!obj(x) || !str(x.polished) || x.polished.trim().length < 10) return false;
+  return true;
+}
+
 // ——— caption assembly (pure) ———
 // Structured caption + group footer → the final caption string stored in posts.caption.
 // Order: title / subtitle / cta / footer / tags. Empty parts are skipped entirely

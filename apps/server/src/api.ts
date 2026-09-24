@@ -5,8 +5,12 @@ import { Hono, type Context } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
+import { sql } from './db/pool.ts';
 import { enqueue, queueStatus } from './queue.ts';
 import { readRun } from './progress.ts';
+import { chatJson, writerModel } from './llm.ts';
+import { overridePolishPrompt } from './prompts.ts';
+import { isPolishOut } from './schema.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
@@ -484,6 +488,25 @@ g.delete('/:slug/templates/:id', async (c) => {
 // ---------- override content ----------
 // GET list / POST create (multipart: name,type,template_id,description,for_date + images[] files)
 g.get('/:slug/overrides', async (c) => c.json(await listOverrides(gr(c).id)));
+
+// AI-polish the manual description BEFORE creating — the human stays in the loop:
+// FE shows the polished preview, the user picks (accept → replaces the textarea,
+// keep → original stays). No DB write here.
+g.post('/:slug/overrides/polish', async (c) => {
+  const PolishBody = z.object({ name: z.string().min(1), type: z.enum(['mix', 'image_only', 'text_only']), description: z.string().min(5) });
+  const parsed = PolishBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const group = gr(c);
+  const cfg = await getGroupCfg(group.slug);
+  const samples = (await sql`select title, body, platform from style_samples
+    where group_id = ${group.id} order by created_at desc limit 4`) as unknown as { title: string; body: string; platform: string | null }[];
+  const out = await chatJson(
+    cfg, writerModel(cfg),
+    overridePolishPrompt(parsed.data, samples as { title: string; body: string; platform: string | null }[]),
+    isPolishOut, 4000,
+  );
+  return c.json({ polished: out.data.polished.trim() });
+});
 
 g.post('/:slug/overrides', async (c) => {
   const group = gr(c);
