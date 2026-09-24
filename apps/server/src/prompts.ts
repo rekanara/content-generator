@@ -263,26 +263,65 @@ export function promoBriefPrompt(brief: string): { role: 'system' | 'user'; cont
   ];
 }
 
-export function promoContentPrompt(p: PromoData, cssVocab: string): { role: 'system' | 'user'; content: string }[] {
+// Story arcs a promo deck may follow — one is drawn at random per run so two
+// regens of the same promo never converge to the same structure. The formula
+// deck (cover → pain → features → stack → price → proof → CTA) is deliberately
+// NOT in the pool: the model falls back to it on its own when given nothing.
+export const PROMO_ARCS: string[] = [
+  'MINI-NARRATIVE: open mid-story — the reader at their worst concrete moment (deadline malam, demo gagal di depan klien, incident jam 2 pagi). 2-3 story slides, each escalating. The turning point slide introduces the product as the thing that changed the outcome. Result slide → offer → CTA.',
+  'MYTH-BUSTING: open with a belief the audience holds that is actually wrong ("yang bilang X jelas belum pernah ..."). Bust it with a concrete mechanism or number. Show the better way — the product. Close with the offer as the practical fix.',
+  'COUNTDOWN: "N kesalahan/kebiasaan/alat yang ..." — numbered slides, one item each, each item a real mistake the reader recognizes. The LAST item resolves into the product. Offer + CTA after.',
+  'BEFORE/AFTER: contrast pairs. "Dulu" slide: the painful old way, concrete detail. "Sekarang" slide: the same task with the product. 2-3 pairs, then the offer. Use visual contrast in composition too (dark/dense before, open/light after).',
+  'QUESTION HOOK: open with a sharp, specific question the reader asks themselves at work (not generic "pernah nggak sih?"). Answer it across slides with proof, then position the product as the answer made tool.',
+  'BOLD CLAIM: open with a bold, specific, defensible claim (a number, a timeframe, an outcome). Spend the deck EARNING it: mechanism, proof, example. Offer arrives only after the claim feels earned.',
+  'BEHIND-THE-SCENES: open with a process detail nobody shares (how the work actually gets done). Build credibility through craft slides — specifics, trade-offs, lessons. Reveal the offer late, as "kalau mau hasil yang sama tanpa trial-error-nya".',
+];
+
+export function promoContentPrompt(
+  p: PromoData,
+  cssVocab: string,
+  arcOverride?: string,
+): { role: 'system' | 'user'; content: string }[] {
+  const arc = arcOverride ?? PROMO_ARCS[Math.floor(Math.random() * PROMO_ARCS.length)]!;
   return [
     {
       role: 'system',
       content: [
         'You are a slide art director for a product promotion (Indonesian, developer audience).',
-        'You write ONE COMPLETE HTML fragment per slide — free layout, free position, only these rules:',
-        '- Use ONLY the CSS classes available in the template (listed below) plus inline styles if needed. No <style> blocks, no <script>.',
-        '- Each slide is one fragment. Suggested flow (adapt if it improves the story):',
-        '  1 cover (product name + hook) → 2 pain point → 3 features (use feature-item list) →',
-        '  4 tech stack (stack-item list) → 5 price (show price_sale as the deal when present) →',
-        '  6 social proof (stat-item list) → 7 CTA (save/follow/check link).',
-        '- Where you want a photo/illustration on a slide, place the token {{image}} inside an <img src="{{image}}"> or as a background, and describe the image you need in that slide\'s image_prompt (Indonesian, concrete: subject + style + mood).',
+        'You write ONE COMPLETE HTML fragment per slide — free layout, free composition.',
+        '',
+        'HARD RULES:',
+        '- Use ONLY the CSS classes of the template (listed in the user message) plus inline styles if needed. No <style> blocks, no <script>.',
         '- Text in Indonesian. Big fonts only (readable on a phone). No lorem ipsum.',
+        '- 5-9 slides. ONE idea per slide — a slide that says two things says neither.',
+        '',
+        'CREATIVITY RULES (a boring deck is a rejected deck):',
+        '- COMPOSITION MUST VARY slide to slide: never two consecutive slides with the same layout.',
+        '  Mix full-bleed image slides, text+image splits, centered big statements, lists, stat highlights, quote-style slides.',
+        '- RHYTHM: alternate dense and sparse slides. A single bold sentence on an otherwise empty slide',
+        '  is a valid and powerful slide. A deck of only dense list slides is rejected.',
+        '- The promo DATA is a palette, not a checklist — use only the parts that serve the story.',
+        '  Feature lists, tech stacks and stats may be ONE slide, several, or absent entirely.',
+        '- Slide 1 is the scroll-stopper: max 8 words, big type. "Introducing X" and any generic',
+        '  cover phrasing is banned — the hook must earn the swipe.',
+        '- Price appears at most once, near the end, only as the deal (price_sale when present).',
+        '- Where a slide needs a photo/illustration, place {{image}} inside an <img src="{{image}}">',
+        '  or as a background, and describe the image in that slide\'s image_prompt (Indonesian, concrete: subject + style + mood).',
         'Reply ONLY with valid JSON.',
       ].join('\n'),
     },
     {
       role: 'user',
-      content: `Promo data:\n${JSON.stringify(p, null, 1)}\n\nTemplate CSS classes you may use:\n${cssVocab}\n\nReturn JSON: {"slides": [{"html": "<fragment>", "image_prompt": "<what image this slide needs, empty if none>"}, ... 6-8 slides]}`,
+      content: `Promo data (a palette — use what the story needs, skip the rest):
+${JSON.stringify(p, null, 1)}
+
+Story arc for THIS deck (follow it; adapt only if the data truly contradicts it — do NOT fall back to the generic formula):
+${arc}
+
+Template CSS classes you may use:
+${cssVocab}
+
+Return JSON: {"slides": [{"html": "<fragment>", "image_prompt": "<what image this slide needs, empty if none>"}, ... 5-9 slides]}`,
     },
   ];
 }
