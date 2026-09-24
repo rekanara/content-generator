@@ -12,12 +12,12 @@ import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
 import { imagePrice } from '../llm-costs.ts';
 import { imagePrompt } from '../prompts.ts';
-import { getTemplateSet, getTemplateSetById, buildSlides, isManualCoverMode } from './template.ts';
+import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, type TemplateSet } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
 
-export type CarouselArtifacts = { files: string[]; prefix: string; coverCost: number; coverModel: string | null };
+export type CarouselArtifacts = { files: string[]; prefix: string; coverCost: number; coverModel: string | null; templateId: string | null };
 
 // Thrown when cover generation is REQUIRED but failed — the queue catches it, parks the
 // post at awaiting_cover and asks Telegram (upload manually / render without cover).
@@ -78,8 +78,20 @@ export async function renderCarousel(
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  const set = (opts.templateId ? await getTemplateSetById(cfg.id, opts.templateId) : null)
-    ?? (await getTemplateSet('carousel', platform, cfg.id));
+  // Template resolution (first match wins):
+  //   1. opts.templateId  — pinned by a plan (slot_override): authority for the date
+  //   2. post's own id    — rerender stability: the post keeps its visual identity,
+  //                         edits to that template row still come through
+  //   3. pool pick        — fresh render: random among active templates for the
+  //                         format, avoiding the group's last-used one (variety)
+  // A dangling id (template deleted) falls through to the next step.
+  const [ownRow] = await sql<{ template_id: string | null }[]>`select template_id from posts where id = ${postId}`;
+  const pinnedId = opts.templateId ?? ownRow?.template_id ?? null;
+  const pinnedSet = pinnedId ? await getTemplateSetById(cfg.id, pinnedId) : null;
+  const picked: { id: string | null; set: TemplateSet } = pinnedSet
+    ? { id: pinnedId, set: pinnedSet }
+    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
+  const set = picked.set;
   const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
   const htmls = buildSlides(set, draft, cover?.buf);
 
@@ -148,17 +160,19 @@ export async function renderCarousel(
     }
     if (pdfPath) keys.push(await uploadPostArtifact(cfg.slug, postId, pdfPath, 'carousel.pdf'));
 
-    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/`, coverCost: cover?.cost ?? 0, coverModel: cover ? cfg.image.model : null };
+    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/`, coverCost: cover?.cost ?? 0, coverModel: cover ? cfg.image.model : null, templateId: picked.id };
   } finally {
     await browser.close();
   }
 }
 
-// Render + persist status + artifact_prefix. "Persist" split out to keep it testable.
+// Render + persist status + artifact_prefix + the chosen template id (rerender
+// stability). "Persist" split out to keep it testable.
 export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, cfg: GroupCfg, opts: RenderOpts = {}): Promise<CarouselArtifacts> {
   const r = await renderCarousel(postId, platform, draft, cfg, opts);
-  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix}
+  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix},
+    template_id = coalesce(${r.templateId}, template_id)
     where id = ${postId}`;
-  console.log(`[render] post #${postId}: ${r.files.length} artifacts → ${r.prefix}`);
+  console.log(`[render] post #${postId}: ${r.files.length} artifacts → ${r.prefix} (template ${r.templateId ? r.templateId.slice(0, 8) : 'default'})`);
   return r;
 }

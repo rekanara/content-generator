@@ -90,9 +90,14 @@ sessions          -- id, user_id, token_hash (sha256), expires_at (sliding 30d),
 pillars           -- id, group_id, name, description, is_news, active, sort_order
 rotation_state    -- group_id PK, last_platform, last_ig_format, last_li_format, last_pillar_id
 posts             -- id, group_id, platform, format, pillar_id, topic, caption, body (jsonb),
-                   --   artifact_prefix, status (queued|draft|rendered|awaiting_approval|sent|failed|rejected),
+                   --   artifact_prefix, template_id (uuid, tanpa FK — rerender stability),
+                   --   status (queued|draft|rendered|awaiting_approval|sent|failed|rejected),
                    --   error, source, llm_usage
-templates         -- id, name, format (ig-carousel|li-carousel|reel), html, is_active (satu per format per group)
+templates         -- id, name, format (ig-carousel|li-carousel|reel), html, is_active
+                   --   regular: BANYAK active per format = pool rotasi (render baru pilih random,
+                   --   hindari template yang sama 2x berturut-turut per group+platform;
+                   --   posts.template_id menyimpan pilihan → rerender stabil)
+                   --   override/promo types: tetap exclusive satu active per format+type
 style_samples     -- id, group_id, title, body, platform
 feeds_cache       -- url PK, fetched_at, items jsonb
 ```

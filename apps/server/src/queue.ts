@@ -4,7 +4,7 @@ import { sql } from './db/pool.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
 import type { Slot, Platform, Format } from './state.ts';
 import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
-import { getTemplateSet, isManualCoverMode } from './render/template.ts';
+import { anyActiveCoverTemplate, isManualCoverMode } from './render/template.ts';
 import { artifactExists } from './storage.ts';
 import { postUsage, type PostUsage } from './llm-costs.ts';
 import { renderReelsAndSave } from './render/reels.ts';
@@ -259,8 +259,8 @@ async function parkAwaitingCover(
   }
 }
 
-// Manual cover needed: carousel/pdf format + cover part in the active template
-// + manual mode (blank/'empty' image model) + no stored cover yet.
+// Manual cover needed: carousel/pdf format + a cover part in ANY active template
+// (pool-aware) + manual mode (blank/'empty' image model) + no stored cover yet.
 async function needsManualCover(
   cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   postId: string,
@@ -268,8 +268,7 @@ async function needsManualCover(
 ): Promise<boolean> {
   if (slot.format !== 'carousel' && slot.format !== 'pdf') return false;
   if (!isManualCoverMode(cfg.image.model)) return false;
-  const set = await getTemplateSet('carousel', slot.platform, cfg.id);
-  if (!set.first) return false; // no cover page in the template → nothing to ask for
+  if (!(await anyActiveCoverTemplate(slot.platform, cfg.id))) return false; // no cover page anywhere → nothing to ask for
   return !(await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
 }
 

@@ -1,7 +1,7 @@
 // Load the active template PACKAGE from DB (one row = body + cover + CTA), fall back to default.
 // Fill tokens + escape HTML.
 import { sql } from '../db/pool.ts';
-import type { Platform, Format } from '../state.ts';
+import type { Platform } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
 
 export type SlideHtml = string; // single-slide html, ready for puppeteer
@@ -52,8 +52,9 @@ const DEFAULT_IG = `<!doctype html>
 // Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
 
-// Template package pinned by id (plan slot_override) — status-agnostic: a planned
-// template renders even if not "active" (the plan IS the authority for that date).
+// Template package pinned by id (plan slot_override, or the post's own previous
+// render) — status-agnostic: a planned template renders even if not "active"
+// (the plan IS the authority for that date).
 export async function getTemplateSetById(groupId: string, templateId: string): Promise<TemplateSet | null> {
   const [t] = await sql`select html, html_first, html_last from templates
     where id = ${templateId} and group_id = ${groupId}`;
@@ -65,23 +66,49 @@ export async function getTemplateSetById(groupId: string, templateId: string): P
   };
 }
 
-// Active template package for a format. Cover flow: html_first present on the row
-// AND a cover image available → slide 1 uses it. Everything null-safe.
-export async function getTemplateSet(format: Format, platform: Platform, groupId: string): Promise<TemplateSet> {
+// Active pool for a format: ALL active rows (multiple allowed — variety by design).
+// hasCover: a cover image exists for the post → prefer templates that HAVE a cover
+// part (only they can show it); pool without cover parts still applies as fallback.
+// Avoids the template this group used last for the same platform when the pool > 1,
+// so consecutive posts don't look identical. Returns null id = built-in default.
+export async function pickTemplateSet(
+  platform: Platform,
+  groupId: string,
+  hasCover = false,
+): Promise<{ id: string | null; set: TemplateSet }> {
   // db format: ig-carousel | li-carousel | reel — pdf (LI) uses li-carousel
   const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
-  const [t] = await sql`select html, html_first, html_last from templates
-    where format = ${dbFormat} and is_active and group_id = ${groupId}
-    order by updated_at desc limit 1`;
-  if (t) {
-    return {
-      body: t.html as string,
-      first: (t.html_first as string | null) ?? null,
-      last: (t.html_last as string | null) ?? null,
-    };
+  const rows = (await sql`select id, html, html_first, html_last from templates
+    where format = ${dbFormat} and is_active and group_id = ${groupId}`) as unknown as { id: string; html: string; html_first: string | null; html_last: string | null }[];
+  let pool = rows;
+  if (pool.length === 0) {
+    return { id: null, set: { body: platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI, first: null, last: null } };
   }
-  const fallback = platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI;
-  return { body: fallback, first: null, last: null };
+  if (hasCover) {
+    const withCover = pool.filter((r) => r.html_first !== null);
+    if (withCover.length > 0) pool = withCover;
+  }
+  if (pool.length > 1) {
+    const [lastUsed] = await sql`select template_id from posts
+      where group_id = ${groupId} and platform = ${platform} and template_id is not null
+      order by created_at desc limit 1`;
+    if (lastUsed?.template_id) {
+      const filtered = pool.filter((r) => r.id !== lastUsed.template_id);
+      if (filtered.length > 0) pool = filtered; // pool of 1 → same as today, no choice to make
+    }
+  }
+  const t = pool[Math.floor(Math.random() * pool.length)]!;
+  return { id: t.id, set: { body: t.html, first: t.html_first ?? null, last: t.html_last ?? null } };
+}
+
+// Manual-cover gate: does ANY active template for this platform's format carry a
+// cover part? (Pool-aware — with several active templates, one cover-capable row
+// is enough for the cover question to make sense.)
+export async function anyActiveCoverTemplate(platform: Platform, groupId: string): Promise<boolean> {
+  const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
+  const r = await sql`select 1 from templates
+    where format = ${dbFormat} and is_active and group_id = ${groupId} and html_first is not null limit 1`;
+  return r.length > 0;
 }
 
 // Build HTML per slide with the package sequence:

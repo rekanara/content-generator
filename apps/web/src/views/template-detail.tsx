@@ -107,9 +107,9 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
     try {
       await api.activateTemplate(slug, id)
       reload()
-      setMsg("activated — one active template per format")
+      setMsg(data?.type === "regular" ? "toggled in/out of the rotation pool" : "activated — one active per format+type")
     } catch (e2) {
-      setMsg(e2 instanceof ApiError ? e2.message : "failed to activate")
+      setMsg(e2 instanceof ApiError ? e2.message : "failed to toggle")
     } finally {
       setBusy(false)
     }

@@ -1,4 +1,7 @@
-// Template repository (group-scoped). 1 active per format — deactivate siblings first.
+// Template repository (group-scoped). REGULAR templates: MULTIPLE active per format
+// is the norm — the pipeline picks randomly from the active pool (variety), so
+// activate is a POOL TOGGLE. Override/promo types stay exclusive: one active per
+// (format, type) — they're chosen deliberately, not rotated.
 // One row = one visual package: html (body), html_first (cover, nullable), html_last (CTA, nullable).
 // type: 'regular' = pipeline rendering; 'mix'|'image_only'|'text_only' = for override content.
 import { sql } from '../db/pool.ts';
@@ -31,23 +34,26 @@ export async function getTemplate(groupId: string, id: string): Promise<Template
 export async function createTemplate(groupId: string, d: {
   name: string; format: string; type: string; html: string; html_first: string | null; html_last: string | null; is_active: boolean;
 }): Promise<void> {
-  if (d.is_active) {
-    // only regular templates compete for the one-active-per-format pipeline slot
-    if (d.type === 'regular') {
-      await sql`update templates set is_active = false
-        where format = ${d.format} and type = 'regular' and group_id = ${groupId}`;
-    } else {
-      await sql`update templates set is_active = false
-        where format = ${d.format} and type = ${d.type} and group_id = ${groupId}`;
-    }
+  // override/promo types: exclusive activate (one active per format+type).
+  // regular: active = joins the rotation pool — siblings stay active.
+  if (d.is_active && d.type !== 'regular') {
+    await sql`update templates set is_active = false
+      where format = ${d.format} and type = ${d.type} and group_id = ${groupId}`;
   }
   await sql`insert into templates (group_id, name, format, type, html, html_first, html_last, is_active)
     values (${groupId}, ${d.name}, ${d.format}, ${d.type}, ${d.html}, ${d.html_first}, ${d.html_last}, ${d.is_active})`;
 }
 
+// Regular templates: toggle this row in/out of the rotation pool.
+// Override/promo types: exclusive activate (deactivates siblings of the same format+type).
 export async function activateTemplate(groupId: string, id: string): Promise<void> {
-  const [t] = await sql`select format, type from templates where id = ${id} and group_id = ${groupId}`;
+  const [t] = await sql<{ format: string; type: string; is_active: boolean }[]>`select format, type, is_active from templates where id = ${id} and group_id = ${groupId}`;
   if (!t) return;
+  if (t.type === 'regular') {
+    await sql`update templates set is_active = ${!t.is_active}, updated_at = now()
+      where id = ${id} and group_id = ${groupId}`;
+    return;
+  }
   await sql`update templates set is_active = false
     where format = ${t.format} and type = ${t.type} and group_id = ${groupId}`;
   await sql`update templates set is_active = true where id = ${id} and group_id = ${groupId}`;

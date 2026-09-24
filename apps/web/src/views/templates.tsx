@@ -101,6 +101,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               body token: {TEMPLATE_TOKENS[form.format].body.join(" ")}
               {!isReel && !isPromoFormat(form.format) && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
               {!isReel && !isPromoFormat(form.format) && form.html_last !== "" && <> · CTA: {TEMPLATE_TOKENS[form.format].last?.join(" ")}</>}
+              {form.type === "regular" && !isPromoFormat(form.format) && <> · multiple active regulars per format = rotation pool (random pick, no immediate repeat)</>}
             </p>
             {isPromoFormat(form.format) && (
               <p className="text-xs text-muted-foreground">
