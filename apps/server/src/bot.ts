@@ -3,7 +3,7 @@
 //   /gen <slug> <platform> <format> — without a slug = first group.
 // Approval-gate callbacks arrive as callback_query updates (inline keyboard buttons):
 //   approve:<postId> / reject:<postId>
-import { getUpdates, replyGlobal, answerCallback, registerCommands, downloadTelegramFile } from './telegram.ts';
+import { getUpdates, replyGlobal, answerCallback, registerCommands, downloadTelegramFile, editMessageButtons } from './telegram.ts';
 import { enqueue, queueStatus, bootCleanup } from './queue.ts';
 import { sql } from './db/pool.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { uploadPostArtifact } from './storage.ts';
 import { getRotation, getActivePillars } from './repos/rotation.ts';
 import { nextSlot } from './state.ts';
 import { getGroupCfg, listGroups } from './groups.ts';
-import { rejectPost } from './repos/posts.ts';
+import { rejectPost, toggleStar } from './repos/posts.ts';
 import { addIdea, countUnusedIdeas } from './repos/ideas.ts';
 import { addEvent } from './repos/events.ts';
 import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
@@ -86,6 +86,8 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
 export type Callback =
   | { t: 'approve'; postId: string }
   | { t: 'reject'; postId: string }
+  | { t: 'regen'; postId: string }
+  | { t: 'star'; postId: string }
   | { t: 'skip_cover'; postId: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
   | { t: 'ovdone' };
@@ -93,14 +95,23 @@ export type Callback =
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function parseCallback(data: string): Callback | null {
-  const m = data.match(/^(approve|reject|skip_cover):([0-9a-f-]{36})$/i);
+  const m = data.match(/^(approve|reject|regen|star|skip_cover):([0-9a-f-]{36})$/i);
   if (m && UUID_RE.test(m[2]!)) {
-    return { t: m[1]!.toLowerCase() as 'approve' | 'reject' | 'skip_cover', postId: m[2]!.toLowerCase() };
+    return { t: m[1]!.toLowerCase() as 'approve' | 'reject' | 'regen' | 'star' | 'skip_cover', postId: m[2]!.toLowerCase() };
   }
   const ot = data.match(/^ovtype:(mix|image_only|text_only)$/);
   if (ot) return { t: 'ovtype', value: ot[1]! as 'mix' | 'image_only' | 'text_only' };
   if (data === 'ovdone') return { t: 'ovdone' };
+  if (/^noop:/i.test(data)) return null; // stamped button — ignore silently
   return null;
+}
+
+// Which message a callback is currently being processed against (set by the polling
+// loop right before handleCallback) — lets handlers edit THAT message's buttons.
+// Single-slot: callbacks are processed strictly sequentially in the polling loop.
+let currentCallbackMessageId_: number | null = null;
+export function currentCallbackMessageId(_chatId: string): number | null {
+  return currentCallbackMessageId_;
 }
 
 // ——— override date parser (pure, unit-test) ———
@@ -135,19 +146,28 @@ async function handleStatus(slug?: string): Promise<string> {
   const cfg = await getGroupCfg(s).catch(() => null);
   if (!cfg) return `group "${s}" not found`;
   const [state, pillars, q] = await Promise.all([getRotation(cfg.id), getActivePillars(cfg.id), Promise.resolve(queueStatus())]);
-  const [grp] = await sql`select cron_expr, cron_enabled from groups where id = ${cfg.id}`;
-  const [last] = await sql`select id, platform, format, topic, status, created_at
+  const [grp] = await sql`select cron_expr, cron_enabled, auto_plan from groups where id = ${cfg.id}`;
+  const [last] = await sql`select id, platform, format, topic, status, starred, created_at
     from posts where group_id = ${cfg.id} order by id desc limit 1`;
+  const [awaiting] = await sql`select count(*)::int as n from posts
+    where group_id = ${cfg.id} and status = 'awaiting_approval'`;
+  const [ideasN] = await sql`select count(*)::int as n from ideas
+    where group_id = ${cfg.id} and used_at is null`;
+  const [cost] = await sql`select coalesce(sum((llm_usage->>'totalCost')::numeric), 0)::float as today
+    from posts where group_id = ${cfg.id} and created_at >= date_trunc('day', now() at time zone 'Asia/Jakarta')`;
   const next = nextSlot(state, pillars, true);
   const lines = [
     `Group: ${s}`,
     `Schedule: \`${grp?.cron_expr ?? '-'}\` ${grp?.cron_enabled ? 'ON' : 'OFF'}`,
     `Rotation: last=${state.last_platform ?? '-'} → next **${next.platform} ${next.format}** (pillar ${next.pillar_id})`,
     `Queue: ${q.running ? 'running' : 'idle'}${q.pending > 0 ? `, ${q.pending} pending` : ''}`,
+    `Awaiting approval: ${awaiting?.n ?? 0}${(awaiting?.n ?? 0) > 0 ? ' — buka FE atau tap tombolnya' : ''}`,
+    `Ideas queued: ${ideasN?.n ?? 0}`,
+    `Cost today: $${(cost?.today ?? 0).toFixed(4)}`,
   ];
   if (last) {
     lines.push(
-      `Post #${last.id}: ${last.platform} ${last.format} — ${last.status} — "${String(last.topic).slice(0, 60)}"`,
+      `Post #${last.id}: ${last.platform} ${last.format} — ${last.status}${last.starred ? ' ★' : ''} — "${String(last.topic).slice(0, 60)}"`,
     );
   }
   return lines.join('\n');
@@ -310,7 +330,9 @@ export async function startBot(): Promise<void> {
             const cb = u.callback_query;
             console.log(`[bot] callback "${cb.data}" from chat ${cb.message?.chat?.id}`);
             await answerCallback(config.telegram.botToken, String(cb.id)).catch(() => {});
+            currentCallbackMessageId_ = cb.message?.message_id ?? null;
             await handleCallback(String(cb.data ?? ''), String(cb.message?.chat?.id ?? config.telegram.chatId));
+            currentCallbackMessageId_ = null;
             continue;
           }
 
@@ -398,26 +420,69 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     return;
   }
 
-  const [post] = await sql`select p.id, p.group_id, p.status, g.slug
+  const [post] = await sql`select p.id, p.group_id, p.status, p.starred, g.slug
     from posts p join groups g on g.id = p.group_id where p.id = ${cb.postId}`;
   if (!post) {
     await replyGlobal(chatId, `Post ${cb.postId} not found`);
     return;
   }
+
+  // Terminal-stamp the origin message of this button press (no zombie buttons).
+  // Best-effort: an edit failure never blocks the action itself.
+  const stamp = async (label: string, extra?: { text: string; callback_data: string }[][]) => {
+    const msgId = currentCallbackMessageId(chatId);
+    if (!msgId) return;
+    await editMessageButtons(chatId, msgId, extra ?? [[{ text: `✓ ${label}`, callback_data: `noop:${cb.postId}` }]])
+      .catch((e) => console.warn(`[bot] stamp failed: ${(e as Error).message}`));
+  };
+
   if (cb.t === 'approve') {
     if (post.status !== 'awaiting_approval') {
       await replyGlobal(chatId, `Cannot approve #${post.id} — status is ${post.status}`);
       return;
     }
     enqueue({ kind: 'approve', slug: post.slug, postId: post.id });
-    await replyGlobal(chatId, `Approved — #${post.id} delivering…`);
+    await stamp('Approved — delivering…', [[
+      { text: '✓ Approved — delivering…', callback_data: `noop:${post.id}` },
+      { text: '☆ Star', callback_data: `star:${post.id}` },
+    ]]);
+  } else if (cb.t === 'regen') {
+    if (post.status !== 'awaiting_approval') {
+      await replyGlobal(chatId, `Cannot regenerate #${post.id} — status is ${post.status}`);
+      return;
+    }
+    // same contract as reject: instant, rotation-safe. Then a fresh generate run.
+    const ok = await rejectPost(post.group_id, post.id);
+    if (!ok) {
+      await replyGlobal(chatId, `Cannot regenerate #${post.id} — status changed to ${post.status}`);
+      return;
+    }
+    await addEvent(post.id, post.group_id, 'rejected', 'regenerate via telegram').catch(() => {});
+    await stamp('Regenerating…');
+    enqueue({ kind: 'generate', slug: post.slug, notifyChat: true, source: 'telegram' });
+    await replyGlobal(chatId, `Rejected + regenerating (${post.slug}) — hasilnya menyusul.`);
+  } else if (cb.t === 'star') {
+    // allowed on any delivered-ish state — starring is metadata, not a status op
+    if (!['sent', 'awaiting_approval'].includes(post.status)) {
+      await replyGlobal(chatId, `Star hanya untuk post terkirim (status: ${post.status})`);
+      return;
+    }
+    const starred = await toggleStar(post.group_id, post.id);
+    if (starred === null) {
+      await replyGlobal(chatId, `Post ${post.id} not found`);
+      return;
+    }
+    await stamp(starred ? '★ Starred — planner signal' : '☆ Unstarred', [[
+      { text: starred ? '★ Starred' : '☆ Star', callback_data: `star:${post.id}` },
+    ]]);
+    console.log(`[bot] star toggled #${post.id} → ${starred}`);
   } else if (cb.t === 'skip_cover') {
     if (post.status !== 'awaiting_cover') {
       await replyGlobal(chatId, `Cannot skip cover #${post.id} — status is ${post.status}`);
       return;
     }
     enqueue({ kind: 'coverContinue', slug: post.slug, postId: post.id, skipCover: true });
-    await replyGlobal(chatId, `Cover dilewati — #${post.id} rendering tanpa cover…`);
+    await stamp('Cover skipped — rendering…');
   } else {
     const ok = await rejectPost(post.group_id, post.id);
     if (!ok) {
@@ -425,7 +490,7 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
       return;
     }
     await addEvent(post.id, post.group_id, 'rejected').catch(() => {});
-    await replyGlobal(chatId, `Rejected — #${post.id} · rotation not consumed`);
+    await stamp('Rejected — rotation not consumed');
   }
 }
 

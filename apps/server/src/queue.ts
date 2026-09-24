@@ -356,10 +356,16 @@ async function sendApprovalRequest(
   const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; artifact_prefix: string | null }[]>`select topic, platform, format, caption, body, artifact_prefix
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
-  const buttons = [[
-    { text: 'Approve — send now', callback_data: `approve:${postId}` },
-    { text: 'Reject', callback_data: `reject:${postId}` },
-  ]];
+  // Row 1 = decision. Row 2 = reject + regenerate (draft goreng → one tap retry).
+  const buttons = [
+    [
+      { text: '✓ Approve — send now', callback_data: `approve:${postId}` },
+    ],
+    [
+      { text: '↻ Regenerate', callback_data: `regen:${postId}` },
+      { text: '✗ Reject', callback_data: `reject:${postId}` },
+    ],
+  ];
   const meta = `${header} — ${cfg.slug}\nTopic: ${post.topic}\n${post.platform}/${post.format} · rotation unchanged until sent`;
   if (post.format === 'text') {
     // nothing visual — show the actual post body instead of just the caption

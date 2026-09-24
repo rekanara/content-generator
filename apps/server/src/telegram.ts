@@ -70,6 +70,29 @@ export async function sendMessageWithButtons(
   });
 }
 
+// Edit the buttons of the message a callback came FROM — the terminal pattern for
+// approval flows: stamp the outcome into the button row, no zombie buttons.
+// Env token (polled bot) — callbacks only arrive on that bot's messages.
+export async function editMessageButtons(
+  chatId: string,
+  messageId: number,
+  buttons: { text: string; callback_data: string }[][],
+): Promise<void> {
+  const token = (await import('./config.ts')).config.telegram.botToken;
+  const res = await fetch(`https://api.telegram.org/bot${token}/editMessageReplyMarkup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: { inline_keyboard: buttons },
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  // "message is not modified" is fine (double-tap race) — mustOk treats the rest
+  await mustOk(res, 'editMessageReplyMarkup');
+}
+
 // Download a file the bot received (manual cover photos). Global env token —
 // the photo arrived on the polled bot, so getFile must use the same token.
 // Telegram file downloads are capped at 20MB by the API — photos are well under.

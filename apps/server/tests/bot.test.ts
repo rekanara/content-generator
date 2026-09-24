@@ -131,6 +131,15 @@ test('parseCallback: unknown action → null', () => {
   assert.equal(parseCallback(''), null);
 });
 
+test('parseCallback: regen:<uuid> + star:<uuid>', () => {
+  assert.deepEqual(parseCallback(`regen:${UUID}`), { t: 'regen', postId: UUID });
+  assert.deepEqual(parseCallback(`star:${UUID}`), { t: 'star', postId: UUID });
+});
+
+test('parseCallback: stamped noop buttons are ignored silently', () => {
+  assert.equal(parseCallback(`noop:${UUID}`), null);
+});
+
 // ---------- parseCallback: override flow buttons ----------
 
 test('parseCallback: ovtype:mix / image_only / text_only', () => {
