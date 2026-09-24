@@ -33,7 +33,7 @@ import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
-import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion } from './repos/promotions.ts';
+import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate } from './repos/promotions.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import {
@@ -818,7 +818,9 @@ g.post('/:slug/promotions/:id/regenerate', async (c) => {
 });
 
 // re-render + resend a SENT promo with the current template row (template edits
-// come through — same content). Non-sent promos render at send time already.
+// come through — same content). Optional body { template_id?: string | null }:
+// switch the promo to a different promo template first (or null = built-in
+// default). Non-sent promos render at send time already.
 g.post('/:slug/promotions/:id/rerender', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
@@ -826,8 +828,28 @@ g.post('/:slug/promotions/:id/rerender', async (c) => {
   if (!p) return c.json({ error: 'promotion not found' }, 404);
   if (p.status !== 'sent') return c.json({ error: `status ${p.status} — rerender resends a SENT promo (template edits apply)` }, 400);
   if (!p.content) return c.json({ error: 'no content' }, 400);
-  const tpl = p.template_id ? await getTemplate(gr(c).id, p.template_id) : null;
-  const platform = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+
+  const body = await c.req.json().catch(() => ({}));
+  const templateId = (body as { template_id?: string | null }).template_id;
+  if (templateId !== undefined && templateId !== null && !isUuid(templateId)) {
+    return c.json({ error: 'invalid template_id' }, 400);
+  }
+  let platform: 'instagram' | 'linkedin';
+  if (templateId === undefined) {
+    // keep the pinned template as-is — plain re-render
+    const tpl = p.template_id ? await getTemplate(gr(c).id, p.template_id) : null;
+    platform = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+  } else {
+    // switch (or clear to default) — must be a promo template: a regular
+    // ig-carousel row has {{headline}} tokens, not the {{content}} hole
+    const tpl = templateId ? await getTemplate(gr(c).id, templateId) : null;
+    if (templateId && !tpl) return c.json({ error: 'template not found' }, 404);
+    if (tpl && !tpl.format.endsWith('-promo')) {
+      return c.json({ error: `template "${tpl.name}" is ${tpl.format} — re-render needs a promo template` }, 400);
+    }
+    await setPromotionTemplate(id, templateId);
+    platform = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+  }
   enqueue({ kind: 'promoSend', slug: gr(c).slug, promoId: id, platform });
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });

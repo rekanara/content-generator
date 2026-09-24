@@ -77,6 +77,13 @@ export async function setContentWithTemplate(id: string, slides: PromoSlide[], t
     where id = ${id}`;
 }
 
+// Switch the pinned template only (re-render with a different look: same content,
+// new design system). The promo keeps its sent history — the row just reflects
+// its CURRENT visual identity.
+export async function setPromotionTemplate(id: string, templateId: string | null): Promise<void> {
+  await sql`update promotions set template_id = ${templateId} where id = ${id}`;
+}
+
 export async function markPromotionSent(id: string): Promise<void> {
   await sql`update promotions set status = 'sent', sent_at = now() where id = ${id}`;
 }

@@ -30,6 +30,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
   const [uploadingSlide, setUploadingSlide] = useState<number | null>(null)
   const { data: templates } = useTemplates(slug)
   const [regenTemplate, setRegenTemplate] = useState<string | null>(null) // null = closed
+  const [rerenderTemplate, setRerenderTemplate] = useState<string | null>(null) // null = closed
 
   const refreshSlots = useCallback(() => {
     if (!data?.content) { setSlots(null); return }
@@ -66,11 +67,26 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
 
   const promoTemplates = (templates ?? []).filter((t) => t.format.endsWith("-promo"))
   const regenChoice = regenTemplate ?? data.template_id ?? "none"
+  const rerenderChoice = rerenderTemplate ?? data.template_id ?? "none"
+  const tplPlatform = (id: string | null) => {
+    if (!id) return "instagram"
+    return promoTemplates.find((t) => t.id === id)?.format.startsWith("li") ? "linkedin" : "instagram"
+  }
 
   const confirmRegen = () => act(
     () => api.regeneratePromo(slug, id, regenChoice === "none" ? null : regenChoice),
     "regenerate",
   ).then(() => setRegenTemplate(null))
+
+  const confirmRerender = () => {
+    const choice = rerenderChoice === "none" ? null : rerenderChoice
+    // switched → pass it (persisted server-side); same as current → plain re-render
+    const same = (choice ?? null) === (data.template_id ?? null)
+    return act(
+      () => api.rerenderPromo(slug, id, same ? undefined : choice),
+      "rerender",
+    ).then(() => setRerenderTemplate(null))
+  }
 
   return (
     <div className="space-y-4">
@@ -113,9 +129,9 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
         )}
         {data.status === "sent" && (
           <Button size="sm" variant="outline" disabled={busy}
-            title="Render ulang dengan template terkini (edits template masuk) + kirim lagi"
-            onClick={() => act(() => api.rerenderPromo(slug, id), "rerender")}>
-            <RefreshCw className="size-4" /> Re-render & resend
+            title="Render ulang (template bisa diganti) + kirim lagi"
+            onClick={() => setRerenderTemplate(rerenderTemplate === null ? (data.template_id ?? "none") : null)}>
+            <RefreshCw className="size-4" /> {rerenderTemplate !== null ? "Batal" : "Re-render & resend"}
           </Button>
         )}
         {data.content && data.status !== "sent" && (
@@ -164,6 +180,40 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           <p className="text-xs text-muted-foreground">
             Catatan: slide baru = slot gambar baru — gambar yang sudah diupload dipakai ulang kalau indeks slotnya sama.
           </p>
+        </CardContent></Card>
+      )}
+
+      {rerenderTemplate !== null && (
+        <Card><CardContent className="space-y-3 p-4">
+          <div>
+            <p className="text-sm font-medium">Re-render &amp; resend</p>
+            <p className="text-xs text-muted-foreground">
+              Konten slide tetap — tampilannya dirender ulang. Pilih template: sama seperti sekarang, atau ganti tampilan.
+            </p>
+          </div>
+          <div className="max-w-xs space-y-1.5">
+            <Label>Template</Label>
+            <Select value={rerenderChoice} onValueChange={(v) => setRerenderTemplate(v)}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">default{data.template_id ? " (ganti dari current)" : ""}</SelectItem>
+                {promoTemplates.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}{t.id === data.template_id ? " · current" : ""} · {t.format.startsWith("li") ? "LinkedIn" : "IG"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Render sebagai {tplPlatform(rerenderChoice === "none" ? null : rerenderChoice) === "linkedin" ? "PDF LinkedIn" : "carousel IG"}.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={confirmRerender}>
+              <RefreshCw className="size-4" /> {busy ? "rendering…" : "Render ulang & kirim"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setRerenderTemplate(null)}>Batal</Button>
+          </div>
         </CardContent></Card>
       )}
 

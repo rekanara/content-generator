@@ -130,8 +130,10 @@ export const api = {
     req<{ ok: true }>(`${g(slug)}/overrides/${id}`, { method: 'PATCH', body: JSON.stringify({ description }) }),
   regeneratePromo: (slug: string, id: string, template_id?: string | null) =>
     req<{ ok: true; slides: number; templateChanged: boolean }>(`${g(slug)}/promotions/${id}/regenerate`, { method: 'POST', body: JSON.stringify({ template_id: template_id ?? null }) }),
-  rerenderPromo: (slug: string, id: string) =>
-    req<{ ok: true }>(`${g(slug)}/promotions/${id}/rerender`, { method: 'POST' }),
+  // template_id semantics: undefined = keep the promo's current template (plain
+  // re-render); null = switch to the built-in default; 'uuid' = switch to it.
+  rerenderPromo: (slug: string, id: string, template_id?: string | null) =>
+    req<{ ok: true }>(`${g(slug)}/promotions/${id}/rerender`, { method: 'POST', body: JSON.stringify(template_id === undefined ? {} : { template_id }) }),
   starPost: (slug: string, id: string) => req<{ ok: true; starred: boolean }>(`${g(slug)}/posts/${id}/star`, { method: 'POST' }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),
   addStyle: (slug: string, s: { title: string; body: string; platform?: string | null }) =>
