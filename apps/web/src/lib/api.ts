@@ -33,6 +33,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // daemon health (root, unauthed) — powers the header status strip
+  health: () => req<{ ok: boolean; db: boolean; stuck: boolean; queue: { running: boolean; pending: number } }>('/health'),
   // auth
   login: (username: string, password: string) =>
     req<{ ok: true; user: AuthMe }>(`${BASE}/auth/login`, { method: 'POST', body: JSON.stringify({ username, password }) }),

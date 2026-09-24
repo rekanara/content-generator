@@ -76,7 +76,7 @@ export function AppSidebar({
   }
 
   return (
-    <Sidebar variant="inset" {...props}>
+    <Sidebar variant="inset" className="scanline" {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -86,8 +86,8 @@ export function AppSidebar({
                   <CalendarCheckIcon className="size-4" />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">content-gen</span>
-                  <span className="truncate text-xs text-muted-foreground">
+                  <span className="truncate font-semibold tracking-tight">content-gen</span>
+                  <span className="readout truncate text-[0.65rem] uppercase text-muted-foreground">
                     {me.role === "admin" ? "admin" : "user"} · {me.username}
                   </span>
                 </div>

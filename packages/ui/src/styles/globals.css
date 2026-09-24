@@ -1,8 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/space-grotesk";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource-variable/jetbrains-mono";
 
+/*
+  REKANARA CONSOLE — the dashboard wears the same skin as the content it ships:
+  #0A0C10 canvas, engineering grid, mono readouts, #FF5757 as the single hot wire.
+  Dark is the DEFAULT (:root) — this is a control room, not a form. `.light` is a
+  warm-paper variant kept alive for the theme toggle.
+*/
 @custom-variant dark (&:is(.dark *));
 @source "../../../apps/**/*.{ts,tsx}";
 @source "../../../components/**/*.{ts,tsx}";
@@ -10,6 +17,8 @@
 
 @theme inline {
     --font-heading: var(--font-sans);
+    --font-sans: 'Plus Jakarta Sans Variable', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -18,6 +27,10 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    /* console signal colors — live/info/warn read as terminal states, not decoration */
+    --color-live: var(--live);
+    --color-info: var(--info);
+    --color-warn: var(--warn);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -48,88 +61,198 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
-    --font-sans: 'Space Grotesk Variable', sans-serif;
 }
 
-:root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.147 0.004 49.25);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.147 0.004 49.25);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.147 0.004 49.25);
-    --primary: oklch(0.553 0.195 38.402);
-    --primary-foreground: oklch(0.98 0.016 73.684);
-    --secondary: oklch(0.967 0.001 286.375);
-    --secondary-foreground: oklch(0.21 0.006 285.885);
-    --muted: oklch(0.97 0.001 106.424);
-    --muted-foreground: oklch(0.553 0.013 58.071);
-    --accent: oklch(0.97 0.001 106.424);
-    --accent-foreground: oklch(0.216 0.006 56.043);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.923 0.003 48.717);
-    --input: oklch(0.923 0.003 48.717);
-    --ring: oklch(0.709 0.01 56.259);
-    --chart-1: oklch(0.828 0.111 230.318);
-    --chart-2: oklch(0.685 0.169 237.323);
-    --chart-3: oklch(0.588 0.158 241.966);
-    --chart-4: oklch(0.5 0.134 242.749);
-    --chart-5: oklch(0.443 0.11 240.79);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0.001 106.423);
-    --sidebar-foreground: oklch(0.147 0.004 49.25);
-    --sidebar-primary: oklch(0.646 0.222 41.116);
-    --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
-    --sidebar-accent: oklch(0.97 0.001 106.424);
-    --sidebar-accent-foreground: oklch(0.216 0.006 56.043);
-    --sidebar-border: oklch(0.923 0.003 48.717);
-    --sidebar-ring: oklch(0.709 0.01 56.259);
-}
-
+:root,
 .dark {
-    --background: oklch(0.147 0.004 49.25);
-    --foreground: oklch(0.985 0.001 106.423);
-    --card: oklch(0.216 0.006 56.043);
-    --card-foreground: oklch(0.985 0.001 106.423);
-    --popover: oklch(0.216 0.006 56.043);
-    --popover-foreground: oklch(0.985 0.001 106.423);
-    --primary: oklch(0.47 0.157 37.304);
-    --primary-foreground: oklch(0.98 0.016 73.684);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.268 0.007 34.298);
-    --muted-foreground: oklch(0.709 0.01 56.259);
-    --accent: oklch(0.268 0.007 34.298);
-    --accent-foreground: oklch(0.985 0.001 106.423);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.553 0.013 58.071);
-    --chart-1: oklch(0.828 0.111 230.318);
-    --chart-2: oklch(0.685 0.169 237.323);
-    --chart-3: oklch(0.588 0.158 241.966);
-    --chart-4: oklch(0.5 0.134 242.749);
-    --chart-5: oklch(0.443 0.11 240.79);
-    --sidebar: oklch(0.216 0.006 56.043);
-    --sidebar-foreground: oklch(0.985 0.001 106.423);
-    --sidebar-primary: oklch(0.705 0.213 47.604);
-    --sidebar-primary-foreground: oklch(0.98 0.016 73.684);
-    --sidebar-accent: oklch(0.268 0.007 34.298);
-    --sidebar-accent-foreground: oklch(0.985 0.001 106.423);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.553 0.013 58.071);
+    --background: #0a0c10;
+    --foreground: #f5f6f8;
+    --card: #10141b;
+    --card-foreground: #f5f6f8;
+    --popover: #141924;
+    --popover-foreground: #f5f6f8;
+    --primary: #ff5757;
+    --primary-foreground: #1a0708;
+    --secondary: #1a1f29;
+    --secondary-foreground: #e8eaef;
+    --muted: #151a22;
+    --muted-foreground: #8b93a3;
+    --accent: #1c2431;
+    --accent-foreground: #f5f6f8;
+    --destructive: #ff6b6b;
+    --border: rgba(255, 255, 255, 0.09);
+    --input: rgba(255, 255, 255, 0.13);
+    --ring: rgba(255, 87, 87, 0.5);
+    --live: #4ade80;
+    --info: #7dd3fc;
+    --warn: #febc2e;
+    --chart-1: #ff5757;
+    --chart-2: #4ade80;
+    --chart-3: #7dd3fc;
+    --chart-4: #febc2e;
+    --chart-5: #8b93a3;
+    --radius: 0.5rem;
+    --sidebar: #07090c;
+    --sidebar-foreground: #b7bdca;
+    --sidebar-primary: #ff5757;
+    --sidebar-primary-foreground: #1a0708;
+    --sidebar-accent: #161c26;
+    --sidebar-accent-foreground: #f5f6f8;
+    --sidebar-border: rgba(255, 255, 255, 0.07);
+    --sidebar-ring: rgba(255, 87, 87, 0.5);
+}
+
+.light {
+    --background: #f4f2ed;
+    --foreground: #16181d;
+    --card: #fbfaf7;
+    --card-foreground: #16181d;
+    --popover: #ffffff;
+    --popover-foreground: #16181d;
+    --primary: #e0342a;
+    --primary-foreground: #fff6f4;
+    --secondary: #e9e5dd;
+    --secondary-foreground: #26282e;
+    --muted: #ebe8e1;
+    --muted-foreground: #6b6f76;
+    --accent: #e3ded4;
+    --accent-foreground: #16181d;
+    --destructive: #d92c20;
+    --border: rgba(22, 24, 29, 0.14);
+    --input: rgba(22, 24, 29, 0.18);
+    --ring: rgba(224, 52, 42, 0.4);
+    --live: #1a9e4b;
+    --info: #0e7490;
+    --warn: #b07708;
+    --chart-1: #e0342a;
+    --chart-2: #1a9e4b;
+    --chart-3: #0e7490;
+    --chart-4: #b07708;
+    --chart-5: #6b6f76;
+    --sidebar: #edeae2;
+    --sidebar-foreground: #3e424b;
+    --sidebar-primary: #e0342a;
+    --sidebar-primary-foreground: #fff6f4;
+    --sidebar-accent: #e3ded4;
+    --sidebar-accent-foreground: #16181d;
+    --sidebar-border: rgba(22, 24, 29, 0.1);
+    --sidebar-ring: rgba(224, 52, 42, 0.4);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
+  }
   body {
     @apply bg-background text-foreground;
-    }
+    font-feature-settings: "ss01" on;
+  }
   button:not(:disabled), [role="button"]:not(:disabled) {
     cursor: pointer;
-    }
+  }
+}
+
+/* ——— engineering grid atmosphere ———
+   Same 54px grid the post templates use, at whisper opacity, fading out toward
+   the lower half so dense content stays clean. Sits above the canvas color and
+   below all content (negative z). */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1000;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 54px 54px;
+  -webkit-mask-image: radial-gradient(ellipse 130% 90% at 50% 0%, black 25%, transparent 78%);
+  mask-image: radial-gradient(ellipse 130% 90% at 50% 0%, black 25%, transparent 78%);
+}
+.light body::before {
+  background-image:
+    linear-gradient(to right, rgba(22, 24, 29, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(22, 24, 29, 0.045) 1px, transparent 1px);
+}
+
+/* ——— panel corner ticks (blueprint brackets) ———
+   4 corner "L" marks drawn with 8 background strokes, inset 5px. Applied by the
+   Card component — every panel in the app gets them for free. */
+.ticks {
+  --tick-color: rgba(255, 255, 255, 0.26);
+  --tick-len: 12px;
+  --tick-w: 1px;
+  --tick-inset: 5px;
+  background-image:
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color)),
+    linear-gradient(var(--tick-color), var(--tick-color));
+  background-size:
+    var(--tick-w) var(--tick-len), var(--tick-len) var(--tick-w),
+    var(--tick-w) var(--tick-len), var(--tick-len) var(--tick-w),
+    var(--tick-w) var(--tick-len), var(--tick-len) var(--tick-w),
+    var(--tick-w) var(--tick-len), var(--tick-len) var(--tick-w);
+  background-position:
+    left var(--tick-inset) top var(--tick-inset), left var(--tick-inset) top var(--tick-inset),
+    right var(--tick-inset) top var(--tick-inset), right var(--tick-inset) top var(--tick-inset),
+    left var(--tick-inset) bottom var(--tick-inset), left var(--tick-inset) bottom var(--tick-inset),
+    right var(--tick-inset) bottom var(--tick-inset), right var(--tick-inset) bottom var(--tick-inset);
+  background-repeat: no-repeat;
+}
+.light .ticks {
+  --tick-color: rgba(22, 24, 29, 0.3);
+}
+
+/* ——— CRT scanline (sidebar chrome) ———
+   Barely-there horizontal lines — texture, not decoration. */
+.scanline {
+  position: relative;
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 3px,
+    rgba(255, 255, 255, 0.014) 3px 4px
+  );
+}
+
+/* ——— data readouts ———
+   Numbers, statuses, ids: mono + tabular so digits align and states read as
+   machine output. */
+.readout {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+}
+
+/* ——— status LED (daemon strip) ——— */
+.led {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--live);
+  animation: led-pulse 2.4s ease-out infinite;
+}
+.led-live { background: var(--live); }
+.led-busy { background: var(--warn); animation-duration: 1.2s; }
+.led-down { background: var(--destructive); animation: none; }
+@keyframes led-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--live) 55%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.led-busy {
+  --live: var(--warn);
 }
 
 .input {

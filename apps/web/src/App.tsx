@@ -19,6 +19,7 @@ import { UsageView } from "@/views/usage.tsx"
 import { ResetPasswordView } from "@/views/reset-password.tsx"
 import { api } from "@/lib/api"
 import { parseRoute, navigate } from "@/lib/router"
+import { DaemonStrip } from "@/components/daemon-strip.tsx"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@workspace/ui/components/sidebar"
 import { Separator } from "@workspace/ui/components/separator"
 import { TooltipProvider } from "@workspace/ui/components/tooltip"
@@ -66,7 +67,7 @@ export function App() {
   if (me === null) return null
   if (me === false) {
     return (
-      <ThemeProvider>
+      <ThemeProvider defaultTheme="dark">
         <div className="min-h-svh bg-background text-foreground">
           {route.name === "login" ? <LoginView onLogin={(u: AuthMe) => setMe(u)} /> : null}
         </div>
@@ -83,7 +84,7 @@ export function App() {
   const view = viewOf(route)
 
   return (
-    <ThemeProvider>
+    <ThemeProvider defaultTheme="dark">
       <TooltipProvider>
         <SidebarProvider>
           <AppSidebar
@@ -96,7 +97,10 @@ export function App() {
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="mr-1 !h-4" />
-            <span className="truncate text-sm font-medium text-muted-foreground">{view}</span>
+            <span className="readout truncate text-xs uppercase tracking-widest text-muted-foreground">{view}</span>
+            <div className="ml-auto flex items-center gap-3">
+              <DaemonStrip />
+            </div>
           </header>
           {/* editor pages (template/post detail) get the extra width for side-by-side preview */}
           <main className="min-w-0 flex-1 overflow-x-clip p-4 md:p-6">

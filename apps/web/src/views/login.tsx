@@ -26,11 +26,18 @@ export function LoginView({ onLogin }: { onLogin: (u: AuthMe) => void }) {
   }
 
   return (
-    <div className="flex min-h-svh items-center justify-center p-4">
+    <div className="flex min-h-svh flex-col items-center justify-center gap-6 p-4">
+      <p className="readout text-xs text-muted-foreground">
+        <span className="text-muted-foreground/60">$</span> content-generator{" "}
+        <span className="text-primary">--login</span>
+        <span className="ml-1 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-primary" />
+      </p>
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in</CardTitle>
-          <CardDescription>content-generator</CardDescription>
+          <CardTitle className="text-base font-semibold tracking-tight">Sign in</CardTitle>
+          <CardDescription className="readout text-[0.65rem] uppercase tracking-widest">
+            rekanara console
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <form className="space-y-3" onSubmit={submit}>
