@@ -4,7 +4,7 @@ import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
-import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, type CaptionOut } from './schema.ts';
+import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, type CaptionOut } from './schema.ts';
 import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
 import { ideationPrompt, writerPrompt, criticPrompt } from './prompts.ts';
 import type { StyleSample, PillarFull } from './prompts.ts';
@@ -13,6 +13,10 @@ import type { GroupCfg } from './groups.ts';
 
 export type Draft = CarouselOut | ReelsOut | TextOut;
 export type RunResult = { postId: string; slot: Slot; topic: string; draft: Draft };
+
+// Critic quality gate: a scored revision below this triggers ONE writer retry
+// (with the critique as feedback). 7 = "solid publish" per the critic contract.
+const CRITIC_THRESHOLD = 7;
 
 // Per-step usage with the model + snapshot cost (llm-costs catalog) — stored in posts.llm_usage.
 type UsageAcc = Record<string, StepUsage>;
@@ -123,31 +127,54 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   addUsage(usage, 'writer', writerModel(cfg), w.usage);
   console.log(`[writer] ok format=${slot.format} tokens=${w.usage.completion}`);
 
-  // 3. critic (separate model) — same guard, structure must stay intact
-  const c = await chatJson(
-    cfg,
-    criticModel(cfg),
-    criticPrompt(slot.platform, slot.format, w.data),
-    writerGuard(slot.format) as (x: unknown) => x is Draft,
-    8000,
-  );
+  // 3. critic (separate model) — same guard, structure must stay intact.
+  //    Quality gate: the critic scores its own revision 0-10; below threshold → ONE
+  //    writer retry with the critique as feedback, then critic again. The better-
+  //    scoring draft wins. Score absent (old-shape critic output) → gate off, ship.
+  const runWriter = async (feedback?: string) =>
+    chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, id.data.topic, id.data.angle, effPillar.name, samples, feedback),
+      writerGuard(slot.format) as (x: unknown) => x is Draft, 8000);
+  const runCritic = async (d: Draft) =>
+    chatJson(cfg, criticModel(cfg), criticPrompt(slot.platform, slot.format, d),
+      writerGuard(slot.format) as (x: unknown) => x is Draft, 8000);
+
+  const c = await runCritic(w.data);
   addUsage(usage, 'critic', criticModel(cfg), c.usage);
-  // tolerant-caption normalization: a string caption (old shape) → structured form
-  if ('caption' in (c.data as Record<string, unknown>)) {
-    (c.data as { caption: CaptionOut }).caption = toCaptionOut((c.data as { caption: unknown }).caption);
+  let final = c.data;
+  let finalScore = criticScore(final);
+  if (finalScore !== null && finalScore < CRITIC_THRESHOLD) {
+    console.log(`[critic] score ${finalScore} < ${CRITIC_THRESHOLD} — one regeneration`);
+    const w2 = await runWriter(criticFeedback(final, finalScore));
+    addUsage(usage, 'writer', writerModel(cfg), w2.usage);
+    const c2 = await runCritic(w2.data);
+    addUsage(usage, 'critic', criticModel(cfg), c2.usage);
+    const score2 = criticScore(c2.data);
+    if (score2 === null || score2 > finalScore) {
+      final = c2.data;
+      finalScore = score2;
+      console.log(`[critic] retry won (score ${score2 ?? 'n/a'})`);
+    } else {
+      console.log(`[critic] original kept (score ${finalScore} >= retry ${score2})`);
+    }
   }
-  console.log(`[critic] ok tokens=${c.usage.completion}`);
+  if (finalScore !== null) console.log(`[critic] ok score=${finalScore} tokens=${c.usage.completion}`);
+  else console.log(`[critic] ok (no score) tokens=${c.usage.completion}`);
+  final = stripCriticMeta(final);
+  // tolerant-caption normalization: a string caption (old shape) → structured form
+  if ('caption' in (final as Record<string, unknown>)) {
+    (final as { caption: CaptionOut }).caption = toCaptionOut((final as { caption: unknown }).caption);
+  }
 
   // 4. persist post (status draft)
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${id.data.topic},
-      ${captionOf(c.data, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(c.data)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
+      ${captionOf(final, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
-  return { postId: post.id, slot, topic: id.data.topic, draft: c.data };
+  return { postId: post.id, slot, topic: id.data.topic, draft: final };
 }
 
 // Structured caption + group footer → final string, stored in posts.caption at

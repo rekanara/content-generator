@@ -68,6 +68,7 @@ export function writerPrompt(
   angle: string,
   pillarName: string,
   samples: StyleSample[],
+  feedback?: string,
 ): Msg[] {
   const plat =
     platform === 'instagram'
@@ -97,7 +98,7 @@ JSON: {"body": string}`,
       content: `Topic: ${topic}
 Angle: ${angle}
 Pillar: ${pillarName}
-
+${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
 Format:
 ${fmt}
 
@@ -139,7 +140,8 @@ export function criticPrompt(
 Draft:
 ${back(format)}
 
-Return JSON with the EXACT same structure (keys and slide/scene counts may change if it improves the result), final revised version ready to publish.`,
+Return JSON with the EXACT same structure (keys and slide/scene counts may change if it improves the result), final revised version ready to publish.
+Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid publish, below 7 = still weak) and "notes" (one short sentence, the weakest aspect of the ORIGINAL draft).`,
     },
   ];
 }

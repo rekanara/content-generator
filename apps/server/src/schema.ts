@@ -83,6 +83,33 @@ export function writerGuardName(format: Format): string {
   return 'CarouselOut';
 }
 
+// ——— critic scoring gate (pure) ———
+// The critic appends "score" (0-10) + "notes" to its revised draft. Guards already
+// tolerate extra keys; these helpers read/strip the meta without touching the draft.
+// score null (key absent / non-numeric) → gate is OFF for that response (fail-open:
+// a scoring hiccup must never block shipping).
+export function criticScore(draft: unknown): number | null {
+  if (!obj(draft)) return null;
+  const s = (draft as Record<string, unknown>).score;
+  if (typeof s !== 'number' || !Number.isFinite(s)) return null;
+  return Math.max(0, Math.min(10, Math.round(s)));
+}
+
+// Remove critic meta keys so the persisted body JSON stays the clean draft shape.
+export function stripCriticMeta<T extends object>(draft: T): T {
+  const d = { ...draft };
+  delete (d as Record<string, unknown>).score;
+  delete (d as Record<string, unknown>).notes;
+  return d;
+}
+
+// Editor feedback line for the retry writer call — notes preferred, score as fallback.
+export function criticFeedback(draft: unknown, score: number): string {
+  const notes = obj(draft) ? (draft as Record<string, unknown>).notes : undefined;
+  const n = typeof notes === 'string' && notes.trim() ? notes.trim() : 'the editor found it below publish quality';
+  return `Editor rejected the previous attempt (score ${score}/10): ${n}`;
+}
+
 // ——— AI planner output ———
 export type PlannerProposal = {
   for_date: string;          // YYYY-MM-DD
