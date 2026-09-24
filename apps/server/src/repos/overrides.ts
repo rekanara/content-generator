@@ -56,6 +56,14 @@ export async function updateOverrideImages(id: string, images: string[]): Promis
   await sql`update overrides set images = ${JSON.stringify(images)}::jsonb where id = ${id}`;
 }
 
+// Description edit (polish-accept flow). Scheduled only — a sent override's
+// text must keep matching what actually shipped.
+export async function updateOverrideDescription(groupId: string, id: string, description: string): Promise<boolean> {
+  const r = await sql`update overrides set description = ${description}
+    where id = ${id} and group_id = ${groupId} and status = 'scheduled' returning id`;
+  return r.length > 0;
+}
+
 export async function markOverrideSent(id: string): Promise<void> {
   await sql`update overrides set status = 'sent', sent_at = now() where id = ${id} and status = 'scheduled'`;
 }

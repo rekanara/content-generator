@@ -68,6 +68,15 @@ export async function setContent(id: string, slides: PromoSlide[]): Promise<void
     where id = ${id}`;
 }
 
+// Regen variant: replaces the slides AND pins a (possibly different) template —
+// the AI re-writes against the new template's CSS vocabulary. Image slots
+// recompute from the new content; uploaded images at surviving indices persist.
+export async function setContentWithTemplate(id: string, slides: PromoSlide[], templateId: string | null): Promise<void> {
+  await sql`update promotions set content = ${JSON.stringify(slides)}::jsonb, template_id = ${templateId},
+    status = case when ${JSON.stringify(slides)}::jsonb::text like '%{{image}}%' then 'awaiting_images' else 'ready' end
+    where id = ${id}`;
+}
+
 export async function markPromotionSent(id: string): Promise<void> {
   await sql`update promotions set status = 'sent', sent_at = now() where id = ${id}`;
 }

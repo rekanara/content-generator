@@ -1,4 +1,4 @@
-import { Check, Lightbulb, RefreshCw, Send, Star, Trash2, X } from "lucide-react"
+import { Check, Lightbulb, RefreshCw, RotateCcw, Star, Trash2, X } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
@@ -94,8 +94,15 @@ export function PostsView({ slug }: { slug: string }) {
             )}
             <span className="hidden w-24 shrink-0 text-xs text-muted-foreground md:inline">{p.platform}/{p.format}</span>
             {p.status === "failed" && (
-              <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(slug, p.id).then(reload)}>
-                <Send className="size-4" />
+              <Button variant="ghost" size="icon" aria-label="regenerate" title="Regenerate — fresh draft, rotation-safe"
+                onClick={() => api.regenPost(slug, p.id).then(reload)}>
+                <RotateCcw className="size-4" />
+              </Button>
+            )}
+            {(p.status === "rejected" || p.status === "awaiting_approval") && (
+              <Button variant="ghost" size="icon" aria-label="regenerate" title="Regenerate — reject + fresh draft, rotation-safe"
+                onClick={() => api.regenPost(slug, p.id).then(reload)}>
+                <RotateCcw className="size-4" />
               </Button>
             )}
             {["sent", "awaiting_approval", "rendered"].includes(p.status) && p.format !== "text" && (

@@ -28,7 +28,8 @@ type Job =
   | { kind: 'approve'; slug: string; postId: string }
   | { kind: 'rerender'; slug: string; postId: string }
   | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean }
-  | { kind: 'promoSend'; slug: string; promoId: string; platform: 'instagram' | 'linkedin' };
+  | { kind: 'promoSend'; slug: string; promoId: string; platform: 'instagram' | 'linkedin' }
+  | { kind: 'overrideSend'; slug: string; overrideId: string };
 
 const jobs: Job[] = [];
 let running = false;
@@ -66,6 +67,7 @@ async function drain(): Promise<void> {
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
         else if (job.kind === 'promoSend') await runPromoSend(cfg, job.promoId, job.platform);
+        else if (job.kind === 'overrideSend') await runOverrideSend(cfg, job.overrideId);
         else await runResend(cfg, job.postId);
         endRun();
   } catch (e) {
@@ -73,8 +75,9 @@ async function drain(): Promise<void> {
     endRun(msg);
     console.error(`[queue] job failed (${job.slug}): ${msg}`);
     try {
-      // generate failures with a post row are evented in runGenerate; here only resend/approve/rerender (id always known)
-      if (cfg && job.kind !== 'generate' && job.kind !== 'promoSend') await addEvent(job.postId, cfg.id, 'failed', msg);
+      // generate failures with a post row are evented in runGenerate; here only post-id jobs
+      // (resend/approve/rerender — id always known). promoSend/overrideSend have no post row.
+      if (cfg && 'postId' in job) await addEvent(job.postId, cfg.id, 'failed', msg);
     } catch { /* event write must never break the queue */ }
   }
       lastActivity = Date.now();
@@ -599,4 +602,14 @@ async function runPromoSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoI
     await sendMessage(cfg, `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`).catch(() => {});
     throw e;
   }
+}
+
+// Re-deliver a SENT override (same content, same images) — resend semantics:
+// rotation was never involved (overrides don't consume it), status stays 'sent'.
+async function runOverrideSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, overrideId: string): Promise<void> {
+  const ov = await getOverride(cfg.id, overrideId);
+  if (!ov || ov.status !== 'sent') throw new Error(`override ${overrideId} is not in a re-deliverable state`);
+  runStage('deliver', `override "${ov.name.slice(0, 40)}"`);
+  await deliverOverride(cfg, ov);
+  console.log(`[queue] override "${ov.name}" re-delivered (${cfg.slug})`);
 }

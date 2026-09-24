@@ -120,8 +120,18 @@ export const api = {
   delPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}`, { method: 'DELETE' }),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
+  regenPost: (slug: string, id: string) =>
+    req<{ ok: true }>(`${g(slug)}/posts/${id}/regenerate`, { method: 'POST' }),
   polishOverride: (slug: string, d: { name: string; type: string; description: string }) =>
     req<{ polished: string }>(`${g(slug)}/overrides/polish`, { method: 'POST', body: JSON.stringify(d) }),
+  resendOverride: (slug: string, id: string) =>
+    req<{ ok: true }>(`${g(slug)}/overrides/${id}/resend`, { method: 'POST' }),
+  patchOverrideDescription: (slug: string, id: string, description: string) =>
+    req<{ ok: true }>(`${g(slug)}/overrides/${id}`, { method: 'PATCH', body: JSON.stringify({ description }) }),
+  regeneratePromo: (slug: string, id: string, template_id?: string | null) =>
+    req<{ ok: true; slides: number; templateChanged: boolean }>(`${g(slug)}/promotions/${id}/regenerate`, { method: 'POST', body: JSON.stringify({ template_id: template_id ?? null }) }),
+  rerenderPromo: (slug: string, id: string) =>
+    req<{ ok: true }>(`${g(slug)}/promotions/${id}/rerender`, { method: 'POST' }),
   starPost: (slug: string, id: string) => req<{ ok: true; starred: boolean }>(`${g(slug)}/posts/${id}/star`, { method: 'POST' }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),
   addStyle: (slug: string, s: { title: string; body: string; platform?: string | null }) =>

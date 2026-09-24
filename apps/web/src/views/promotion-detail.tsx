@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeft, CalendarClock, Check, Send, Sparkles, Trash2, Upload } from "lucide-react"
+import { ArrowLeft, CalendarClock, Check, RefreshCw, RotateCcw, Send, Sparkles, Trash2, Upload } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
+import { Label } from "@workspace/ui/components/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@workspace/ui/components/select"
 import { api, ApiError } from "@/lib/api"
-import { usePromotion } from "@/lib/hooks"
+import { usePromotion, useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 
 const STATUS_BADGE: Record<string, string> = {
@@ -26,6 +28,8 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
   const fileInputs = useRef<Record<number, HTMLInputElement | null>>({})
   const [slots, setSlots] = useState<SlotStatus[] | null>(null)
   const [uploadingSlide, setUploadingSlide] = useState<number | null>(null)
+  const { data: templates } = useTemplates(slug)
+  const [regenTemplate, setRegenTemplate] = useState<string | null>(null) // null = closed
 
   const refreshSlots = useCallback(() => {
     if (!data?.content) { setSlots(null); return }
@@ -60,6 +64,14 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
   if (error) return <p className="text-destructive text-sm">{error}</p>
   if (!data) return null
 
+  const promoTemplates = (templates ?? []).filter((t) => t.format.endsWith("-promo"))
+  const regenChoice = regenTemplate ?? data.template_id ?? "none"
+
+  const confirmRegen = () => act(
+    () => api.regeneratePromo(slug, id, regenChoice === "none" ? null : regenChoice),
+    "regenerate",
+  ).then(() => setRegenTemplate(null))
+
   return (
     <div className="space-y-4">
       <section className="flex flex-wrap items-center gap-2">
@@ -93,6 +105,20 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           <Sparkles className="size-4" /> {data.content ? "content ready" : busy ? "generating…" : "Generate content (AI)"}
         </Button>
         {data.content && data.status !== "sent" && (
+          <Button size="sm" variant="outline" disabled={busy}
+            title="AI menulis ulang slide dari data yang sama — template bisa diganti"
+            onClick={() => setRegenTemplate(regenTemplate === null ? (data.template_id ?? "none") : null)}>
+            <RotateCcw className="size-4" /> {regenTemplate !== null ? "Batal" : "Re-generate"}
+          </Button>
+        )}
+        {data.status === "sent" && (
+          <Button size="sm" variant="outline" disabled={busy}
+            title="Render ulang dengan template terkini (edits template masuk) + kirim lagi"
+            onClick={() => act(() => api.rerenderPromo(slug, id), "rerender")}>
+            <RefreshCw className="size-4" /> Re-render & resend
+          </Button>
+        )}
+        {data.content && data.status !== "sent" && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.sendPromotion(slug, id), "send")}>
             <Send className="size-4" /> Send now
           </Button>
@@ -106,6 +132,40 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           </div>
         )}
       </section>
+
+      {regenTemplate !== null && (
+        <Card><CardContent className="space-y-3 p-4">
+          <div>
+            <p className="text-sm font-medium">Re-generate content</p>
+            <p className="text-xs text-muted-foreground">
+              Data promo tetap (name / features / price) — AI menulis ulang slidanya. Pilih template: sama seperti sekarang, atau ganti.
+            </p>
+          </div>
+          <div className="max-w-xs space-y-1.5">
+            <Label>Template</Label>
+            <Select value={regenChoice} onValueChange={(v) => setRegenTemplate(v)}>
+              <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">default{data.template_id ? " (ganti dari current)" : ""}</SelectItem>
+                {promoTemplates.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    {t.name}{t.id === data.template_id ? " · current" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={busy} onClick={confirmRegen}>
+              <RotateCcw className="size-4" /> {busy ? "regenerating…" : "Generate ulang"}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setRegenTemplate(null)}>Batal</Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Catatan: slide baru = slot gambar baru — gambar yang sudah diupload dipakai ulang kalau indeks slotnya sama.
+          </p>
+        </CardContent></Card>
+      )}
 
       {data.content && (
         <Card><CardContent className="space-y-2 p-4">

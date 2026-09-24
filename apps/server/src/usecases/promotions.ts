@@ -2,7 +2,7 @@
 import { chatJson, writerModel } from '../llm.ts';
 import { isPromoContentOut, isPromoBriefOut, type PromoContentOut, type PromoBriefOut } from '../schema.ts';
 import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts.ts';
-import { getPromotion, setContent, imageSlots, markPromotionSent } from '../repos/promotions.ts';
+import { getPromotion, setContent, setContentWithTemplate, imageSlots, markPromotionSent } from '../repos/promotions.ts';
 import { getTemplate } from '../repos/templates.ts';
 import { cssVocabOf, renderPromotion } from '../render/promotion.ts';
 import { artifactExists, uploadPromotionImage } from '../storage.ts';
@@ -34,6 +34,38 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
 export async function draftPromotionFromBrief(cfg: GroupCfg, brief: string): Promise<PromoBriefOut> {
   const out = await chatJson<PromoBriefOut>(cfg, writerModel(cfg), promoBriefPrompt(brief), isPromoBriefOut, 3000);
   return out.data;
+}
+
+// Re-generate the slides of an EXISTING promo — same data source (name/features/
+// stack/price are the human's truth), fresh AI slides. Optionally switches the
+// template first (the AI writes against the new template's CSS vocabulary).
+// Refuses promos already sent: a re-gen would make storage lie about what shipped
+// (re-render is the honest tool there).
+export async function regeneratePromotionContent(
+  cfg: GroupCfg,
+  promoId: string,
+  templateId?: string | null,
+): Promise<{ slides: number; imageSlots: { slide: number; prompt: string }[]; templateChanged: boolean }> {
+  const promo = await getPromotion(cfg.id, promoId);
+  if (!promo) throw new Error(`promotion ${promoId} not found`);
+  if (promo.status === 'sent') throw new Error('already sent — re-render (resend with current template) instead');
+  const chosenId = templateId !== undefined ? templateId : promo.template_id;
+  const tpl = chosenId ? await getTemplate(cfg.id, chosenId) : null;
+  if (chosenId && !tpl) throw new Error(`template ${chosenId} not found`);
+  if (tpl && !tpl.format.endsWith('-promo')) throw new Error(`template ${tpl.name} is ${tpl.format} — regeneration needs a promo template`);
+  const cssVocab = cssVocabOf(tpl?.html ?? '');
+  const data: PromoData = {
+    name: promo.name, topic: promo.topic, features: promo.features, stacks: promo.stacks,
+    stats: promo.stats, price: promo.price, price_sale: promo.price_sale,
+  };
+  const out = await chatJson<PromoContentOut>(
+    cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
+  );
+  const slides = out.data.slides.map((s) => ({ html: s.html, image_prompt: s.image_prompt ?? '' }));
+  await setContentWithTemplate(promoId, slides, chosenId);
+  const templateChanged = (chosenId ?? null) !== (promo.template_id ?? null);
+  console.log(`[promo] #${promoId} content re-generated — ${slides.length} slides (template ${templateChanged ? 'switched' : 'kept'})`);
+  return { slides: slides.length, imageSlots: imageSlots({ ...promo, content: slides }), templateChanged };
 }
 
 // After content generation: tell Telegram which images are needed (or that none are).

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Ban, Check, Plus, Sparkles, Trash2, X } from "lucide-react"
+import { Ban, Check, Plus, Send, Sparkles, Trash2, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -41,6 +41,7 @@ export function OverridesView({ slug }: { slug: string }) {
   const [busy, setBusy] = useState(false)
   const [polishing, setPolishing] = useState(false)
   const [preview, setPreview] = useState<string | null>(null) // AI-polished text awaiting accept/keep
+  const [rowPolish, setRowPolish] = useState<{ id: string; name: string; type: OverrideType; description: string } | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
 
   const polish = async () => {
@@ -59,6 +60,35 @@ export function OverridesView({ slug }: { slug: string }) {
   const acceptPreview = () => {
     if (preview) setForm((f) => ({ ...f, description: preview }))
     setPreview(null)
+  }
+
+  // polish an EXISTING scheduled override — same preview pattern, accept → PATCH
+  const polishRow = async (o: { id: string; name: string; type: OverrideType; description: string }) => {
+    setRowPolish(o); setPreview(null); setMsg(null)
+    setPolishing(true)
+    try {
+      const r = await api.polishOverride(slug, { name: o.name, type: o.type, description: o.description })
+      setPreview(r.polished)
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : "polish failed")
+      setRowPolish(null)
+    } finally {
+      setPolishing(false)
+    }
+  }
+
+  const acceptRowPolish = async () => {
+    if (!rowPolish || !preview) return
+    setBusy(true)
+    try {
+      await api.patchOverrideDescription(slug, rowPolish.id, preview)
+      setRowPolish(null); setPreview(null)
+      reload()
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : "failed to save polished text")
+    } finally {
+      setBusy(false)
+    }
   }
 
   const submit = async (e: React.FormEvent) => {
@@ -97,6 +127,29 @@ export function OverridesView({ slug }: { slug: string }) {
         Replaces the automatic pipeline for a date — generate is cancelled, this content is sent instead. Rotation unchanged.
       </p>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
+
+      {rowPolish && (
+        <Card><CardContent className="space-y-2 p-4">
+          <p className="readout text-[0.65rem] uppercase tracking-widest text-amber-400">
+            AI polish — {rowPolish.name}
+          </p>
+          {polishing ? (
+            <p className="text-sm text-muted-foreground">polishing…</p>
+          ) : preview && (
+            <>
+              <p className="whitespace-pre-wrap break-words text-sm">{preview}</p>
+              <div className="flex gap-2">
+                <Button size="sm" disabled={busy} onClick={acceptRowPolish}>
+                  <Check className="size-3.5" /> Pakai ini
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => { setRowPolish(null); setPreview(null) }}>
+                  <X className="size-3.5" /> Pertahankan punyaku
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent></Card>
+      )}
 
       <Card>
         <CardContent className="p-4">
@@ -210,6 +263,18 @@ export function OverridesView({ slug }: { slug: string }) {
                 ))}
                 {o.images.length > 4 && <span className="self-center text-xs text-muted-foreground">+{o.images.length - 4}</span>}
               </div>
+            )}
+            {o.status === "scheduled" && o.description && (
+              <Button variant="ghost" size="icon" aria-label="polish" title="AI polish description — preview dulu, kamu yang pilih"
+                disabled={polishing || !!rowPolish} onClick={() => polishRow(o)}>
+                <Sparkles className="size-4 text-amber-400" />
+              </Button>
+            )}
+            {o.status === "sent" && (
+              <Button variant="ghost" size="icon" aria-label="resend" title="Kirim ulang konten yang sama ke Telegram"
+                onClick={() => api.resendOverride(slug, o.id).then(() => setMsg("resend queued")).catch(() => setMsg("resend failed"))}>
+                <Send className="size-4" />
+              </Button>
             )}
             {o.status === "scheduled" && (
               <Button variant="ghost" size="icon" aria-label="cancel" title="Cancel — frees the date for normal generation"

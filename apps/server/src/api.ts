@@ -31,10 +31,10 @@ import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
-import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages } from './repos/overrides.ts';
+import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion } from './repos/promotions.ts';
-import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus } from './usecases/promotions.ts';
+import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
@@ -376,6 +376,26 @@ g.post('/:slug/posts/:id/star', async (c) => {
   return c.json({ ok: true, starred });
 });
 
+// regenerate — same contract as the Telegram Regenerate button: awaiting posts
+// are rejected first (instant, rotation-safe), then a fresh generate run starts
+// (plan-aware: a plan owning today overrides the natural slot as usual).
+g.post('/:slug/posts/:id/regenerate', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const post = await getPost(gr(c).id, id);
+  if (!post) return c.json({ error: 'post not found' }, 404);
+  if (!['awaiting_approval', 'rejected', 'failed'].includes(post.status)) {
+    return c.json({ error: `post status ${post.status} — regenerate works on awaiting/rejected/failed` }, 400);
+  }
+  if (post.status === 'awaiting_approval') {
+    const ok = await rejectPost(gr(c).id, id);
+    if (!ok) return c.json({ error: 'post left awaiting concurrently' }, 409);
+    await addEvent(id, gr(c).id, 'rejected', 'regenerate via FE').catch(() => {});
+  }
+  enqueue({ kind: 'generate', slug: gr(c).slug, notifyChat: true, source: 'regen' });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
 // ---------- calendar preview ----------
 g.get('/:slug/calendar', async (c) => {
   const group = gr(c);
@@ -570,6 +590,33 @@ g.post('/:slug/overrides', async (c) => {
   }
 });
 
+// re-deliver a SENT override — same content, same images. Rotation was never
+// consumed by overrides, so this is a pure resend (status stays 'sent').
+g.post('/:slug/overrides/:id/resend', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ov = await getOverride(gr(c).id, id);
+  if (!ov) return c.json({ error: 'override not found' }, 404);
+  if (ov.status !== 'sent') return c.json({ error: `status ${ov.status} — resend re-delivers a SENT override` }, 400);
+  enqueue({ kind: 'overrideSend', slug: gr(c).slug, overrideId: id });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+// description edit (polish-accept flow) — scheduled only: a sent override's
+// text must keep matching what actually shipped.
+g.patch('/:slug/overrides/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = z.object({ description: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ov = await getOverride(gr(c).id, id);
+  if (!ov) return c.json({ error: 'override not found' }, 404);
+  if (ov.status !== 'scheduled') return c.json({ error: `status ${ov.status} — only scheduled overrides can be edited` }, 400);
+  const ok = await updateOverrideDescription(gr(c).id, id, parsed.data.description);
+  if (!ok) return c.json({ error: 'override not found' }, 404);
+  return c.json({ ok: true });
+});
+
 // ---------- plans (date-scoped source of truth) ----------
 g.get('/:slug/plans', async (c) => c.json(await listPlans(gr(c).id)));
 
@@ -749,6 +796,40 @@ g.post('/:slug/promotions/:id/generate-content', async (c) => {
   } catch (e) {
     return c.json({ error: `content generation failed: ${(e as Error).message}` }, 502);
   }
+});
+
+// re-generate slides — same data, fresh AI content. Optional template switch:
+// body { template_id?: string | null } — null/absent keeps the current template.
+g.post('/:slug/promotions/:id/regenerate', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const body = await c.req.json().catch(() => ({}));
+  const templateId = (body as { template_id?: string | null }).template_id ?? undefined;
+  if (templateId !== undefined && templateId !== null && !isUuid(templateId)) {
+    return c.json({ error: 'invalid template_id' }, 400);
+  }
+  try {
+    const r = await regeneratePromotionContent(await getGroupCfg(gr(c).slug), id, templateId);
+    await notifyImageSlots(await getGroupCfg(gr(c).slug), id);
+    return c.json({ ok: true, ...r });
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 400);
+  }
+});
+
+// re-render + resend a SENT promo with the current template row (template edits
+// come through — same content). Non-sent promos render at send time already.
+g.post('/:slug/promotions/:id/rerender', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const p = await getPromotion(gr(c).id, id);
+  if (!p) return c.json({ error: 'promotion not found' }, 404);
+  if (p.status !== 'sent') return c.json({ error: `status ${p.status} — rerender resends a SENT promo (template edits apply)` }, 400);
+  if (!p.content) return c.json({ error: 'no content' }, 400);
+  const tpl = p.template_id ? await getTemplate(gr(c).id, p.template_id) : null;
+  const platform = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+  enqueue({ kind: 'promoSend', slug: gr(c).slug, promoId: id, platform });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
 // upload image for a slide slot (multipart: slide + file)
