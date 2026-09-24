@@ -159,6 +159,7 @@ export const PostSummary = z.object({
   source: z.string(),
   created_at: z.string(),
   pillar_id: z.string().uuid().nullable(),
+  starred: z.boolean().default(false),
 });
 export type PostSummary = z.infer<typeof PostSummary>;
 

@@ -170,7 +170,7 @@ export type PlannerRun = {
 };
 export type PlannerTemplate = { id: string; name: string; type: string; format: string };
 
-export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], recentTopics: string[]): { role: 'system' | 'user'; content: string }[] {
+export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], recentTopics: string[], starredTopics: string[] = []): { role: 'system' | 'user'; content: string }[] {
   return [
     {
       role: 'system',
@@ -203,6 +203,9 @@ export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], 
         '',
         'Recent published topics (avoid repeating):',
         JSON.stringify(recentTopics.slice(0, 30)),
+        ...(starredTopics.length
+          ? ['', 'Starred topics — these RESONATED with the audience (human-judged). Lean toward similar angles/depth when proposing plans:', JSON.stringify(starredTopics)]
+          : []),
         '',
         'Decide the plans for this week.',
       ].join('\n'),

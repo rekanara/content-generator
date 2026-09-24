@@ -110,6 +110,7 @@ export const api = {
   delPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}`, { method: 'DELETE' }),
   gen: (slug: string, opts?: { platform?: string; format?: string }) =>
     req<{ ok: true }>(`${g(slug)}/gen`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
+  starPost: (slug: string, id: string) => req<{ ok: true; starred: boolean }>(`${g(slug)}/posts/${id}/star`, { method: 'POST' }),
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),
   addStyle: (slug: string, s: { title: string; body: string; platform?: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/styles`, { method: 'POST', body: JSON.stringify(s) }),

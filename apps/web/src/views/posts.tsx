@@ -1,4 +1,4 @@
-import { Check, Lightbulb, RefreshCw, Send, Trash2, X } from "lucide-react"
+import { Check, Lightbulb, RefreshCw, Send, Star, Trash2, X } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
@@ -86,6 +86,12 @@ export function PostsView({ slug }: { slug: string }) {
             <button className="min-w-0 flex-1 truncate text-left hover:underline" onClick={() => navigate(`/app/${slug}/posts/${p.id}`)}>
               {p.topic}
             </button>
+            {p.status === "sent" && (
+              <Button variant="ghost" size="icon" aria-label="star" title="Star — quality signal (feeds the AI planner)"
+                onClick={() => api.starPost(slug, p.id).then(reload)}>
+                <Star className={`size-4 ${p.starred ? "fill-amber-400 text-amber-400" : "text-muted-foreground"}`} />
+              </Button>
+            )}
             <span className="hidden w-24 shrink-0 text-xs text-muted-foreground md:inline">{p.platform}/{p.format}</span>
             {p.status === "failed" && (
               <Button variant="ghost" size="icon" aria-label="resend" onClick={() => api.resend(slug, p.id).then(reload)}>

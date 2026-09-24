@@ -91,6 +91,7 @@ pillars           -- id, group_id, name, description, is_news, active, sort_orde
 rotation_state    -- group_id PK, last_platform, last_ig_format, last_li_format, last_pillar_id
 posts             -- id, group_id, platform, format, pillar_id, topic, caption, body (jsonb),
                    --   artifact_prefix, template_id (uuid, tanpa FK — rerender stability),
+                   --   starred (quality signal → planner context + kandidat style sample),
                    --   status (queued|draft|rendered|awaiting_approval|sent|failed|rejected),
                    --   error, source, llm_usage
 templates         -- id, name, format (ig-carousel|li-carousel|reel), html, is_active
@@ -99,6 +100,7 @@ templates         -- id, name, format (ig-carousel|li-carousel|reel), html, is_a
                    --   posts.template_id menyimpan pilihan → rerender stabil)
                    --   override/promo types: tetap exclusive satu active per format+type
 style_samples     -- id, group_id, title, body, platform
+ideas             -- id, group_id, text (3-400), source (bot|fe), used_at, created_at — FIFO backlog
 feeds_cache       -- url PK, fetched_at, items jsonb
 ```
 

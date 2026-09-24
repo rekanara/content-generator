@@ -34,7 +34,7 @@ export async function runPlanner(cfg: GroupCfg): Promise<PlannerResult> {
   const [grp] = await sql<{ cron_expr: string; cron_enabled: boolean }[]>`select cron_expr, cron_enabled from groups where id = ${cfg.id}`;
   if (!grp?.cron_enabled) return { created: [], skipped: ['cron off — dates do not map to runs'] };
 
-  const [rot, pillars, allPillars, templates, plans, recent] = await Promise.all([
+  const [rot, pillars, allPillars, templates, plans, recent, starred] = await Promise.all([
     getRotationRow(cfg.id),
     getActivePillars(cfg.id),
     listPillars(cfg.id),
@@ -42,6 +42,8 @@ export async function runPlanner(cfg: GroupCfg): Promise<PlannerResult> {
     listPlans(cfg.id, 200),
     sql<{ topic: string }[]>`select topic from posts where group_id = ${cfg.id}
       and status in ('sent','rendered','draft','awaiting_approval') order by created_at desc limit 30`,
+    sql<{ topic: string }[]>`select topic from posts where group_id = ${cfg.id}
+      and starred and status = 'sent' order by created_at desc limit 10`,
   ]);
 
   const slots = previewSlots(
@@ -91,7 +93,7 @@ export async function runPlanner(cfg: GroupCfg): Promise<PlannerResult> {
   const out = await chatJson<PlannerOut>(
     cfg,
     model,
-    plannerPrompt(runs, palette, recent.map((r) => r.topic)),
+    plannerPrompt(runs, palette, recent.map((r) => r.topic), starred.map((r) => r.topic)),
     isPlannerOut,
     2000,
   );

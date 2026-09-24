@@ -4,13 +4,13 @@ import { sql } from '../db/pool.ts';
 import type { PostSummary, PostDetail } from '@workspace/shared';
 
 export async function listPosts(groupId: string, limit = 100): Promise<PostSummary[]> {
-  const rows = await sql`select id, platform, format, topic, status, source, created_at, pillar_id
+  const rows = await sql`select id, platform, format, topic, status, source, created_at, pillar_id, starred
     from posts where group_id = ${groupId} order by id desc limit ${limit}`;
   return rows.map(toSummary);
 }
 
 export async function getPost(groupId: string, id: string): Promise<PostDetail | null> {
-  const [p] = await sql`select id, platform, format, topic, caption, body, status, error, source, created_at, pillar_id
+  const [p] = await sql`select id, platform, format, topic, caption, body, status, error, source, created_at, pillar_id, starred
     from posts where id = ${id} and group_id = ${groupId}`;
   if (!p) return null;
   return {
@@ -41,6 +41,7 @@ function toSummary(p: any): PostSummary {
     topic: p.topic as string, status: p.status as PostSummary['status'],
     source: p.source as string, created_at: (p.created_at as string) ?? new Date().toISOString(),
     pillar_id: (p.pillar_id as string) ?? null,
+    starred: (p.starred as boolean) ?? false,
   };
 }
 
@@ -50,6 +51,14 @@ export async function rejectPost(groupId: string, id: string): Promise<boolean> 
   const r = await sql`update posts set status = 'rejected'
     where id = ${id} and group_id = ${groupId} and status = 'awaiting_approval' returning id`;
   return r.length > 0;
+}
+
+// Toggle the star (quality signal: feeds planner context + marks style-sample
+// candidates). Returns the new state, or null when the post doesn't exist.
+export async function toggleStar(groupId: string, id: string): Promise<boolean | null> {
+  const [r] = await sql`update posts set starred = not starred
+    where id = ${id} and group_id = ${groupId} returning starred`;
+  return r ? (r.starred as boolean) : null;
 }
 
 // Flatten stored JSON body (per format) into plain display text. Pure — unit-testable.

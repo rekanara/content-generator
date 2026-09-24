@@ -21,7 +21,7 @@ import {
   getGroupOwner, saveCron,
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar, updatePillar } from './repos/pillars.ts';
-import { listPosts, getPost, rejectPost } from './repos/posts.ts';
+import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
@@ -358,6 +358,15 @@ g.post('/:slug/posts/:id/reject', async (c) => {
   if (!ok) return c.json({ error: 'post not found or not awaiting approval' }, 400);
   await addEvent(id, gr(c).id, 'rejected');
   return c.json({ ok: true });
+});
+
+// toggle the quality star (planner signal + style-sample candidate marker)
+g.post('/:slug/posts/:id/star', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const starred = await toggleStar(gr(c).id, id);
+  if (starred === null) return c.json({ error: 'post not found' }, 404);
+  return c.json({ ok: true, starred });
 });
 
 // ---------- calendar preview ----------
