@@ -1,5 +1,7 @@
 # content-generator
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-FF5757.svg)](LICENSE)
+
 A daemon that auto-generates **one developer-audience post per day per group** (Indonesian language) — Instagram (carousel / voiceover reels) or LinkedIn (PDF / text), alternating automatically. Output is delivered to a Telegram chat for manual uploading. Not auto-posting, not multi-agent.
 
 One process: HTTP API + admin SPA + per-group cron scheduler + Telegram bot (polling) + FIFO queue + pipeline (ideation → writer → critic → render → send).
@@ -104,3 +106,7 @@ npx shadcn@latest add <name> -c apps/web
 ```
 
 Components land in `packages/ui/src/components`, imported as `@workspace/ui/components/<name>`.
+
+## License
+
+[MIT](LICENSE) — free to use, modify, and distribute. Keep the copyright notice.
