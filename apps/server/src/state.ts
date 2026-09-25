@@ -1,28 +1,28 @@
-// PURE rotation logic — zero import, zero I/O. Unit-test di tests/state.test.ts.
+// PURE rotation logic — zero imports, zero I/O. Unit-tested in tests/state.test.ts.
 
 export type Platform = 'instagram' | 'linkedin';
 export type IgFormat = 'carousel' | 'reels';
 export type LiFormat = 'text' | 'pdf';
 export type Format = IgFormat | LiFormat;
 
-export type PillarLite = { id: number; is_news: boolean };
+export type PillarLite = { id: string; is_news: boolean };
 
 export type RotationState = {
   last_platform: Platform;
   last_ig_format: IgFormat | null;
   last_li_format: LiFormat | null;
-  last_pillar_id: number | null;
+  last_pillar_id: string | null;
 };
 
 export type Slot = {
   platform: Platform;
   format: Format;
-  pillar_id: number; // sudah termasuk fallback non-news
+  pillar_id: string; // non-news fallback already applied
 };
 
 const OTHER: Record<Platform, Platform> = { instagram: 'linkedin', linkedin: 'instagram' };
 
-// Format berikutnya untuk platform yg diberikan, dari state terakhir.
+// Next format for the given platform, based on the last state.
 function nextFormat(state: RotationState, platform: Platform): Format {
   if (platform === 'instagram') {
     return state.last_ig_format === 'carousel' ? 'reels' : 'carousel';
@@ -30,11 +30,11 @@ function nextFormat(state: RotationState, platform: Platform): Format {
   return state.last_li_format === 'pdf' ? 'text' : 'pdf';
 }
 
-// Pilar aktif berikutnya (urut sort_order), melewati pilar berita jika tanpa RSS.
-// Pilar berita hanya dipilih bila allowNews=true. Kalau sampai satu putaran penuh
-// tidak ada kandidat non-news, fallback ke pilar berita itu juga.
-function nextPillar(pillars: PillarLite[], lastId: number | null, allowNews: boolean): number {
-  const sorted = [...pillars].sort((a, b) => a.id - b.id); // ponytail: sort by id, anggap seed urut; upgrade: kolom sort_order di query
+// Next active pillar (sorted by id), skipping news pillars when RSS is unavailable.
+// News pillars are only picked when allowNews=true. If a full pass yields no
+// non-news candidate, fall back to a news pillar anyway.
+function nextPillar(pillars: PillarLite[], lastId: string | null, allowNews: boolean): string {
+  const sorted = [...pillars].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0); // uuid v7 time-ordered = chronological
   const eligible = (p: PillarLite) => allowNews || !p.is_news;
   if (sorted.length === 0) throw new Error('no active pillars');
 
@@ -43,11 +43,11 @@ function nextPillar(pillars: PillarLite[], lastId: number | null, allowNews: boo
     const cand = sorted[(start + i + sorted.length) % sorted.length]!;
     if (eligible(cand)) return cand.id;
   }
-  // seluruh pilar adalah berita dan allowNews=false — kondisi aneh, pilih apa saja
+  // every pillar is news and allowNews=false — odd condition, pick any
   return sorted[0]!.id;
 }
 
-// Slot berikutnya dari state. Pillars harus sudah difilter active-only oleh caller.
+// Next slot from state. Pillars must already be filtered active-only by the caller.
 export function nextSlot(
   state: RotationState,
   pillars: PillarLite[],
@@ -59,7 +59,7 @@ export function nextSlot(
   return { platform, format, pillar_id };
 }
 
-// Slot manual dari /gen atau FE: platform wajib, format opsional (ikuti rotasi).
+// Manual slot from /gen or the frontend: platform required, format optional (follows rotation).
 export function forcedSlot(
   state: RotationState,
   pillars: PillarLite[],
@@ -74,7 +74,25 @@ export function forcedSlot(
   return { platform, format: chosen, pillar_id };
 }
 
-// State baru setelah slot ini sukses terkirim.
+// Planned slot from a plans row (slot_override): every spec field optional —
+// null/absent falls back to natural rotation for that field. A planned pillar
+// that is no longer active falls back to the natural pillar too (deleted/deactivated
+// pillars must not break the run).
+export function plannedSlot(
+  state: RotationState,
+  pillars: PillarLite[],
+  spec: { platform?: Platform | null; format?: Format | null; pillar_id?: string | null },
+): Slot {
+  const platform = spec.platform ?? OTHER[state.last_platform];
+  const format = spec.format ?? nextFormat(state, platform);
+  const pillarActive = spec.pillar_id != null && pillars.some((p) => p.id === spec.pillar_id);
+  const pillar_id = pillarActive
+    ? spec.pillar_id!
+    : nextPillar(pillars, state.last_pillar_id, true);
+  return { platform, format, pillar_id };
+}
+
+// New state after this slot is successfully sent.
 export function nextState(state: RotationState, slot: Slot): RotationState {
   return {
     last_platform: slot.platform,
@@ -82,4 +100,18 @@ export function nextState(state: RotationState, slot: Slot): RotationState {
     last_li_format: slot.platform === 'linkedin' ? (slot.format as LiFormat) : state.last_li_format,
     last_pillar_id: slot.pillar_id,
   };
+}
+
+// Preview the next n slots from a state — calendar view, no DB, no mutation.
+// Assumes allowNews=true (RSS availability for future runs is unknowable).
+// ponytail: re-derive when an in-flight run finishes (rotation advances only after `sent`).
+export function previewSlots(state: RotationState, pillars: PillarLite[], n: number): Slot[] {
+  const out: Slot[] = [];
+  let st = state;
+  for (let i = 0; i < n; i++) {
+    const slot = nextSlot(st, pillars, true);
+    out.push(slot);
+    st = nextState(st, slot);
+  }
+  return out;
 }

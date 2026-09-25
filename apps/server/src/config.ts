@@ -1,4 +1,5 @@
-// Env loader + tipe config. Satu-satunya file yang baca process.env.
+// Env loader + config types. The only file that reads process.env.
+// Env values here are FALLBACKS — group-level overrides live in groups.ts (DB).
 import { readFileSync } from 'node:fs';
 
 for (const f of ['.env', '.env.local']) {
@@ -8,7 +9,7 @@ for (const f of ['.env', '.env.local']) {
       const key = m?.[1];
       if (m && key && !process.env[key]) process.env[key] = m[2] ?? '';
     }
-  } catch { /* file tidak ada — skip */ }
+  } catch { /* file missing — skip */ }
 }
 
 const req = (name: string): string => {
@@ -34,10 +35,11 @@ export const config = {
     useSSL: process.env.MINIO_USE_SSL === 'true',
   },
   llm: {
-    baseUrl: req('LLM_BASE_URL'),
-    apiKey: req('LLM_API_KEY'),
-    model: req('LLM_MODEL'),
-    criticModel: process.env.LLM_MODEL_CRITIC || process.env.LLM_MODEL!,
+    // env = fallback; groups can override via DB. Presence validated at generate time.
+    baseUrl: process.env.LLM_BASE_URL || '',
+    apiKey: process.env.LLM_API_KEY || '',
+    model: process.env.LLM_MODEL || '',
+    criticModel: process.env.LLM_MODEL_CRITIC || process.env.LLM_MODEL || '',
   },
   tts: {
     provider: (process.env.TTS_PROVIDER ?? 'edge') as 'edge' | 'openai',

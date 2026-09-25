@@ -4,34 +4,43 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { readFileSync } from 'node:fs';
 import { config } from './config.ts';
-import { sql } from './db.ts';
+import { sql } from './db/pool.ts';
 import { startBot } from './bot.ts';
-import { queueStatus } from './queue.ts';
-import { startCron, cronStatus } from './cron.ts';
+import { queueLiveness } from './queue.ts';
+import { startCron } from './cron.ts';
+import { startMonitor } from './monitor.ts';
+import { startPlanner } from './usecases/planner.ts';
+import { startDigest } from './usecases/digest.ts';
 import { api } from './api.ts';
 
 const app = new Hono();
 app.route('/api', api);
-app.all('/api/*', (c) => c.json({ error: 'endpoint tidak ada' }, 404));
+app.all('/api/*', (c) => c.json({ error: 'endpoint not found' }, 404));
 
 app.get('/', (c) => c.text('content-generator daemon v2 — OK'));
 app.get('/health', async (c) => {
   await sql`select 1`;
-  return c.json({ ok: true, queue: queueStatus(), cron: cronStatus() });
+  const live = queueLiveness();
+  // running + no activity for 30min = stuck run (puppeteer/LLM hang)
+  const stuck = live.running && live.lastActivityMs > 30 * 60_000;
+  return c.json({ ok: !stuck, db: true, queue: live, stuck }, stuck ? 503 : 200);
 });
 
-// SPA build output (apps/web/dist) — asset statis + fallback index.html utk client router.
+// SPA build output (apps/web/dist) — static assets + index.html fallback for the client router.
 const webDist = new URL('../../web/dist/', import.meta.url).pathname;
 app.use('/*', serveStatic({ root: webDist }));
 app.get('/*', (c) => {
   try {
     return c.html(readFileSync(`${webDist}index.html`, 'utf8'));
   } catch {
-    return c.text('FE belum dibuild — jalankan build di apps/web lalu restart', 503);
+    return c.text('frontend not built yet — run the build in apps/web and restart', 503);
   }
 });
 
 serve({ fetch: app.fetch, port: config.port });
-console.log(`[server] daemon v2 jalan di :${config.port}`);
+console.log(`[server] daemon v2 running on :${config.port}`);
 await startCron();
+startMonitor(); // watchdog: boot missed-slot check + heartbeat (must run before bot's blocking loop)
+startPlanner(); // AI planner: daily 17:00 WIB for auto_plan groups
+startDigest(); // daily digest: 07:00 WIB (today's slots, awaiting, recap)
 await startBot();

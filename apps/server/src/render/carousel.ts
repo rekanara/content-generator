@@ -1,29 +1,99 @@
 // Carousel: HTML per slide → Puppeteer → PNG 1080x1350 (IG) / PDF (LinkedIn).
-// Staging lokal out/<id>/ → upload MinIO posts/<id>/.
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+// Local staging out/<id>/ → upload to MinIO posts/<id>/.
+// Cover flow: cover.png in MinIO → reuse (rerender never re-pays image API);
+// missing + image model configured → generate once + upload; generation failure
+// is fail-safe — the post renders without a cover page (body template on slide 1).
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import puppeteer from 'puppeteer';
-import { sql } from '../db.ts';
+import { sql } from '../db/pool.ts';
 import type { Platform } from '../state.ts';
 import type { CarouselOut } from '../schema.ts';
-import { getTemplateHtml, slidesToHtml } from './template.ts';
-import { uploadPostArtifact } from '../storage.ts';
+import type { GroupCfg } from '../groups.ts';
+import { generateImage } from '../llm.ts';
+import { imagePrice } from '../llm-costs.ts';
+import { imagePrompt } from '../prompts.ts';
+import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, type TemplateSet } from './template.ts';
+import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
 
-export type CarouselArtifacts = { files: string[]; prefix: string };
+export type CarouselArtifacts = { files: string[]; prefix: string; coverCost: number; coverModel: string | null; templateId: string | null };
 
-// Render + upload. Return object keys ter-upload.
+// Thrown when cover generation is REQUIRED but failed — the queue catches it, parks the
+// post at awaiting_cover and asks Telegram (upload manually / render without cover).
+// Without the flag, generation failure stays fail-safe (render without cover).
+export class CoverGenerationError extends Error {
+  constructor(public readonly cause: Error) {
+    super(`cover generation failed: ${cause.message}`);
+    this.name = 'CoverGenerationError';
+  }
+}
+
+export type RenderOpts = {
+  /** throw on generation failure (queue parks + asks) instead of fail-safe */
+  coverRequired?: boolean;
+  /** render WITHOUT generating a cover (skip button) — a stored cover.png is still reused */
+  skipCover?: boolean;
+  /** pinned template (plans slot_override) — renders even if not active; falls back to the active set when deleted */
+  templateId?: string;
+};
+
+// Cover image for the post: reuse from MinIO, else generate + upload. null = no cover.
+// Returns the image + its snapshot cost (attached to the post's llm_usage by the caller —
+// render stays adapter-pure; cost bookkeeping belongs to the queue layer).
+// Caller must have created out/<id>/ already (staging dir doubles as upload source).
+async function getCover(cfg: GroupCfg, postId: string, topic: string, required: boolean, skip: boolean): Promise<{ buf: Buffer; cost: number } | null> {
+  const key = `${cfg.slug}/posts/${postId}/cover.png`;
+  if (await artifactExists(key)) {
+    // even on skip: a stored cover (e.g. photo uploaded after skipping) is free — use it
+    console.log(`[render] cover reused from ${key}`);
+    return { buf: await getArtifactBuffer(key), cost: 0 };
+  }
+  if (skip) return null; // explicit skip — never generate (the skip button must terminate the flow)
+  if (isManualCoverMode(cfg.image.model)) return null; // manual flow paused earlier; reaching here = skip path
+  try {
+    const buf = await generateImage(cfg, imagePrompt(topic));
+    const tmp = `out/${postId}/cover.png`;
+    writeFileSync(tmp, buf);
+    await uploadPostArtifact(cfg.slug, postId, tmp, 'cover.png');
+    const cost = imagePrice(cfg.image.model).perImage;
+    console.log(`[render] cover generated + saved (${buf.length}B, model=${cfg.image.model}, ~$${cost})`);
+    return { buf, cost };
+  } catch (e) {
+    if (required) throw new CoverGenerationError(e as Error); // queue parks + asks
+    console.warn(`[render] cover generation failed — rendering without cover: ${(e as Error).message}`);
+    return null; // fail-safe: post still ships, slide 1 uses the body template
+  }
+}
+
+// Render + upload. Returns the uploaded object keys.
 export async function renderCarousel(
-  postId: number,
+  postId: string,
   platform: Platform,
   draft: CarouselOut,
+  cfg: GroupCfg,
+  opts: RenderOpts = {},
 ): Promise<CarouselArtifacts> {
-  const template = await getTemplateHtml('carousel', platform);
-  const htmls = slidesToHtml(template, draft);
-
   const outDir = `out/${postId}`;
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
+
+  // Template resolution (first match wins):
+  //   1. opts.templateId  — pinned by a plan (slot_override): authority for the date
+  //   2. post's own id    — rerender stability: the post keeps its visual identity,
+  //                         edits to that template row still come through
+  //   3. pool pick        — fresh render: random among active templates for the
+  //                         format, avoiding the group's last-used one (variety)
+  // A dangling id (template deleted) falls through to the next step.
+  const [ownRow] = await sql<{ template_id: string | null }[]>`select template_id from posts where id = ${postId}`;
+  const pinnedId = opts.templateId ?? ownRow?.template_id ?? null;
+  const pinnedSet = pinnedId ? await getTemplateSetById(cfg.id, pinnedId) : null;
+  const picked: { id: string | null; set: TemplateSet } = pinnedSet
+    ? { id: pinnedId, set: pinnedSet }
+    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
+  const set = picked.set;
+  const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
+  const htmls = buildSlides(set, draft, cover?.buf);
 
   const browser = await puppeteer.launch();
   try {
@@ -38,16 +108,35 @@ export async function renderCarousel(
       files.push(file);
     }
 
-    // PDF utk LinkedIn: gabung slide jadi dokumen — screenshot per halaman sudah ada,
-    // cara paling kecil: render ulang semua html ke satu page.pdf multi halaman.
+    // PDF for LinkedIn: one multi-page document from the per-slide htmls.
+    // Each html is a FULL document (<html><head><style>...<body>...) — combining them
+    // naively nests documents and every body ends up stacked on page 1. Extract each
+    // slide's <body> inner html, wrap it in a page-sized block (the slide css targets
+    // `body { width/height }` — repoint it to the wrapper), and break pages explicitly.
     let pdfPath: string | null = null;
     if (platform === 'linkedin') {
       pdfPath = `${outDir}/carousel.pdf`;
-      const combined = htmls
-        .map((h) => h.replace('</body></html>', ''))
-        .join('<div style="page-break-after: always"></div>')
-        .replace('<html><head>', '<html><head>');
-      // page.pdf butuh satu dokumen: setContent combined, ukuran halaman 1080x1350pt
+      const bodyInner = (h: string) => {
+        const m = h.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+        return m?.[1] ?? h;
+      };
+      // slide templates style `body {width:1080px;height:1350px}` — for the combined
+      // document each slide lives in a .slide div; translate those body rules onto it.
+      const styleFor = (h: string) => {
+        const m = h.match(/<style[^>]*>([\s\S]*?)<\/style>/i);
+        return m?.[1]
+          ?.replace(/\bbody\s*\{/g, '.slide {')
+          .replace(/\bbody\s*,/g, '.slide,')
+          .replace(/,\s*body\s*\{/g, ', .slide {') ?? '';
+      };
+      const pages = htmls.map((h) =>
+        `<div class="slide">${bodyInner(h)}</div>`);
+      const combined = `<!doctype html><html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  .slide { width: ${IG_W}px; height: ${IG_H}px; overflow: hidden; page-break-after: always; break-after: page; }
+  .slide:last-child { page-break-after: auto; break-after: auto; }
+</style>${htmls.map((h) => `<style>${styleFor(h)}</style>`).join('')}</head>
+<body>${pages.join('')}</body></html>`;
       const pdfPage = await browser.newPage();
       try {
         await pdfPage.setContent(combined, { waitUntil: 'load' });
@@ -64,24 +153,26 @@ export async function renderCarousel(
       }
     }
 
-    // upload MinIO
+    // upload to MinIO
     const keys: string[] = [];
     for (let i = 0; i < files.length; i++) {
-      keys.push(await uploadPostArtifact(postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
+      keys.push(await uploadPostArtifact(cfg.slug, postId, files[i]!, `slide-${String(i + 1).padStart(2, '0')}.png`));
     }
-    if (pdfPath) keys.push(await uploadPostArtifact(postId, pdfPath, 'carousel.pdf'));
+    if (pdfPath) keys.push(await uploadPostArtifact(cfg.slug, postId, pdfPath, 'carousel.pdf'));
 
-    return { files: keys, prefix: `posts/${postId}/` };
+    return { files: keys, prefix: `${cfg.slug}/posts/${postId}/`, coverCost: cover?.cost ?? 0, coverModel: cover ? cfg.image.model : null, templateId: picked.id };
   } finally {
     await browser.close();
   }
 }
 
-// Render + persist status + artifact_prefix. Bagian "persist" dipisah biar testable.
-export async function renderAndSave(postId: number, platform: Platform, draft: CarouselOut): Promise<CarouselArtifacts> {
-  const { files, prefix } = await renderCarousel(postId, platform, draft);
-  await sql`update posts set status = 'rendered', artifact_prefix = ${prefix}
+// Render + persist status + artifact_prefix + the chosen template id (rerender
+// stability). "Persist" split out to keep it testable.
+export async function renderAndSave(postId: string, platform: Platform, draft: CarouselOut, cfg: GroupCfg, opts: RenderOpts = {}): Promise<CarouselArtifacts> {
+  const r = await renderCarousel(postId, platform, draft, cfg, opts);
+  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix},
+    template_id = coalesce(${r.templateId}, template_id)
     where id = ${postId}`;
-  console.log(`[render] post #${postId}: ${files.length} artefak → ${prefix}`);
-  return { files, prefix };
+  console.log(`[render] post #${postId}: ${r.files.length} artifacts → ${r.prefix} (template ${r.templateId ? r.templateId.slice(0, 8) : 'default'})`);
+  return r;
 }

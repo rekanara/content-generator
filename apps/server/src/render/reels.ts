@@ -1,22 +1,23 @@
-// Reels: scene TTS → ffprobe durasi → frame PNG → segmen MP4 → concat → MP4 final.
-// Staging lokal out/<id>/ → upload MinIO posts/<id>/.
+// Reels: scene TTS → ffprobe duration → PNG frame → MP4 segment → concat → final MP4.
+// Local staging out/<id>/ → upload to MinIO posts/<id>/.
 import { mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
-import { sql } from '../db.ts';
+import { sql } from '../db/pool.ts';
 import type { ReelsOut } from '../schema.ts';
 import { ttsToFile } from '../tts.ts';
+import type { GroupCfg } from '../groups.ts';
 import { ffprobeDurationArgs, segmentArgs, concatArgs } from './ffmpeg.ts';
 import { uploadPostArtifact } from '../storage.ts';
 
 const exec = promisify(execFile);
 const REEL_W = 1080, REEL_H = 1920;
 
-// Default template reel — dark dev theme 1080x1920. Token: {{overlay}} {{index}} {{total}}.
-// ponytail: user upload template custom via FE (step 8).
+// Default reel template — dark dev theme 1080x1920. Tokens: {{overlay}} {{index}} {{total}}.
+// ponytail: user-uploaded custom template via FE (step 8).
 const DEFAULT_REEL = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   * { margin: 0; box-sizing: border-box; }
@@ -32,8 +33,10 @@ const DEFAULT_REEL = `<!doctype html>
 const esc = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-async function getReelTemplate(): Promise<string> {
-  const rows = await sql`select html from templates where format = 'reel' and is_active
+async function getReelTemplate(groupId: string): Promise<string> {
+  // reels are scene-based: one html per template, html_first/html_last unused
+  const rows = await sql`select html from templates
+    where format = 'reel' and is_active and group_id = ${groupId}
     order by updated_at desc limit 1`;
   return rows.length > 0 ? (rows[0]!.html as string) : DEFAULT_REEL;
 }
@@ -41,33 +44,33 @@ async function getReelTemplate(): Promise<string> {
 async function ffprobeDuration(file: string): Promise<number> {
   const { stdout } = await exec('ffprobe', ffprobeDurationArgs(file));
   const d = Number.parseFloat(stdout.trim());
-  if (!Number.isFinite(d) || d <= 0) throw new Error(`durasi tak valid utk ${file}: "${stdout.trim()}"`);
+  if (!Number.isFinite(d) || d <= 0) throw new Error(`invalid duration for ${file}: "${stdout.trim()}"`);
   return d;
 }
 
 export type ReelsArtifacts = { video: string; prefix: string; durationSec: number };
 
-export async function renderReels(postId: number, draft: ReelsOut): Promise<ReelsArtifacts> {
+export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
   const total = draft.scenes.length;
-  const template = await getReelTemplate();
+  const template = await getReelTemplate(cfg.id);
   const outDir = `out/${postId}`;
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
-  // 1. TTS per scene + durasi
+  // 1. TTS per scene + duration
   const audios: { mp3: string; dur: number }[] = [];
   for (let i = 0; i < total; i++) {
     const mp3 = `${outDir}/audio-${String(i + 1).padStart(2, '0')}.mp3`;
-    await ttsToFile(draft.scenes[i]!.narration, mp3);
+    await ttsToFile(cfg, draft.scenes[i]!.narration, mp3);
     const dur = await ffprobeDuration(mp3);
     audios.push({ mp3, dur });
     console.log(`[reels] scene ${i + 1}/${total}: TTS ${dur.toFixed(1)}s`);
   }
   const totalDur = audios.reduce((a, b) => a + b.dur, 0);
-  if (totalDur < 10 || totalDur > 35) throw new Error(`durasi total ${totalDur.toFixed(1)}s di luar 15-30s (toleransi)`);
-  // spec: 15–30 detik; fail keras jika jauh — biar writer prompt dicek ulang, bukan video rusak
+  if (totalDur < 10 || totalDur > 35) throw new Error(`total duration ${totalDur.toFixed(1)}s outside 15-30s (tolerance)`);
+  // spec: 15–30 seconds; hard fail when far off — so the writer prompt gets rechecked, not a broken video
 
-  // 2. Frame PNG per scene
+  // 2. PNG frame per scene
   const browser = await puppeteer.launch();
   const frames: string[] = [];
   try {
@@ -87,7 +90,7 @@ export async function renderReels(postId: number, draft: ReelsOut): Promise<Reel
     await browser.close();
   }
 
-  // 3. Segmen MP4 per scene (PNG + audio, durasi = audio)
+  // 3. MP4 segment per scene (PNG + audio, duration = audio)
   const segments: string[] = [];
   for (let i = 0; i < total; i++) {
     const seg = `${outDir}/seg-${String(i + 1).padStart(2, '0')}.mp4`;
@@ -96,21 +99,21 @@ export async function renderReels(postId: number, draft: ReelsOut): Promise<Reel
   }
 
   // 4. Concat → final
-  // concat demuxer resolve path relatif terhadap direktori LIST FILE, bukan cwd.
-  // Segmen kita relatif dari project root → wajib absolut.
+  // concat demuxer resolves paths relative to the LIST FILE's directory, not cwd.
+  // Our segments are relative to project root → must be absolute.
   const listFile = `${outDir}/concat.txt`;
   await writeFile(listFile, segments.map((s) => `file '${resolve(s)}'`).join('\n'), 'utf8');
   const finalMp4 = `${outDir}/reel.mp4`;
   await exec('ffmpeg', concatArgs(listFile, finalMp4));
 
   // 5. Upload
-  const key = await uploadPostArtifact(postId, finalMp4, 'reel.mp4');
+  const key = await uploadPostArtifact(cfg.slug, postId, finalMp4, 'reel.mp4');
   console.log(`[reels] post #${postId}: MP4 ${totalDur.toFixed(1)}s → ${key}`);
-  return { video: key, prefix: `posts/${postId}/`, durationSec: totalDur };
+  return { video: key, prefix: `${cfg.slug}/posts/${postId}/`, durationSec: totalDur };
 }
 
-export async function renderReelsAndSave(postId: number, draft: ReelsOut): Promise<ReelsArtifacts> {
-  const r = await renderReels(postId, draft);
+export async function renderReelsAndSave(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
+  const r = await renderReels(postId, draft, cfg);
   await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix} where id = ${postId}`;
   return r;
 }

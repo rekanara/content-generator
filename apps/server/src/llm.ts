@@ -1,60 +1,61 @@
-// Klien openai-compatible chat completion. JSON mode + 1 retry per panggilan.
-import { config } from './config.ts';
+// OpenAI-compatible chat completion client. JSON mode + 1 retry per call.
+// Per-group config (GroupCfg) — baseUrl/apiKey/model from group ?? env.
+import type { GroupCfg } from './groups.ts';
 
 export type Usage = { prompt: number; completion: number };
 export type LlmResult<T> = { data: T; usage: Usage };
 
 type Msg = { role: 'system' | 'user'; content: string };
 
-// ponytail: tidak ada streaming — output pendek (JSON), streaming tidak dibutuhkan.
-// 9router kadang menempel SSE tail ("data: [DONE]") setelah body JSON — parse objek
-// pertama saja via raw_decode, buang sisanya.
+// ponytail: no streaming — output is short (JSON), streaming not needed.
+// 9router sometimes appends an SSE tail ("data: [DONE]") after the JSON body —
+// just parse the first object, discard the rest.
 type RawResp = { content: string; usage: Usage };
 
 function parseLoose(body: string): any {
   const start = body.indexOf('{');
-  if (start < 0) throw new Error('LLM: body tanpa JSON');
+  if (start < 0) throw new Error('LLM: body has no JSON');
   for (let end = body.lastIndexOf('}'); end > start; end = body.lastIndexOf('}', end - 1)) {
     try {
       return JSON.parse(body.slice(start, end + 1));
-    } catch { /* coba bracket penutup sebelumnya */ }
+    } catch { /* try the previous closing bracket */ }
   }
-  throw new Error(`LLM: JSON tidak ketemu dalam body; head=${body.slice(0, 120)}`);
+  throw new Error(`LLM: no JSON found in body; head=${body.slice(0, 120)}`);
 }
 
-async function chatOnce(model: string, messages: Msg[], maxTokens: number): Promise<RawResp> {
-  const res = await fetch(`${config.llm.baseUrl}/chat/completions`, {
+async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens: number): Promise<RawResp> {
+  const res = await fetch(`${cfg.llm.baseUrl}/chat/completions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${config.llm.apiKey}` },
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },
     body: JSON.stringify({
       model,
       messages,
       temperature: 0.8,
       max_tokens: maxTokens,
       response_format: { type: 'json_object' },
-      stream: false, // provider ag/* default SSE — paksa non-stream agar body JSON tunggal
+      stream: false, // provider ag/* defaults to SSE — force non-stream for a single JSON body
     }),
-    signal: AbortSignal.timeout(300_000), // reasoning model via router: 120s kurang utk critic
+    signal: AbortSignal.timeout(300_000), // reasoning model via router: 120s not enough for critic
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const text = await res.text();
   const json = parseLoose(text);
   const msg = json.choices?.[0]?.message;
-  // Model reasoning (glm-5.3-mod) bisa menghabiskan max_tokens untuk reasoning_content
-  // dan meninggalkan content kosong. Fallback: ekstrak JSON dari reasoning_content.
+  // Reasoning models (glm-5.3-mod) can burn all of max_tokens on reasoning_content
+  // and leave content empty. Fallback: extract JSON from reasoning_content.
   let content = msg?.content;
   if (typeof content !== 'string' || content.length === 0) {
     const rc = msg?.reasoning_content;
     if (typeof rc === 'string') {
-      const m = rc.match(/\{[\s\S]*\}/); // JSON terakhir yang tertulis dalam reasoning
+      const m = rc.match(/\{[\s\S]*\}/); // last JSON written in the reasoning
       if (m) {
-        console.warn('[llm] content kosong — fallback JSON dari reasoning_content');
+        console.warn('[llm] content empty — falling back to JSON from reasoning_content');
         content = m[m.length - 1]!;
       }
     }
   }
   if (typeof content !== 'string' || content.length === 0) {
-    throw new Error('LLM: konten kosong/bentuk salah');
+    throw new Error('LLM: content empty/malformed');
   }
   return {
     content,
@@ -65,22 +66,23 @@ async function chatOnce(model: string, messages: Msg[], maxTokens: number): Prom
   };
 }
 
-// Chat + parse JSON + guard. Rusak → 1x retry → throw.
+// Chat + parse JSON + guard. Broken → 1x retry → throw.
 export async function chatJson<T>(
+  cfg: GroupCfg,
   model: string,
   messages: Msg[],
   guard: (x: unknown) => x is T,
-  maxTokens = 4000, // reasoning model memakan token utk berpikir; 2000 kurang
+  maxTokens = 4000, // reasoning models burn tokens on thinking; 2000 is not enough
 ): Promise<LlmResult<T>> {
   let lastErr = new Error('no attempt');
   for (let attempt = 0; attempt < 2; attempt++) {
     let content: string, usage: Usage;
     try {
-      ({ content, usage } = await chatOnce(model, messages, maxTokens));
+      ({ content, usage } = await chatOnce(cfg, model, messages, maxTokens));
     } catch (e) {
-      // router/upstream kadang 503 capacity — tunggu sebelum retry (retryDelay tipikal 52s)
+      // router/upstream sometimes 503s on capacity — wait before retrying (typical retryDelay 52s)
       lastErr = e as Error;
-      console.warn(`[llm] attempt ${attempt + 1} gagal: ${lastErr.message.slice(0, 150)}`);
+      console.warn(`[llm] attempt ${attempt + 1} failed: ${lastErr.message.slice(0, 150)}`);
       if (attempt === 0) {
         await new Promise((r) => setTimeout(r, 60_000));
         continue;
@@ -91,27 +93,54 @@ export async function chatJson<T>(
     try {
       parsed = JSON.parse(content);
     } catch (e) {
-      // konten model kadang dibungkus ```json ... ``` — strip
+      // model output is sometimes wrapped in ```json ... ``` — strip it
       const m = content.match(/```(?:json)?\s*([\s\S]*?)```/);
       if (m) {
         try {
           parsed = JSON.parse(m[1]!);
         } catch {
-          lastErr = new Error(`JSON parse gagal: ${(e as Error).message}; raw=${content.slice(0, 200)}`);
+          lastErr = new Error(`JSON parse failed: ${(e as Error).message}; raw=${content.slice(0, 200)}`);
           continue;
         }
       } else {
-        lastErr = new Error(`JSON parse gagal: ${(e as Error).message}; raw=${content.slice(0, 200)}`);
+        lastErr = new Error(`JSON parse failed: ${(e as Error).message}; raw=${content.slice(0, 200)}`);
         continue;
       }
     }
     if (guard(parsed)) return { data: parsed, usage };
-    lastErr = new Error(`guard gagal: struktur tidak sesuai; raw=${JSON.stringify(parsed).slice(0, 200)}`);
+    lastErr = new Error(`guard failed: structure mismatch; raw=${JSON.stringify(parsed).slice(0, 200)}`);
   }
   throw lastErr;
 }
 
-// Chat biasa (tanpa JSON) — untuk critic revisi yang outputnya JSON juga, jadi pakai chatJson.
 export type { Usage as LlmUsage };
-export const criticModel = (): string => config.llm.criticModel;
-export const writerModel = (): string => config.llm.model;
+export const criticModel = (cfg: GroupCfg): string => cfg.llm.criticModel;
+export const writerModel = (cfg: GroupCfg): string => cfg.llm.model;
+
+// ——— image generation (cover pages) ———
+// OpenAI-compatible /images/generations, b64 response. Same gateway/creds as chat.
+// No retry loop here — cover failure is fail-safe (render continues without the image),
+// so callers decide whether retrying is worth it (rerender re-attempts naturally).
+// ponytail: size/config knobs when a model needs non-default geometry.
+export async function generateImage(cfg: GroupCfg, prompt: string): Promise<Buffer> {
+  const res = await fetch(`${cfg.llm.baseUrl}/images/generations`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },
+    body: JSON.stringify({
+      model: cfg.image.model,
+      prompt,
+      n: 1,
+      size: '1024x1024',
+      response_format: 'b64_json',
+    }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  if (!res.ok) throw new Error(`image ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  const json = await res.json();
+  const b64: unknown = json?.data?.[0]?.b64_json;
+  if (typeof b64 !== 'string' || b64.length === 0) {
+    // some gateways return url instead — unsupported by design (we want bytes, not a fetch)
+    throw new Error(`image: no b64_json in response (${JSON.stringify(json).slice(0, 150)})`);
+  }
+  return Buffer.from(b64, 'base64');
+}

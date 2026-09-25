@@ -16,29 +16,43 @@ import {
 } from "@workspace/ui/components/select"
 import { api, ApiError } from "@/lib/api"
 import { useTemplates } from "@/lib/hooks"
-import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
+import { navigate } from "@/lib/router"
+import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateType } from "@workspace/shared"
 
-const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel"]
+const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel", "ig-carousel-promo", "li-carousel-promo"]
+const isPromoFormat = (f: TemplateFormat) => f.endsWith("-promo")
+const TYPES: TemplateType[] = ["regular", "mix", "image_only", "text_only"]
 
-export function TemplatesView() {
-  const { data, error, loading, reload } = useTemplates()
-  const [form, setForm] = useState({ name: "", format: "ig-carousel" as TemplateFormat, html: "", is_active: false })
+export function TemplatesView({ slug }: { slug: string }) {
+  const { data, error, loading, reload } = useTemplates(slug)
+  const [form, setForm] = useState({
+    name: "", format: "ig-carousel" as TemplateFormat, type: "regular" as TemplateType,
+    html: "", html_first: "", html_last: "", is_active: false,
+  })
   const [msg, setMsg] = useState<string | null>(null)
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     try {
-      await api.addTemplate(form)
-      setForm({ name: "", format: "ig-carousel", html: "", is_active: false })
+      await api.addTemplate(slug, { type: form.type,
+        name: form.name, format: form.format,
+        html: form.html,
+        html_first: form.format === "reel" || form.html_first === "" ? null : form.html_first,
+        html_last: form.format === "reel" || form.html_last === "" ? null : form.html_last,
+        is_active: form.is_active,
+      })
+      setForm({ name: "", format: "ig-carousel", type: "regular", html: "", html_first: "", html_last: "", is_active: false })
       setMsg(null)
       reload()
     } catch (err) {
-      setMsg(err instanceof ApiError ? err.message : "gagal menambah template")
+      setMsg(err instanceof ApiError ? err.message : "failed to add template")
     }
   }
 
-  if (loading && !data) return <p className="text-muted-foreground text-sm">memuat…</p>
+  if (loading && !data) return <p className="text-muted-foreground text-sm">loading…</p>
   if (error) return <p className="text-destructive text-sm">{error}</p>
+
+  const isReel = form.format === "reel"
 
   return (
     <div className="space-y-6">
@@ -48,10 +62,10 @@ export function TemplatesView() {
       <Card>
         <CardContent className="p-4">
           <form onSubmit={submit} id="template-form" className="grid gap-3">
-            <div className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_180px_170px_auto]">
               <div className="space-y-1.5">
-                <Label htmlFor="tpl-name">Nama template</Label>
-                <Input id="tpl-name" placeholder="nama template" required value={form.name}
+                <Label htmlFor="tpl-name">Template name</Label>
+                <Input id="tpl-name" placeholder="template name" required value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </div>
               <div className="space-y-1.5">
@@ -66,20 +80,60 @@ export function TemplatesView() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="tpl-active">Aktif</Label>
+                <Label>Type</Label>
+                <Select value={isPromoFormat(form.format) ? "regular" : form.type} onValueChange={(v) => setForm({ ...form, type: v as TemplateType })} disabled={isPromoFormat(form.format)}>
+                  <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-active">Active</Label>
                 <div className="flex h-7 items-center">
                   <Checkbox id="tpl-active" checked={form.is_active}
                     onCheckedChange={(c) => setForm({ ...form, is_active: c === true })} />
                 </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">token: {TEMPLATE_TOKENS[form.format].join(" ")}</p>
+
+            <p className="text-xs text-muted-foreground">
+              body token: {TEMPLATE_TOKENS[form.format].body.join(" ")}
+              {!isReel && !isPromoFormat(form.format) && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
+              {!isReel && !isPromoFormat(form.format) && form.html_last !== "" && <> · CTA: {TEMPLATE_TOKENS[form.format].last?.join(" ")}</>}
+              {form.type === "regular" && !isPromoFormat(form.format) && <> · multiple active regulars per format = rotation pool (random pick, no immediate repeat)</>}
+            </p>
+            {isPromoFormat(form.format) && (
+              <p className="text-xs text-muted-foreground">
+                promo template = design system: full CSS (classes like .feature-item / .stack-item / .stat-item)
+                + a single {"{{content}}"} hole — the AI writes free-form slide html using your classes.
+              </p>
+            )}
+
             <div className="space-y-1.5">
-              <Label htmlFor="tpl-html">HTML template</Label>
+              <Label htmlFor="tpl-html">Body HTML (middle slides)</Label>
               <Textarea id="tpl-html" className="min-h-32 font-mono text-xs" placeholder="HTML template" required
                 value={form.html} onChange={(e) => setForm({ ...form, html: e.target.value })} />
             </div>
-            <Button type="submit" form="template-form" className="justify-self-start">Tambah</Button>
+
+            {!isReel && !isPromoFormat(form.format) && (
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-first">Cover HTML (first slide, optional)</Label>
+                  <Textarea id="tpl-first" className="min-h-32 font-mono text-xs"
+                    placeholder={`uses {{image}} + ${TEMPLATE_TOKENS[form.format].first?.join(" ")} — empty = no cover page`}
+                    value={form.html_first} onChange={(e) => setForm({ ...form, html_first: e.target.value })} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="tpl-last">CTA HTML (last slide, optional)</Label>
+                  <Textarea id="tpl-last" className="min-h-32 font-mono text-xs"
+                    placeholder={`uses ${TEMPLATE_TOKENS[form.format].last?.join(" ")} — empty = no CTA page`}
+                    value={form.html_last} onChange={(e) => setForm({ ...form, html_last: e.target.value })} />
+                </div>
+              </div>
+            )}
+
+            <Button type="submit" form="template-form" className="justify-self-start">Add</Button>
           </form>
         </CardContent>
       </Card>
@@ -87,19 +141,22 @@ export function TemplatesView() {
       <div className="divide-y rounded-lg border">
         {(data ?? []).map((t) => (
           <div key={t.id} className="flex items-center gap-3 p-3 text-sm">
-            <button onClick={() => api.activateTemplate(t.id).then(reload)}>
+            <button onClick={() => api.activateTemplate(slug, t.id).then(reload)}>
               <Badge variant="secondary" className={t.is_active ? "bg-emerald-500/15 text-emerald-500 border-transparent" : ""}>
-                {t.is_active ? "aktif" : "off"}
+                {t.is_active ? "active" : "off"}
               </Badge>
             </button>
-            <span className="min-w-0 flex-1 truncate font-medium">{t.name}</span>
+            <button className="min-w-0 flex-1 truncate text-left font-medium hover:underline" onClick={() => navigate(`/app/${slug}/templates/${t.id}`)}>
+              {t.name}
+            </button>
             <span className="text-xs text-muted-foreground">{t.format}</span>
-            <Button variant="ghost" size="icon" aria-label="hapus" onClick={() => api.delTemplate(t.id).then(reload)}>
+            {t.type !== "regular" && <Badge variant="outline" className="text-xs">{t.type}</Badge>}
+            <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delTemplate(slug, t.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
           </div>
         ))}
-        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">belum ada template</p>}
+        {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">no templates yet</p>}
       </div>
     </div>
   )

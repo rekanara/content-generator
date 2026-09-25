@@ -1,7 +1,7 @@
 // Small data-fetch hooks — no react-query, stdlib fetch + useEffect.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import type { Pillar, PostSummary, PostDetail, StyleSample, Template, Dashboard, CronSettings } from '@workspace/shared';
+import type { Promotion, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan, Idea } from '@workspace/shared';
 
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -14,7 +14,7 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
     setLoading(true);
     fetcher()
       .then((d) => live && (setData(d), setError(null)))
-      .catch((e) => live && setError(e instanceof ApiError ? e.message : 'gagal memuat'))
+      .catch((e) => live && setError(e instanceof ApiError ? e.message : 'failed to load'))
       .finally(() => live && setLoading(false));
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -22,10 +22,18 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   return { data, error, loading, reload };
 }
 
-export const useDashboard = () => useApi<Dashboard>(api.dashboard);
-export const usePillars = () => useApi<Pillar[]>(api.pillars);
-export const usePosts = () => useApi<PostSummary[]>(api.posts);
-export const usePost = (id: number | null) => useApi<PostDetail>(() => id ? api.post(id) : Promise.reject(new Error('no id')), [id]);
-export const useStyles = () => useApi<StyleSample[]>(api.styles);
-export const useTemplates = () => useApi<Template[]>(api.templates);
-export const useCron = () => useApi<CronSettings>(api.cron);
+export const useGroups = () => useApi<Group[]>(api.groups);
+export const useDashboard = (slug: string) => useApi<Dashboard>(() => api.dashboard(slug), [slug]);
+export const usePillars = (slug: string) => useApi<Pillar[]>(() => api.pillars(slug), [slug]);
+export const usePosts = (slug: string) => useApi<PostSummary[]>(() => api.posts(slug), [slug]);
+export const useCalendar = (slug: string) => useApi<CalendarRun[]>(() => api.calendar(slug), [slug]);
+export const usePost = (slug: string, id: string | null) => useApi<PostDetail>(() => id ? api.post(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
+export const useStyles = (slug: string) => useApi<StyleSample[]>(() => api.styles(slug), [slug]);
+export const useTemplates = (slug: string) => useApi<Template[]>(() => api.templates(slug), [slug]);
+export const useOverrides = (slug: string) => useApi<Override[]>(() => api.overrides(slug), [slug]);
+export const usePlans = (slug: string) => useApi<Plan[]>(() => api.plans(slug), [slug]);
+export const useTemplate = (slug: string, id: string | null) => useApi<TemplateDetail>(() => id ? api.template(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
+export const useCron = (slug: string) => useApi<CronSettings>(() => api.cron(slug), [slug]);
+export const usePromotions = (slug: string) => useApi<Promotion[]>(() => api.promotions(slug), [slug]);
+export const usePromotion = (slug: string, id: string | null) => useApi<Promotion>(() => id ? api.promotion(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
+export const useIdeas = (slug: string) => useApi<Idea[]>(() => api.ideas(slug), [slug]);

@@ -1,21 +1,43 @@
-// FIFO in-process, satu run aktif. Cron, bot, FE → enqueue yang sama.
-import { sql } from './db.ts';
+// In-process FIFO, one active run. Cron, bot, FE → same enqueue.
+// Job carries group slug — cfg resolved at run time (config edits don't wait for old jobs).
+import { sql } from './db/pool.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
+import { startRun, stage as runStage, postRef, endRun } from './progress.ts';
 import type { Slot, Platform, Format } from './state.ts';
-import { renderAndSave } from './render/carousel.ts';
+import { renderAndSave, CoverGenerationError } from './render/carousel.ts';
+import { anyActiveCoverTemplate, isManualCoverMode } from './render/template.ts';
+import { artifactExists } from './storage.ts';
+import { postUsage, type PostUsage } from './llm-costs.ts';
 import { renderReelsAndSave } from './render/reels.ts';
-import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo } from './telegram.ts';
+import { sendMediaGroupPhoto, sendDocument, sendMessage, sendVideo, sendMessageWithButtons, sendPhoto } from './telegram.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
+import { getGroupCfg, getGroupCfgById } from './groups.ts';
+import { addEvent } from './repos/events.ts';
+import { getOverride, markOverrideSent } from './repos/overrides.ts';
+import { getPromotion } from './repos/promotions.ts';
+import { deliverPromotion } from './usecases/promotions.ts';
+import { getTemplate } from './repos/templates.ts';
+import { getPlanByDate } from './repos/plans.ts';
+import { resolvePlannedSlot } from './pipeline.ts';
+import { jakartaToday } from './cronmath.ts';
+import type { Override } from '@workspace/shared';
 
 type Job =
-  | { kind: 'generate'; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
-  | { kind: 'resend'; postId: number };
+  | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
+  | { kind: 'resend'; slug: string; postId: string }
+  | { kind: 'approve'; slug: string; postId: string }
+  | { kind: 'rerender'; slug: string; postId: string }
+  | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean }
+  | { kind: 'promoSend'; slug: string; promoId: string; platform: 'instagram' | 'linkedin' }
+  | { kind: 'overrideSend'; slug: string; overrideId: string };
 
 const jobs: Job[] = [];
 let running = false;
+let lastActivity = Date.now(); // liveness: any queue touch updates this
 
 export function enqueue(job: Job): number {
   jobs.push(job);
+  lastActivity = Date.now();
   void drain();
   return jobs.length;
 }
@@ -24,100 +46,570 @@ export function queueStatus(): { running: boolean; pending: number } {
   return { running, pending: jobs.length };
 }
 
+// Liveness for /api/health: idle queue is fine, but stale activity + running=true = stuck run.
+export function queueLiveness(): { running: boolean; pending: number; lastActivityMs: number } {
+  return { running, pending: jobs.length, lastActivityMs: Date.now() - lastActivity };
+}
+
 async function drain(): Promise<void> {
   if (running) return;
   running = true;
   try {
     while (jobs.length > 0) {
       const job = jobs.shift()!;
+      lastActivity = Date.now();
+      let cfg: Awaited<ReturnType<typeof getGroupCfg>> | null = null;
+      startRun(job.kind, job.slug); // live telemetry for /api/queue/live
       try {
-        if (job.kind === 'generate') await runGenerate(job.forced, job.notifyChat, job.source);
-        else await runResend(job.postId);
-      } catch (e) {
-        console.error(`[queue] job gagal: ${(e as Error).message}`);
-      }
+        cfg = await getGroupCfg(job.slug);
+        if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
+        else if (job.kind === 'approve') await runApprove(cfg, job.postId);
+        else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
+        else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
+        else if (job.kind === 'promoSend') await runPromoSend(cfg, job.promoId, job.platform);
+        else if (job.kind === 'overrideSend') await runOverrideSend(cfg, job.overrideId);
+        else await runResend(cfg, job.postId);
+        endRun();
+  } catch (e) {
+    const msg = (e as Error).message;
+    endRun(msg);
+    console.error(`[queue] job failed (${job.slug}): ${msg}`);
+    try {
+      // generate failures with a post row are evented in runGenerate; here only post-id jobs
+      // (resend/approve/rerender — id always known). promoSend/overrideSend have no post row.
+      if (cfg && 'postId' in job) await addEvent(job.postId, cfg.id, 'failed', msg);
+    } catch { /* event write must never break the queue */ }
+  }
+      lastActivity = Date.now();
     }
   } finally {
     running = false;
   }
 }
 
-// Satu run penuh: resolve slot → draft → render → kirim → markSent.
+// Deliver an override: raw content straight to Telegram — text_only → message,
+// mix → 1 photo + caption, image_only → 1 photo or album + caption.
+// Status → sent. Rotation untouched (override is not a rotation product).
+// ponytail: template-based rendering of override content (template_id is stored,
+// unused by delivery for now).
+async function deliverOverride(cfg: Awaited<ReturnType<typeof getGroupCfg>>, ov: Override): Promise<void> {
+  const keys = ov.images.map((f) => `overrides/${ov.id}/${f}`);
+  const caption = ov.description || ov.name;
+  if (ov.type === 'text_only' || keys.length === 0) {
+    await withRetry(() => sendMessage(cfg, caption.slice(0, 4000)));
+  } else if (keys.length === 1) {
+    await withRetry(() => sendPhoto(cfg, keys[0]!, caption));
+  } else {
+    await withRetry(() => sendMediaGroupPhoto(cfg, keys, caption));
+  }
+  await markOverrideSent(ov.id);
+  console.log(`[queue] override "${ov.name}" delivered (${cfg.slug}, ${ov.type}, ${keys.length} image(s)) — rotation untouched`);
+}
+
+// One full run: resolve slot → draft → render → send → markSent.
+// Approval gate (group flag): render → post awaits approval in Telegram/FE.
+// Rotation NOT consumed until approved & sent (spec #11 holds).
+// PLANS are the date-scoped source of truth (one funnel: cron/bot/FE):
+//   override_content plan → deliver the linked override (rotation never advances);
+//   slot_override plan    → pipeline runs with the pinned spec (rotation advances on sent);
+//   no plan               → natural rotation.
 async function runGenerate(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
   forced?: { platform: Platform; format?: Format },
   notifyChat = true,
   source = 'cli',
 ): Promise<void> {
-  const slot = await resolveSlot(forced);
-  console.log(`[queue] run: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}`);
-  const r = await generateDraft(slot, source);
-  await deliver(r.postId, slot, notifyChat);
-}
+  const today = jakartaToday();
+  const plan = await getPlanByDate(cfg.id, today);
 
-// Kirim post yang sudah dirender (dipakai runGenerate + resend).
-async function deliver(postId: number, slot: Slot, notifyChat: boolean): Promise<void> {
-  const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
-    from posts where id = ${postId}`;
-  if (!post) throw new Error(`post ${postId} tidak ada`);
+  // ——— override content plan: manual content replaces the pipeline ———
+  if (plan?.type === 'override_content') {
+    if (!plan.override_id) {
+      console.warn(`[queue] plan ${plan.id} has no override link — running natural pipeline`);
+    } else {
+      const ov = await getOverride(cfg.id, plan.override_id);
+      // cancelled/missing override = inert plan → natural pipeline (date freed)
+      if (ov && ov.status === 'sent') {
+        console.log(`[queue] generate skipped (${cfg.slug}) — override "${ov.name}" already sent today`);
+        await sendMessage(cfg, `Generate di-skip — override "${ov.name}" sudah terkirim hari ini.`).catch(() => {});
+        return;
+      }
+      if (ov && ov.status === 'scheduled') {
+        try {
+          console.log(`[queue] run ${cfg.slug}: override "${ov.name}" (${ov.type}) replaces pipeline source=${source}`);
+          await deliverOverride(cfg, ov);
+        } catch (e) {
+          const msg = `Override delivery failed — ${cfg.slug}: ${(e as Error).message}`;
+          console.error(`[queue] ${msg}`);
+          await sendMessage(cfg, `${msg}\nOverride tetap scheduled — /gen untuk coba lagi.`).catch(() => {});
+          throw e;
+        }
+        return;
+      }
+    }
+  }
 
-  if (post.status !== 'rendered') {
-    if (slot.format === 'text') {
-      // format text: langsung kirim body, tak perlu render
-      await sendMessage(`${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`);
-      await markSent(postId, slot);
+  // ——— promotion plan: deliver the linked promo (rotation untouched) ———
+  if (plan?.type === 'promotion' && plan.promotion_id) {
+    const promo = await getPromotion(cfg.id, plan.promotion_id);
+    if (promo?.status === 'sent') {
+      console.log(`[queue] generate skipped (${cfg.slug}) — promotion "${promo.name}" already sent`);
       return;
     }
-    // belum dirender → render dulu per format
+    if (promo && promo.content) {
+      const tpl = promo.template_id ? await getTemplate(cfg.id, promo.template_id) : null;
+      const platform: 'instagram' | 'linkedin' = tpl?.format?.endsWith('li-carousel-promo') ? 'linkedin' : 'instagram';
+      console.log(`[queue] run ${cfg.slug}: plan promotion "${promo.name}" (${platform}) source=${source}`);
+      try {
+        await deliverPromotion(cfg, promo.id, platform);
+      } catch (e) {
+        const msg = `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`;
+        console.error(`[queue] ${msg}`);
+        await sendMessage(cfg, msg).catch(() => {});
+        throw e;
+      }
+      return;
+    }
+    // promo missing (deleted) or has no content → fall through to natural pipeline
+    console.warn(`[queue] promotion plan ${plan.id} has no deliverable promo — running natural pipeline`);
+  }
+
+  // ——— slot resolution: pinned spec (slot_override) / forced (/gen args) / natural ———
+  const planned = plan?.type === 'slot_override';
+  const slot = planned
+    ? await resolvePlannedSlot(cfg.id, plan)
+    : await resolveSlot(cfg.id, forced);
+  const renderOpts = { coverRequired: true, templateId: planned ? (plan.template_id ?? undefined) : undefined };
+  console.log(`[queue] run ${cfg.slug}: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}${planned ? ` (plan ${plan!.id.slice(0, 8)}${plan!.note ? ` "${plan!.note.slice(0, 40)}"` : ''})` : ''}`);
+  if (planned && forced) {
+    // the plan owns the date — say so instead of silently ignoring the /gen args
+    await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
+  }
+  const r = await generateDraft(cfg, slot, source);
+  postRef(r.postId);
+  await addEvent(r.postId, cfg.id, 'generated');
+  try {
+    // manual cover (no image model, cover part in template, no stored cover yet):
+    // pause BEFORE render — the cover image must exist before slide 1 can use it.
+    if (await needsManualCover(cfg, r.postId, slot)) {
+      await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft));
+      return;
+    }
+    if (cfg.approval_required) await prepareForApproval(cfg, r.postId, slot, renderOpts);
+    else await deliver(cfg, r.postId, slot, notifyChat, renderOpts);
+  } catch (e) {
+    // cover generation failed with a model configured → same manual flow, but say why
+    if (e instanceof CoverGenerationError) {
+      await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft), e.cause);
+      return;
+    }
+    await markFailed(r.postId, e); // status → failed immediately, not just event
+    await addEvent(r.postId, cfg.id, 'failed', (e as Error).message).catch(() => {});
+    await notifyRunFailed(cfg, e); // silent failures are the daemon's #1 operational risk
+    throw e;
+  }
+}
+
+// Attach the cover-image cost snapshot to a post's llm_usage (merge; keep existing steps).
+// Image generation happens at render time — this is the single bookkeeping point.
+async function attachCoverCost(postId: string, coverCost: number, coverModel: string | null): Promise<void> {
+  if (!coverCost || !coverModel) return;
+  const [row] = await sql<{ llm_usage: PostUsage | null }[]>`select llm_usage from posts where id = ${postId}`;
+  const u = row?.llm_usage ?? { steps: {}, totalCost: 0 };
+  const cover = { model: coverModel, images: (u.cover?.images ?? 0) + 1, cost: Math.round(((u.cover?.cost ?? 0) + coverCost) * 10000) / 10000 };
+  await sql`update posts set llm_usage = ${JSON.stringify(postUsage(u.steps, cover))}::jsonb where id = ${postId}`;
+}
+
+// Park the post at awaiting_cover + ask Telegram for the image (skip button included).
+// Two triggers: manual mode (blank/'empty' image model) or generation failure (genError).
+// Status guard covers draft (fresh generate) and rendered/awaiting_approval (rerender path
+// — renderAndSave throws BEFORE touching status, so the pre-rerender status is still there).
+// Ask message is best-effort: the post is status-driven — uploading a photo works
+// even if this message flakes (handlePhoto finds any awaiting_cover post).
+async function parkAwaitingCover(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  topic: string,
+  slot: Slot,
+  firstHeadline: string,
+  genError?: Error,
+): Promise<void> {
+  const upd = await sql`update posts set status = 'awaiting_cover'
+    where id = ${postId} and group_id = ${cfg.id}
+    and status in ('draft','rendered','awaiting_approval') returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} not in a cover-pausable state`);
+  await addEvent(postId, cfg.id, 'awaiting_cover');
+  runStage('awaiting', `cover image — ${topic.slice(0, 50)}`); // human input needed (photo / skip)
+  console.log(`[queue] post #${postId} awaiting cover image (${cfg.slug})${genError ? ' — generation failed' : ''}`);
+  try {
+    const lines = genError
+      ? [
+          `Generate cover gagal — ${cfg.slug}`,
+          `Topik: ${topic}`,
+          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          `Error: ${genError.message.slice(0, 200)}`,
+          '',
+          'Kalau tetap mau gambar cover, upload fotonya langsung di chat ini —',
+          'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
+        ]
+      : [
+          `Cover image dibutuhkan — ${cfg.slug}`,
+          `Topik: ${topic}`,
+          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          '',
+          'Sudah menyiapkan gambar cover? Upload fotonya langsung di chat ini —',
+          'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
+        ];
+    await withRetry(() => sendMessageWithButtons(cfg, lines.join('\n'), [
+      [{ text: 'Lewati — render tanpa cover', callback_data: `skip_cover:${postId}` }],
+    ]));
+  } catch (e) {
+    console.warn(`[queue] cover request not delivered (${cfg.slug}): ${(e as Error).message}`);
+  }
+}
+
+// Manual cover needed: carousel/pdf format + a cover part in ANY active template
+// (pool-aware) + manual mode (blank/'empty' image model) + no stored cover yet.
+async function needsManualCover(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  slot: Slot,
+): Promise<boolean> {
+  if (slot.format !== 'carousel' && slot.format !== 'pdf') return false;
+  if (!isManualCoverMode(cfg.image.model)) return false;
+  if (!(await anyActiveCoverTemplate(slot.platform, cfg.id))) return false; // no cover page anywhere → nothing to ask for
+  return !(await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
+}
+
+function firstHeadline(draft: CarouselOut | ReelsOut | TextOut): string {
+  return 'slides' in draft ? (draft.slides[0]?.headline ?? '') : '';
+}
+
+// Resume after cover received (photo saved to MinIO by bot) or skipped:
+// back to draft → render (getCover reuses the uploaded cover.png; skip = never generate)
+// → gate/deliver. skipCover=true comes from the "Lewati" button — it MUST terminate the
+// cover flow (no second generation attempt → no park loop).
+async function runCoverContinue(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string, skipCover: boolean): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; body: string }[]>`select platform, format, pillar_id, status, topic, body
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  if (post.status !== 'awaiting_cover') {
+    throw new Error(`post ${postId} status ${post.status} — no cover to continue`);
+  }
+  const upd = await sql`update posts set status = 'draft'
+    where id = ${postId} and group_id = ${cfg.id} and status = 'awaiting_cover' returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} left awaiting_cover concurrently`);
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  try {
+    const resumeOpts = skipCover ? { skipCover: true } : { coverRequired: true };
+    if (cfg.approval_required) await prepareForApproval(cfg, postId, slot, resumeOpts);
+    else await deliver(cfg, postId, slot, true, resumeOpts);
+  } catch (e) {
+    // model was (re)configured between ask and resume → generation can fail here too
+    // (never on the skip path — skipCover never reaches generateImage)
+    if (e instanceof CoverGenerationError) {
+      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut), e.cause);
+      return;
+    }
+    throw e;
+  }
+}
+
+// Render (if needed) + park the post at awaiting_approval + request approval in Telegram.
+// Render happens BEFORE approval so approve→deliver is instant (no CPU wait on the button tap).
+// ponytail: pre-render approval if rejected-runs waste too much CPU.
+async function prepareForApproval(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  slot: Slot,
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean; templateId?: string } = {},
+): Promise<void> {
+  const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; status: string }[]>`select platform, format, topic, caption, body, status, artifact_prefix
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  runStage('render', post.format === 'reels' ? 'rendering reel' : 'rendering slides');
+  if (post.format !== 'text' && post.status !== 'rendered') {
     if (slot.format === 'reels') {
-      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut);
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+    } else {
+      const ra = await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg, coverOpts);
+      await attachCoverCost(postId, ra.coverCost, ra.coverModel);
+    }
+    await addEvent(postId, cfg.id, 'rendered');
+  }
+  const upd = await sql`update posts set status = 'awaiting_approval'
+    where id = ${postId} and group_id = ${cfg.id} and status in ('draft','rendered','queued') returning id`;
+  if (upd.length === 0) throw new Error(`post ${postId} not in a pre-approval state`);
+  await addEvent(postId, cfg.id, 'awaiting_approval');
+  runStage('awaiting', post.topic.slice(0, 60)); // terminal for this run — human input needed
+  console.log(`[queue] post #${postId} awaiting approval (${cfg.slug})`);
+  // Approval request is best-effort: if Telegram flakes, the post stays awaiting — FE can approve.
+  // ponytail: inline buttons only work for the env (polled) bot — groups with a token override
+  // get the message from their own bot whose callbacks we never receive; FE approve covers them.
+  // (multi-bot polling = one getUpdates loop per token, when it ever matters)
+  try {
+    await sendApprovalRequest(cfg, postId, 'Approval needed');
+  } catch (e) {
+    console.warn(`[queue] approval request failed (${cfg.slug}): ${(e as Error).message}`);
+    await addEvent(postId, cfg.id, 'failed', `approval request not delivered: ${(e as Error).message}`).catch(() => {});
+  }
+}
+
+// Approval request WITH visual preview: slide 1 PNG (carousel/pdf — pdf renders slide PNGs
+// too, previewing the PNG instead of the document avoids a duplicate PDF on approve), the
+// reel video itself, or the full text body. Buttons ride on the same message. Called AFTER
+// the post is rendered — artifact_prefix is set by then.
+async function sendApprovalRequest(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  header: string,
+): Promise<void> {
+  const [post] = await sql<{ topic: string; platform: string; format: string; caption: string | null; body: string; artifact_prefix: string | null }[]>`select topic, platform, format, caption, body, artifact_prefix
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  // Row 1 = decision. Row 2 = reject + regenerate (draft goreng → one tap retry).
+  const buttons = [
+    [
+      { text: '✓ Approve — send now', callback_data: `approve:${postId}` },
+    ],
+    [
+      { text: '↻ Regenerate', callback_data: `regen:${postId}` },
+      { text: '✗ Reject', callback_data: `reject:${postId}` },
+    ],
+  ];
+  const meta = `${header} — ${cfg.slug}\nTopic: ${post.topic}\n${post.platform}/${post.format} · rotation unchanged until sent`;
+  if (post.format === 'text') {
+    // nothing visual — show the actual post body instead of just the caption
+    const body = (JSON.parse(post.body) as TextOut).body;
+    await withRetry(() => sendMessageWithButtons(cfg, `${meta}\n\n${body.slice(0, 1500)}`, buttons));
+    return;
+  }
+  const cap = `${meta}\n\n${(post.caption ?? '').slice(0, 700)}`.slice(0, 1000);
+  const prefix = post.artifact_prefix ?? `${cfg.slug}/posts/${postId}/`;
+  if (post.format === 'reels') {
+    await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, cap, buttons));
+  } else {
+    await withRetry(() => sendPhoto(cfg, `${prefix}slide-01.png`, cap, buttons));
+  }
+}
+
+// Approve an awaiting_approval post: send now + advance rotation. On send failure the post
+// STAYS awaiting_approval (tap approve again) — no markFailed, no rotation consumption.
+async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string }[]>`select platform, format, pillar_id, status
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  if (post.status !== 'awaiting_approval') {
+    throw new Error(`post ${postId} status ${post.status} — cannot approve`);
+  }
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  await addEvent(postId, cfg.id, 'approved');
+  await deliver(cfg, postId, slot, true); // artifacts exist — no cover path
+}
+
+// Re-render an EXISTING post's body with the CURRENT template (content unchanged —
+// for "template edited after send"). Routing by the post's pre-rerender status:
+//   awaiting_approval → back to awaiting + fresh approval buttons (rotation still pending)
+//   rendered          → gate ? awaiting + buttons : deliver (first send → rotation advances)
+//   sent              → resend the new artifacts directly (rotation already consumed — untouched)
+// failed/rejected/draft/queued → refused (/gen is the right tool for those).
+async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; caption: string | null; body: string }[]>`select platform, format, pillar_id, status, topic, caption, body
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+  const wasStatus = post.status;
+  if (!['sent', 'awaiting_approval', 'rendered'].includes(wasStatus)) {
+    throw new Error(`post status ${wasStatus} — /rerender only works on sent/awaiting/rendered; use /gen for ${wasStatus}`);
+  }
+  if (post.format === 'text') throw new Error('text format has no visual template — nothing to re-render');
+
+  console.log(`[queue] rerender #${postId} (${cfg.slug}, was ${wasStatus}) with current template`);
+  runStage('render', post.topic.slice(0, 60));
+  try {
+    if (post.format === 'reels') {
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+    } else {
+      // sent posts fail-safe on cover failure (parking a delivered post + re-approving would
+      // double-advance rotation); awaiting/rendered posts park for the manual decision.
+      const ra = await renderAndSave(postId, post.platform, JSON.parse(post.body) as CarouselOut, cfg, { coverRequired: wasStatus !== 'sent' });
+      await attachCoverCost(postId, ra.coverCost, ra.coverModel);
+    }
+  } catch (e) {
+    if (e instanceof CoverGenerationError) {
+      const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut), e.cause);
+      return;
+    }
+    throw e;
+  }
+  await addEvent(postId, cfg.id, 'rerendered');
+
+  if (wasStatus === 'sent') {
+    // already delivered once → rotation was consumed → just ship the new artifacts.
+    // restore status FIRST (guarded: render*AndSave just set 'rendered'): leaving it there
+    // would let boot cleanup orphan-fail a genuinely-delivered post.
+    await sql`update posts set status = 'sent' where id = ${postId} and group_id = ${cfg.id} and status = 'rendered'`;
+    await runResend(cfg, postId);
+    return;
+  }
+  if (wasStatus === 'rendered' && !cfg.approval_required) {
+    // never sent, gate off → normal first delivery (send + rotation advance)
+    const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+    await deliver(cfg, postId, slot, true);
+    return;
+  }
+  // awaiting_approval (or rendered with gate on) → park at awaiting + fresh approval message.
+  // render*AndSave set status='rendered' — restore the deliberate pause (guarded: only from 'rendered',
+  // so a concurrent reject can never be clobbered — rejectPost itself guards on 'awaiting_approval').
+  await sql`update posts set status = 'awaiting_approval'
+    where id = ${postId} and group_id = ${cfg.id} and status = 'rendered'`;
+  await addEvent(postId, cfg.id, 'awaiting_approval');
+  try {
+    await sendApprovalRequest(cfg, postId, `Re-rendered with current template (was ${wasStatus})`);
+  } catch (e) {
+    console.warn(`[queue] rerender approval request failed (${cfg.slug}): ${(e as Error).message}`);
+  }
+  console.log(`[queue] post #${postId} re-rendered, awaiting approval (${cfg.slug})`);
+}
+
+// Send a post (used by runGenerate, runApprove, resend-style flows).
+// awaiting_approval counts as artifact-ready (approve path) — no re-render.
+async function deliver(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  postId: string,
+  slot: Slot,
+  notifyChat: boolean,
+  coverOpts: { coverRequired?: boolean; skipCover?: boolean; templateId?: string } = {},
+): Promise<void> {
+  const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
+
+  const ready = post.status === 'rendered' || post.status === 'awaiting_approval';
+  if (!ready && slot.format !== 'text') {
+    // not rendered yet → render first per format
+    runStage('render', post.topic.slice(0, 60));
+    if (slot.format === 'reels') {
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
     } else {
       const draft = JSON.parse(post.body) as CarouselOut;
-      await renderAndSave(postId, slot.platform, draft);
+      const ra = await renderAndSave(postId, slot.platform, draft, cfg, coverOpts);
+    await attachCoverCost(postId, ra.coverCost, ra.coverModel);
+    }
+    await addEvent(postId, cfg.id, 'rendered');
+  }
+
+  runStage('deliver', post.topic.slice(0, 60)); // telegram send + rotation commit
+  const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
+  if (post.format === 'carousel') {
+    const keys: string[] = [];
+    // slide count from body
+    const slides = (JSON.parse(post.body) as CarouselOut).slides.length;
+    for (let i = 1; i <= slides; i++) keys.push(`${prefix}slide-${String(i).padStart(2, '0')}.png`);
+    if (notifyChat) await withRetry(() => sendMediaGroupPhoto(cfg, keys, post.caption || post.topic));
+  } else if (post.format === 'pdf') {
+    if (notifyChat) await withRetry(() => sendDocument(cfg, `${prefix}carousel.pdf`, `carousel-${postId}.pdf`, post.caption || post.topic));
+  } else if (post.format === 'reels') {
+    if (notifyChat) await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic));
+  } else {
+    // text format: send body directly, no artifacts
+    if (notifyChat) await withRetry(() => sendMessage(cfg, `${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`));
+  }
+  await markSent(cfg.id, postId, slot);
+  await addEvent(postId, cfg.id, 'sent');
+  // ponytail: telegram send happens BEFORE the DB commit — send-ok + commit-fail = duplicate
+  // send on re-tap. Outbox/idempotency keys if it ever bites in practice.
+  console.log(`[queue] post #${postId} delivered + rotation advanced (${cfg.slug})`);
+}
+
+// Telegram sends can flake (network/429) — retry 2x with 5s backoff before failing a delivered post.
+async function withRetry(fn: () => Promise<void>, tries = 3, delayMs = 5000): Promise<void> {
+  for (let i = 1; i <= tries; i++) {
+    try {
+      await fn();
+      return;
+    } catch (e) {
+      if (i === tries) throw e;
+      console.warn(`[queue] send attempt ${i}/${tries} failed — retry in ${delayMs}ms: ${(e as Error).message}`);
+      await new Promise((r) => setTimeout(r, delayMs));
     }
   }
-
-  const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
-  if (post.format === 'carousel') {
-    const keys: string[] = [];
-    // slide count dari body
-    const slides = (JSON.parse(post.body) as CarouselOut).slides.length;
-    for (let i = 1; i <= slides; i++) keys.push(`${prefix}slide-${String(i).padStart(2, '0')}.png`);
-    if (notifyChat) await sendMediaGroupPhoto(keys, post.caption || post.topic);
-  } else if (post.format === 'pdf') {
-    if (notifyChat) await sendDocument(`${prefix}carousel.pdf`, `carousel-${postId}.pdf`, post.caption || post.topic);
-  } else if (post.format === 'reels') {
-    if (notifyChat) await sendVideo(`${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic);
-  }
-  await markSent(postId, slot);
-  console.log(`[queue] post #${postId} delivered + rotasi maju`);
 }
 
-async function runResend(postId: number): Promise<void> {
+async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
   const [post] = await sql`select platform, format, artifact_prefix, body, status, caption, topic
-    from posts where id = ${postId}`;
-  if (!post) throw new Error(`post ${postId} tidak ada`);
+    from posts where id = ${postId} and group_id = ${cfg.id}`;
+  if (!post) throw new Error(`post ${postId} not found`);
   if (post.status !== 'rendered' && post.status !== 'sent') {
-    throw new Error(`post ${postId} status ${post.status} — tidak bisa resend`);
+    throw new Error(`post ${postId} status ${post.status} — cannot resend`);
   }
   const prefix = (post.artifact_prefix as string | null) ?? `posts/${postId}/`;
   if (post.format === 'carousel') {
     const slides = (JSON.parse(post.body) as CarouselOut).slides.length;
     const keys: string[] = [];
     for (let i = 1; i <= slides; i++) keys.push(`${prefix}slide-${String(i).padStart(2, '0')}.png`);
-    await sendMediaGroupPhoto(keys, post.caption || post.topic);
+    await withRetry(() => sendMediaGroupPhoto(cfg, keys, post.caption || post.topic));
   } else if (post.format === 'pdf') {
-    await sendDocument(`${prefix}carousel.pdf`, `carousel-${postId}.pdf`, post.caption || post.topic);
+    await withRetry(() => sendDocument(cfg, `${prefix}carousel.pdf`, `carousel-${postId}.pdf`, post.caption || post.topic));
   } else if (post.format === 'reels') {
-    await sendVideo(`${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic);
+    await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, post.caption || post.topic));
   } else {
-    await sendMessage(JSON.parse(post.body).body);
+    await withRetry(() => sendMessage(cfg, JSON.parse(post.body).body));
   }
-  console.log(`[queue] post #${postId} resent`);
+  await addEvent(postId, cfg.id, 'resent');
+  console.log(`[queue] post #${postId} resent (${cfg.slug})`);
 }
 
-// Boot cleanup: orphan queued/draft/rendered saat daemon start → failed (crash sebelumnya).
+// Best-effort run-failure alert to the group's Telegram chat. Never throws.
+async function notifyRunFailed(cfg: Awaited<ReturnType<typeof getGroupCfg>>, e: unknown): Promise<void> {
+  const msg = String((e as Error)?.message ?? e).slice(0, 300);
+  try {
+    await sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`);
+  } catch (te) {
+    console.warn(`[queue] failure alert not delivered (${cfg.slug}): ${(te as Error).message}`);
+  }
+}
+
+// Boot cleanup: orphan queued/draft/rendered at daemon start → failed (previous crash).
+// awaiting_approval is a DELIBERATE pause — survives restarts, never boot-failed.
 export async function bootCleanup(): Promise<void> {
-  const r = await sql`update posts set status = 'failed', error = 'orphan saat boot'
-    where status in ('queued','draft','rendered') returning id`;
-  for (const row of r) console.log(`[boot] post #${row.id} orphan → failed`);
+  const r = await sql`update posts set status = 'failed', error = 'orphaned at boot'
+    where status in ('queued','draft','rendered') returning id, group_id`;
+  for (const row of r) {
+    console.log(`[boot] post #${row.id} orphan → failed`);
+    try {
+      await addEvent(row.id, row.group_id, 'failed', 'orphaned at boot');
+    } catch { /* event write must never break boot */ }
+  }
+  // one best-effort alert per affected group — crashed runs shouldn't be silent either
+  const byGroup = new Map<string, number>();
+  for (const row of r) byGroup.set(row.group_id, (byGroup.get(row.group_id) ?? 0) + 1);
+  for (const [groupId, n] of byGroup) {
+    const cfg = await getGroupCfgById(groupId).catch(() => null);
+    if (!cfg) continue;
+    try {
+      await sendMessage(cfg, `Daemon restarted — ${n} in-flight post${n > 1 ? 's' : ''} marked failed (${cfg.slug}). Regenerate: /gen ${cfg.slug}`);
+    } catch { /* alert is best-effort */ }
+  }
+}
+
+// Send a promo on demand (FE button) — rotation untouched.
+async function runPromoSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoId: string, platform: 'instagram' | 'linkedin'): Promise<void> {
+  runStage('deliver', `promo ${promoId.slice(0, 8)} (${platform})`);
+  try {
+    await deliverPromotion(cfg, promoId, platform);
+  } catch (e) {
+    await sendMessage(cfg, `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`).catch(() => {});
+    throw e;
+  }
+}
+
+// Re-deliver a SENT override (same content, same images) — resend semantics:
+// rotation was never involved (overrides don't consume it), status stays 'sent'.
+async function runOverrideSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, overrideId: string): Promise<void> {
+  const ov = await getOverride(cfg.id, overrideId);
+  if (!ov || ov.status !== 'sent') throw new Error(`override ${overrideId} is not in a re-deliverable state`);
+  runStage('deliver', `override "${ov.name.slice(0, 40)}"`);
+  await deliverOverride(cfg, ov);
+  console.log(`[queue] override "${ov.name}" re-delivered (${cfg.slug})`);
 }

@@ -1,66 +1,56 @@
-// Cron in-app: jadwal dari settings DB, re-schedule saat berubah, tanpa restart daemon.
+// In-app cron per group: schedule from the groups DB row, re-scheduled on change.
+// Map of groupId → CronJob. Boot: load all groups. Cron patch → refreshCron(group).
 import { CronJob } from 'cron';
-import { sql } from './db.ts';
-import { enqueue, queueStatus } from './queue.ts';
+import { sql } from './db/pool.ts';
+import { enqueue } from './queue.ts';
 
-let job: CronJob | null = null;
-let currentExpr = '';
-let currentEnabled = false;
+type JobState = { job: CronJob | null; expr: string; enabled: boolean };
+const jobs = new Map<string, JobState>();
 
-type Settings = { cron_expr: string; cron_enabled: boolean };
-
-async function readSettings(): Promise<Settings> {
-  const [row] = await sql`select cron_expr, cron_enabled from settings limit 1`;
-  if (!row || !row.cron_expr) throw new Error('settings.cron_expr kosong — jalankan migrate');
-  return { cron_expr: row.cron_expr, cron_enabled: !!row.cron_enabled };
-}
-
-function apply(expr: string, enabled: boolean): void {
-  if (job) {
-    job.stop();
-    job = null;
-  }
-  currentExpr = expr;
-  currentEnabled = enabled;
+function apply(groupId: string, slug: string, expr: string, enabled: boolean): void {
+  const st = jobs.get(groupId);
+  if (st) st.job?.stop();
+  jobs.set(groupId, { job: null, expr, enabled });
   if (!enabled) {
-    console.log(`[cron] MATI (expr: ${expr})`);
+    console.log(`[cron] ${slug}: OFF (expr: ${expr})`);
     return;
   }
-  job = new CronJob(
+  const job = new CronJob(
     expr,
     () => {
-      console.log(`[cron] trigger ${expr} — enqueue generate`);
-      enqueue({ kind: 'generate', notifyChat: true, source: 'cron' });
+      console.log(`[cron] ${slug} trigger ${expr} — enqueue generate`);
+      enqueue({ kind: 'generate', slug, notifyChat: true, source: 'cron' });
     },
     null, // onComplete
     true, // start
     'Asia/Jakarta',
   );
-  console.log(`[cron] AKTIF: ${expr} (Asia/Jakarta)`);
+  jobs.get(groupId)!.job = job;
+  console.log(`[cron] ${slug}: ON ${expr} (Asia/Jakarta)`);
 }
 
-/** Muat setting awal + start. Dipanggil sekali saat daemon boot. */
+/** Load all groups + start each one. Called once at daemon boot. */
 export async function startCron(): Promise<void> {
-  const s = await readSettings();
-  apply(s.cron_expr, s.cron_enabled);
+  const rows = await sql`select id, slug, cron_expr, cron_enabled from groups`;
+  for (const g of rows) apply(g.id, g.slug, g.cron_expr, g.cron_enabled);
 }
 
-/**
- * Re-read settings DB; re-schedule kalau berubah. Bisa dipanggil kapan saja
- * (FE step 7 manggil ini setelah update setting). No-op kalau tidak berubah.
- */
-export async function refreshCron(): Promise<void> {
-  const s = await readSettings();
-  if (s.cron_expr === currentExpr && s.cron_enabled === currentEnabled) return;
-  apply(s.cron_expr, s.cron_enabled);
+/** Re-read group; re-schedule if changed. No-op if unchanged. */
+export async function refreshCron(groupId: string): Promise<void> {
+  const [g] = await sql`select id, slug, cron_expr, cron_enabled from groups where id = ${groupId}`;
+  if (!g) {
+    // group deleted → stop the job
+    jobs.get(groupId)?.job?.stop();
+    jobs.delete(groupId);
+    return;
+  }
+  const st = jobs.get(groupId);
+  if (st && st.expr === g.cron_expr && st.enabled === g.cron_enabled) return;
+  apply(g.id, g.slug, g.cron_expr, g.cron_enabled);
 }
 
-export function cronStatus(): { expr: string; enabled: boolean; running: boolean } {
-  return { expr: currentExpr, enabled: currentEnabled, running: !!job };
-}
-
-// cegar hit ganda: kalau run masih jalan saat trigger berikutnya, queue FIFO tetap satu sumber kebenaran
-export function cronAndQueueStatus(): string {
-  const q = queueStatus();
-  return `cron=${cronStatus().expr} ${cronStatus().enabled ? 'AKTIF' : 'MATI'} | queue: ${q.running ? 'run jalan' : 'idle'}${q.pending > 0 ? `, ${q.pending} menunggu` : ''}`;
+/** Cron status per group. */
+export function cronStatus(groupId: string): { expr: string; enabled: boolean; running: boolean } {
+  const st = jobs.get(groupId);
+  return { expr: st?.expr ?? '', enabled: st?.enabled ?? false, running: !!st?.job };
 }
