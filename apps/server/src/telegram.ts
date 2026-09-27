@@ -23,7 +23,9 @@ async function tg(cfg: GroupCfg, method: string, body: Record<string, unknown>):
 export async function getUpdates(token: string, offset: number): Promise<any[]> {
   const allowed = encodeURIComponent('["message","callback_query"]');
   const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=${allowed}`, {
-    signal: AbortSignal.timeout(30_000),
+    // 25s long-poll + generous latency margin — a 30s abort turned normal slow
+    // long-polls into false "operation aborted" errors during network spikes.
+    signal: AbortSignal.timeout(40_000),
   });
   const j = await mustOk(res, 'getUpdates');
   return j.result ?? [];

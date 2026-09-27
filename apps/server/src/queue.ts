@@ -560,11 +560,13 @@ async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: s
   console.log(`[queue] post #${postId} resent (${cfg.slug})`);
 }
 
-// Best-effort run-failure alert to the group's Telegram chat. Never throws.
+// Best-effort run-failure alert to the group's Telegram chat — WITH retry:
+// a run that fails while the network is flaky must not fail silently too
+// (bit us: quota-exhausted run + telegram 502s = total silence).
 async function notifyRunFailed(cfg: Awaited<ReturnType<typeof getGroupCfg>>, e: unknown): Promise<void> {
   const msg = String((e as Error)?.message ?? e).slice(0, 300);
   try {
-    await sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`);
+    await withRetry(() => sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`), 3, 10_000);
   } catch (te) {
     console.warn(`[queue] failure alert not delivered (${cfg.slug}): ${(te as Error).message}`);
   }

@@ -57,6 +57,13 @@ async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens
   if (typeof content !== 'string' || content.length === 0) {
     throw new Error('LLM: content empty/malformed');
   }
+  // Some gateways pass upstream errors through as a 200 with the error TEXT as
+  // the message content (e.g. "Your quota is exhausted"). A JSON-mode response
+  // without a single '{' can never be valid — fail fast with the actual reason
+  // instead of dying later with "JSON parse failed: Unexpected token 'Y'".
+  if (!content.includes('{')) {
+    throw new Error(`LLM gateway error (non-JSON content): ${content.trim().slice(0, 200)}`);
+  }
   return {
     content,
     usage: {
