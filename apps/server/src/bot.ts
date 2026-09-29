@@ -89,6 +89,7 @@ export type Callback =
   | { t: 'regen'; postId: string }
   | { t: 'star'; postId: string }
   | { t: 'skip_cover'; postId: string }
+  | { t: 'genpick'; slug: string; platform?: string; format?: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
   | { t: 'ovdone' };
 
@@ -98,6 +99,14 @@ export function parseCallback(data: string): Callback | null {
   const m = data.match(/^(approve|reject|regen|star|skip_cover):([0-9a-f-]{36})$/i);
   if (m && UUID_RE.test(m[2]!)) {
     return { t: m[1]!.toLowerCase() as 'approve' | 'reject' | 'regen' | 'star' | 'skip_cover', postId: m[2]!.toLowerCase() };
+  }
+  // /gen format picker — genpick:<slug>:natural | genpick:<slug>:ig:carousel | ...
+  const gm = data.match(/^genpick:([a-z0-9_-]+):(natural|ig:carousel|ig:reels|li:pdf|li:text)$/i);
+  if (gm) {
+    const slug = gm[1]!.toLowerCase();
+    if (gm[2] === 'natural') return { t: 'genpick', slug, platform: undefined, format: undefined };
+    const [p, f] = gm[2]!.split(':');
+    return { t: 'genpick', slug, platform: p === 'ig' ? 'instagram' : 'linkedin', format: f as never };
   }
   const ot = data.match(/^ovtype:(mix|image_only|text_only)$/);
   if (ot) return { t: 'ovtype', value: ot[1]! as 'mix' | 'image_only' | 'text_only' };
@@ -179,9 +188,8 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       const groups = await listGroups();
       const slugs = groups.map((x) => x.slug).join(', ');
       return [
-        '/gen — generate the next post (first group, natural rotation)',
-        '/gen <group> — force a group',
-        '/gen <group> <platform> <format> — force group+platform+format',
+        '/gen — pilih format konten (tombol: IG carousel/reels, LI pdf/text, atau natural)',
+        '/gen <group> <platform> <format> — langsung pakai format spesifik (power-user)',
         '/ide [group] <ide> — simpan topik ke backlog (dipakai FIFO, skip ideation)',
         '/plan [group] — AI plans the upcoming week (creates cancelable plans)',
         '/override [group] — create override content for a date (guided, step by step)',
@@ -263,14 +271,30 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       const slug = cmd.slug ?? (await defaultSlug());
       const cfg = await getGroupCfg(slug).catch(() => null);
       if (!cfg) return `group "${slug}" not found`;
-      enqueue({
-        kind: 'generate',
-        slug,
-        forced: cmd.platform ? { platform: cmd.platform, format: cmd.format } : undefined,
-        notifyChat: true,
-        source: 'telegram',
-      });
-      return `queued (${slug}) — result will be sent when done.`;
+      // forced args → direct enqueue (power-user path: /gen <group> <platform> <format>)
+      if (cmd.platform) {
+        enqueue({
+          kind: 'generate', slug,
+          forced: { platform: cmd.platform, format: cmd.format },
+          notifyChat: true, source: 'telegram',
+        });
+        return `queued (${slug}) — ${cmd.platform}${cmd.format ? `/${cmd.format}` : ''}. Result will be sent when done.`;
+      }
+      // no args → show the format picker (self-documenting, one tap)
+      await sendMessageWithButtonsRaw(cfg.telegram.chatId, `Pilih format untuk ${slug}:`, [
+        [
+          { text: '🌀 Natural rotation', callback_data: `genpick:${slug}:natural` },
+        ],
+        [
+          { text: '📱 IG Carousel', callback_data: `genpick:${slug}:ig:carousel` },
+          { text: '🎬 IG Reels', callback_data: `genpick:${slug}:ig:reels` },
+        ],
+        [
+          { text: '📄 LinkedIn PDF', callback_data: `genpick:${slug}:li:pdf` },
+          { text: '✍️ LinkedIn Text', callback_data: `genpick:${slug}:li:text` },
+        ],
+      ]).catch(() => {});
+      return '—'; // the button message above IS the reply
     }
     default:
       return `Unknown command. ${cmd.raw}\nType /help`;
@@ -383,6 +407,23 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
   const cb = parseCallback(data);
   if (!cb) {
     await replyGlobal(chatId, `Unknown button: ${data}`);
+    return;
+  }
+
+  // ——— /gen format picker (inline button → enqueue with forced platform/format) ———
+  if (cb.t === 'genpick') {
+    const cfg = await getGroupCfg(cb.slug).catch(() => null);
+    if (!cfg) { await replyGlobal(chatId, `group "${cb.slug}" not found`); return; }
+    const label = cb.platform ? `${cb.platform} ${cb.format}` : 'natural rotation';
+    enqueue({
+      kind: 'generate', slug: cb.slug,
+      forced: cb.platform ? { platform: cb.platform as Platform, format: cb.format as Format } : undefined,
+      notifyChat: true, source: 'telegram',
+    });
+    const msgId = currentCallbackMessageId(chatId);
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${label}`, callback_data: `noop:${cb.slug}` }]])
+      .catch((e) => console.warn(`[bot] genpick stamp failed: ${(e as Error).message}`));
+    await replyGlobal(chatId, `Queued (${cb.slug}) — ${label}. Hasilnya menyusul.`);
     return;
   }
 

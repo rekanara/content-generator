@@ -140,6 +140,28 @@ test('parseCallback: stamped noop buttons are ignored silently', () => {
   assert.equal(parseCallback(`noop:${UUID}`), null);
 });
 
+// ---------- parseCallback: /gen format picker buttons ----------
+
+test('parseCallback: genpick natural', () => {
+  assert.deepEqual(parseCallback('genpick:default:natural'), { t: 'genpick', slug: 'default', platform: undefined, format: undefined });
+});
+
+test('parseCallback: genpick ig:carousel', () => {
+  assert.deepEqual(parseCallback('genpick:brand2:ig:carousel'), { t: 'genpick', slug: 'brand2', platform: 'instagram', format: 'carousel' });
+});
+
+test('parseCallback: genpick li:reels → null (reels is IG only)', () => {
+  assert.equal(parseCallback('genpick:default:li:reels'), null);
+});
+
+test('parseCallback: genpick li:pdf', () => {
+  assert.deepEqual(parseCallback('genpick:default:li:pdf'), { t: 'genpick', slug: 'default', platform: 'linkedin', format: 'pdf' });
+});
+
+test('parseCallback: genpick with invalid slug chars → null', () => {
+  assert.equal(parseCallback('genpick:bad slug!:natural'), null);
+});
+
 // ---------- parseCallback: override flow buttons ----------
 
 test('parseCallback: ovtype:mix / image_only / text_only', () => {

@@ -131,7 +131,7 @@ export async function registerCommands(token: string): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       commands: [
-        { command: 'gen', description: 'Generate the next post (natural rotation)' },
+        { command: 'gen', description: 'Generate content — shows format picker (IG carousel, reels, LI pdf, text)' },
         { command: 'ide', description: 'Save a topic to the idea backlog (used FIFO)' },
         { command: 'plan', description: 'AI-plan the upcoming week' },
         { command: 'override', description: 'Create override content for a date' },
