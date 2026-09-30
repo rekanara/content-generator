@@ -132,12 +132,13 @@ export async function registerCommands(token: string): Promise<void> {
     body: JSON.stringify({
       commands: [
         { command: 'gen', description: 'Generate content — shows format picker (IG carousel, reels, LI pdf, text)' },
+        { command: 'buat', description: 'Send your own content text — AI structures it into slides' },
         { command: 'ide', description: 'Save a topic to the idea backlog (used FIFO)' },
         { command: 'plan', description: 'AI-plan the upcoming week' },
         { command: 'override', description: 'Create override content for a date' },
         { command: 'rerender', description: 'Re-render latest post with current template' },
         { command: 'status', description: 'Schedule, rotation, latest post' },
-        { command: 'cancel', description: 'Abort the current override session' },
+        { command: 'cancel', description: 'Abort the current /buat or /override session' },
         { command: 'help', description: 'All commands' },
       ],
     }),

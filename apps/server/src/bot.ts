@@ -25,6 +25,7 @@ import type { Platform, Format } from './state.ts';
 export type Cmd =
   | { t: 'gen'; slug?: string; platform?: Platform; format?: Format }
   | { t: 'ide'; slug?: string; text: string }
+  | { t: 'buat'; slug?: string }
   | { t: 'rerender'; slug?: string }
   | { t: 'override'; slug?: string }
   | { t: 'plan'; slug?: string }
@@ -55,6 +56,12 @@ export function parseCmd(text: string, slugs: string[]): Cmd {
   if (s.startsWith('/override')) {
     const arg = s.split(/\s+/)[1];
     return { t: 'override', slug: arg && slugs.includes(arg) ? arg : undefined };
+  }
+  if (s.startsWith('/buat')) {
+    const parts = s.split(/\s+/).slice(1);
+    let slug: string | undefined;
+    if (parts[0] && slugs.includes(parts[0])) slug = parts.shift()!.toLowerCase();
+    return { t: 'buat', slug };
   }
   if (s.startsWith('/ide')) {
     // case matters for idea text — parse from the RAW text, not the lowercased copy
@@ -90,6 +97,7 @@ export type Callback =
   | { t: 'star'; postId: string }
   | { t: 'skip_cover'; postId: string }
   | { t: 'genpick'; slug: string; platform?: string; format?: string }
+  | { t: 'buatpick'; slug: string; platform?: string; format?: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
   | { t: 'ovdone' };
 
@@ -107,6 +115,14 @@ export function parseCallback(data: string): Callback | null {
     if (gm[2] === 'natural') return { t: 'genpick', slug, platform: undefined, format: undefined };
     const [p, f] = gm[2]!.split(':');
     return { t: 'genpick', slug, platform: p === 'ig' ? 'instagram' : 'linkedin', format: f as never };
+  }
+  // /buat format picker — same pattern as genpick but starts a content-capture session
+  const bm = data.match(/^buatpick:([a-z0-9_-]+):(natural|ig:carousel|ig:reels|li:pdf|li:text)$/i);
+  if (bm) {
+    const slug = bm[1]!.toLowerCase();
+    if (bm[2] === 'natural') return { t: 'buatpick', slug, platform: undefined, format: undefined };
+    const [p, f] = bm[2]!.split(':');
+    return { t: 'buatpick', slug, platform: p === 'ig' ? 'instagram' : 'linkedin', format: f as never };
   }
   const ot = data.match(/^ovtype:(mix|image_only|text_only)$/);
   if (ot) return { t: 'ovtype', value: ot[1]! as 'mix' | 'image_only' | 'text_only' };
@@ -190,6 +206,7 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       return [
         '/gen — pilih format konten (tombol: IG carousel/reels, LI pdf/text, atau natural)',
         '/gen <group> <platform> <format> — langsung pakai format spesifik (power-user)',
+        '/buat [group] — kirim teks konten kamu sendiri, AI menstruktur jadi slide',
         '/ide [group] <ide> — simpan topik ke backlog (dipakai FIFO, skip ideation)',
         '/plan [group] — AI plans the upcoming week (creates cancelable plans)',
         '/override [group] — create override content for a date (guided, step by step)',
@@ -201,6 +218,25 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
     }
     case 'status':
       return handleStatus(cmd.slug);
+    case 'buat': {
+      const slug = cmd.slug ?? (await defaultSlug());
+      const cfg = await getGroupCfg(slug).catch(() => null);
+      if (!cfg) return `group "${slug}" not found`;
+      await sendMessageWithButtonsRaw(cfg.telegram.chatId, `Pilih format untuk konten kamu (${slug}):`, [
+        [
+          { text: '🌀 Natural rotation', callback_data: `buatpick:${slug}:natural` },
+        ],
+        [
+          { text: '📱 IG Carousel', callback_data: `buatpick:${slug}:ig:carousel` },
+          { text: '🎬 IG Reels', callback_data: `buatpick:${slug}:ig:reels` },
+        ],
+        [
+          { text: '📄 LinkedIn PDF', callback_data: `buatpick:${slug}:li:pdf` },
+          { text: '✍️ LinkedIn Text', callback_data: `buatpick:${slug}:li:text` },
+        ],
+      ]).catch(() => {});
+      return '—';
+    }
     case 'ide': {
       const slug = cmd.slug ?? (await defaultSlug());
       const cfg = await getGroupCfg(slug).catch(() => null);
@@ -211,9 +247,11 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       return `Idea disimpan (#${idea.id.slice(0, 8)}) — posisi ${n} di antrian ${slug}.\nPipeline akan memakainya di run berikutnya (FIFO), sebelum ideation LLM.`;
     }
     case 'cancel': {
-      const had = overrideSessions.size > 0;
+      const hadOv = overrideSessions.size > 0;
+      const hadBuat = buatSessions.size > 0;
       overrideSessions.clear();
-      return had ? 'Override session dibatalkan.' : 'Tidak ada sesi override yang aktif.';
+      buatSessions.clear();
+      return hadOv || hadBuat ? 'Session dibatalkan.' : 'Tidak ada sesi yang aktif.';
     }
     case 'plan': {
       const slug = cmd.slug ?? (await defaultSlug());
@@ -301,6 +339,17 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
   }
 }
 
+// ——— /buat content-capture session (per chat, in-memory) ———
+type BuatSession = { slug: string; platform?: Platform; format?: Format; createdAt: number };
+const buatSessions = new Map<string, BuatSession>();
+const BUAT_TTL_MS = 5 * 60_000;
+function getBuatSession(chatId: string): BuatSession | null {
+  const s = buatSessions.get(chatId);
+  if (!s) return null;
+  if (Date.now() - s.createdAt > BUAT_TTL_MS) { buatSessions.delete(chatId); return null; }
+  return s;
+}
+
 // ——— polling loop ———
 let stopped = false;
 
@@ -361,6 +410,7 @@ export async function startBot(): Promise<void> {
           }
 
           const chatId = String(u.message?.chat?.id ?? config.telegram.chatId);
+          const buatSession = getBuatSession(chatId);
           const session = getSession(chatId);
 
           const text = u.message?.text;
@@ -376,6 +426,23 @@ export async function startBot(): Promise<void> {
                 await handlePhoto(chatId, photo);
               }
             }
+            continue;
+          }
+
+          // mid-buat-session non-command text = the user's content brief
+          if (buatSession && !text.trim().startsWith('/')) {
+            buatSessions.delete(chatId);
+            const brief = text.trim();
+            if (brief.length < 10) {
+              await replyGlobal(chatId, 'Teksnya kependekan — minimal 10 karakter. Mulai lagi dengan /buat');
+              continue;
+            }
+            enqueue({
+              kind: 'generate', slug: buatSession.slug,
+              forced: buatSession.platform ? { platform: buatSession.platform, format: buatSession.format } : undefined,
+              notifyChat: true, source: 'buat', brief,
+            });
+            await replyGlobal(chatId, `Oke — konten kamu (${brief.length} karakter) di-queue sebagai ${buatSession.slug}${buatSession.platform ? ` ${buatSession.platform}${buatSession.format ? `/${buatSession.format}` : ''}` : ''}. AI akan menstruktur jadi slide, hasilnya menyusul.`);
             continue;
           }
 
@@ -424,6 +491,24 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${label}`, callback_data: `noop:${cb.slug}` }]])
       .catch((e) => console.warn(`[bot] genpick stamp failed: ${(e as Error).message}`));
     await replyGlobal(chatId, `Queued (${cb.slug}) — ${label}. Hasilnya menyusul.`);
+    return;
+  }
+
+  // ——— /buat format picker (inline button → start content-capture session) ———
+  if (cb.t === 'buatpick') {
+    const cfg = await getGroupCfg(cb.slug).catch(() => null);
+    if (!cfg) { await replyGlobal(chatId, `group "${cb.slug}" not found`); return; }
+    buatSessions.set(cfg.telegram.chatId, {
+      slug: cb.slug,
+      platform: cb.platform as Platform | undefined,
+      format: cb.format as Format | undefined,
+      createdAt: Date.now(),
+    });
+    const label = cb.platform ? `${cb.platform} ${cb.format}` : 'natural rotation';
+    const msgId = currentCallbackMessageId(chatId);
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `✍️ ${label} — kirim teks`, callback_data: `noop:${cb.slug}` }]])
+      .catch(() => {});
+    await replyGlobal(chatId, `Format: ${label}. Kirim teks konten kamu sekarang — tulis detail sebanyak mau, AI akan menstruktur jadi slide. Hashtag yang kamu kasih ikut dipakai. (5 menit sebelum session hangus, /cancel untuk batal)`);
     return;
   }
 

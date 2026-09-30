@@ -83,7 +83,10 @@ export async function resolvePlannedSlot(
 }
 
 // Full LLM phase: ideation → writer → critic. No render, no send.
-export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): Promise<RunResult> {
+// brief: when provided (Telegram /buat), skips ideation entirely — the user's
+// full text becomes the source material. First line = topic (the hook), rest =
+// angle (the story). Writer restructures, does NOT rewrite from scratch.
+export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli', brief?: string): Promise<RunResult> {
   const groupId = cfg.id;
   const pillar = await getPillar(slot.pillar_id);
   const usage: UsageAcc = {};
@@ -105,33 +108,42 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
     var newsCtx: string | null = null;
   }
 
-  // 1. topic source: idea backlog (FIFO, human-submitted) → else ideation LLM.
-  //    An idea row carries the topic itself — no ideation call, no dedup screening
-  //    (the human already decided). marked used AFTER the draft persists.
+  // 1. topic source priority: brief (/buat) > idea backlog (FIFO) > ideation LLM.
   runStage('slot', `${slot.platform}/${slot.format} · ${effPillar.name}`);
-  const idea = await claimIdea(groupId);
   let topic: string;
   let angle: string;
-  if (idea) {
-    topic = idea.text.trim().slice(0, 400);
-    angle = '';
-    runStage('writer', `idea backlog: ${topic.slice(0, 50)}`);
-    console.log(`[pipeline] idea backlog #${idea.id.slice(0, 8)} claimed: "${topic.slice(0, 60)}"`);
+  let idea: Awaited<ReturnType<typeof claimIdea>> = null;
+  if (brief) {
+    // User-provided content: first line = topic (the hook), full text = angle (story).
+    // Writer restructures into slides — does NOT rewrite from scratch.
+    const lines = brief.trim().split('\n').filter((l) => l.trim());
+    topic = lines[0]?.trim().slice(0, 120) ?? brief.trim().slice(0, 120);
+    angle = brief.trim();
+    runStage('writer', `brief: ${topic.slice(0, 50)}`);
+    console.log(`[pipeline] brief provided (${brief.length} chars) — skipping ideation`);
   } else {
-    runStage('ideation');
-    const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
-    const id = await chatJson(
-      cfg,
-      writerModel(cfg),
-      ideationPrompt(effPillar, history, newsCtx, recentTopics),
-      isIdeationOut,
-      6000,
-    );
-    addUsage(usage, 'ideation', writerModel(cfg), id.usage);
-    console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
-    topic = id.data.topic;
-    angle = id.data.angle;
-    runStage('writer', topic.slice(0, 60));
+    idea = await claimIdea(groupId);
+    if (idea) {
+      topic = idea.text.trim().slice(0, 400);
+      angle = '';
+      runStage('writer', `idea backlog: ${topic.slice(0, 50)}`);
+      console.log(`[pipeline] idea backlog #${idea.id.slice(0, 8)} claimed: "${topic.slice(0, 60)}"`);
+    } else {
+      runStage('ideation');
+      const [history, recentTopics] = await Promise.all([getHistory(effPillar.id), getRecentTopics(groupId)]);
+      const id = await chatJson(
+        cfg,
+        writerModel(cfg),
+        ideationPrompt(effPillar, history, newsCtx, recentTopics),
+        isIdeationOut,
+        6000,
+      );
+      addUsage(usage, 'ideation', writerModel(cfg), id.usage);
+      console.log(`[ideation] topic="${id.data.topic}" tokens=${id.usage.completion}`);
+      topic = id.data.topic;
+      angle = id.data.angle;
+      runStage('writer', topic.slice(0, 60));
+    }
   }
 
   // 2. writer
@@ -139,7 +151,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   const w = await chatJson(
     cfg,
     writerModel(cfg),
-    writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples),
+    writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples, undefined, brief),
     writerGuard(slot.format) as (x: unknown) => x is Draft,
     8000,
   );
@@ -152,7 +164,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
   //    scoring draft wins. Score absent (old-shape critic output) → gate off, ship.
   runStage('critic');
   const runWriter = async (feedback?: string) =>
-    chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples, feedback),
+    chatJson(cfg, writerModel(cfg), writerPrompt(slot.platform, slot.format, topic, angle, effPillar.name, samples, feedback, brief),
       writerGuard(slot.format) as (x: unknown) => x is Draft, 8000);
   const runCritic = async (d: Draft) =>
     chatJson(cfg, criticModel(cfg), criticPrompt(slot.platform, slot.format, d),
@@ -193,8 +205,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli'): 
       ${captionOf(final, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
-  if (idea) await markIdeaUsed(idea.id); // consumed only once the draft exists
-  postRef(post.id);
+  if (idea && !brief) await markIdeaUsed(idea.id); // consumed only once the draft exists
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
   return { postId: post.id, slot, topic, draft: final };
