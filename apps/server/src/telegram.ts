@@ -23,7 +23,9 @@ async function tg(cfg: GroupCfg, method: string, body: Record<string, unknown>):
 export async function getUpdates(token: string, offset: number): Promise<any[]> {
   const allowed = encodeURIComponent('["message","callback_query"]');
   const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=25&offset=${offset}&allowed_updates=${allowed}`, {
-    signal: AbortSignal.timeout(30_000),
+    // 25s long-poll + generous latency margin — a 30s abort turned normal slow
+    // long-polls into false "operation aborted" errors during network spikes.
+    signal: AbortSignal.timeout(40_000),
   });
   const j = await mustOk(res, 'getUpdates');
   return j.result ?? [];
@@ -129,13 +131,14 @@ export async function registerCommands(token: string): Promise<void> {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       commands: [
-        { command: 'gen', description: 'Generate the next post (natural rotation)' },
+        { command: 'gen', description: 'Generate content — shows format picker (IG carousel, reels, LI pdf, text)' },
+        { command: 'buat', description: 'Send your own content text — AI structures it into slides' },
         { command: 'ide', description: 'Save a topic to the idea backlog (used FIFO)' },
         { command: 'plan', description: 'AI-plan the upcoming week' },
         { command: 'override', description: 'Create override content for a date' },
         { command: 'rerender', description: 'Re-render latest post with current template' },
         { command: 'status', description: 'Schedule, rotation, latest post' },
-        { command: 'cancel', description: 'Abort the current override session' },
+        { command: 'cancel', description: 'Abort the current /buat or /override session' },
         { command: 'help', description: 'All commands' },
       ],
     }),

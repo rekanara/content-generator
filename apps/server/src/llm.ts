@@ -35,7 +35,7 @@ async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens
       response_format: { type: 'json_object' },
       stream: false, // provider ag/* defaults to SSE — force non-stream for a single JSON body
     }),
-    signal: AbortSignal.timeout(300_000), // reasoning model via router: 120s not enough for critic
+    signal: AbortSignal.timeout(600_000), // reasoning models via slow gateways need more room
   });
   if (!res.ok) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const text = await res.text();
@@ -56,6 +56,13 @@ async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens
   }
   if (typeof content !== 'string' || content.length === 0) {
     throw new Error('LLM: content empty/malformed');
+  }
+  // Some gateways pass upstream errors through as a 200 with the error TEXT as
+  // the message content (e.g. "Your quota is exhausted"). A JSON-mode response
+  // without a single '{' can never be valid — fail fast with the actual reason
+  // instead of dying later with "JSON parse failed: Unexpected token 'Y'".
+  if (!content.includes('{')) {
+    throw new Error(`LLM gateway error (non-JSON content): ${content.trim().slice(0, 200)}`);
   }
   return {
     content,

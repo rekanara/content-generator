@@ -69,6 +69,7 @@ export function writerPrompt(
   pillarName: string,
   samples: StyleSample[],
   feedback?: string,
+  brief?: string,
 ): Msg[] {
   const plat =
     platform === 'instagram'
@@ -88,6 +89,7 @@ JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max
 JSON: {"body": string}`,
   }[format]!;
 
+  const isBrief = brief && brief.trim().length > 0;
   return [
     {
       role: 'system',
@@ -98,6 +100,7 @@ JSON: {"body": string}`,
       content: `Topic: ${topic}
 Angle: ${angle}
 Pillar: ${pillarName}
+${isBrief ? `\nUSER-PROVIDED CONTENT — restructure this into ${format} slides. Keep the story, facts, specific details, and hashtags INTACT. Do NOT rewrite from scratch or invent new claims. Spread the content across slides, one idea per slide. Use the hashtags from the user's text.\n---\n${brief}\n---\n` : ''}
 ${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
 Format:
 ${fmt}

@@ -182,7 +182,7 @@ export const Idea = z.object({
 export type Idea = z.infer<typeof Idea>;
 
 export const IdeaInput = z.object({
-  text: z.string().trim().min(3).max(400),
+  text: z.string().trim().min(3).max(4000),
 });
 export type IdeaInput = z.infer<typeof IdeaInput>;
 

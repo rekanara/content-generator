@@ -140,6 +140,48 @@ test('parseCallback: stamped noop buttons are ignored silently', () => {
   assert.equal(parseCallback(`noop:${UUID}`), null);
 });
 
+// ---------- parseCallback: /gen format picker buttons ----------
+
+test('parseCallback: genpick natural', () => {
+  assert.deepEqual(parseCallback('genpick:default:natural'), { t: 'genpick', slug: 'default', platform: undefined, format: undefined });
+});
+
+test('parseCallback: genpick ig:carousel', () => {
+  assert.deepEqual(parseCallback('genpick:brand2:ig:carousel'), { t: 'genpick', slug: 'brand2', platform: 'instagram', format: 'carousel' });
+});
+
+test('parseCallback: genpick li:reels → null (reels is IG only)', () => {
+  assert.equal(parseCallback('genpick:default:li:reels'), null);
+});
+
+test('parseCallback: genpick li:pdf', () => {
+  assert.deepEqual(parseCallback('genpick:default:li:pdf'), { t: 'genpick', slug: 'default', platform: 'linkedin', format: 'pdf' });
+});
+
+test('parseCmd: /buat with group slug', () => {
+  assert.deepEqual(parseCmd('/buat brand2', SLUGS), { t: 'buat', slug: 'brand2' });
+});
+
+test('parseCmd: /buat without slug → first group', () => {
+  assert.deepEqual(parseCmd('/buat', SLUGS), { t: 'buat', slug: undefined });
+});
+
+test('parseCallback: buatpick ig:carousel', () => {
+  assert.deepEqual(parseCallback('buatpick:default:ig:carousel'), { t: 'buatpick', slug: 'default', platform: 'instagram', format: 'carousel' });
+});
+
+test('parseCallback: buatpick natural', () => {
+  assert.deepEqual(parseCallback('buatpick:default:natural'), { t: 'buatpick', slug: 'default', platform: undefined, format: undefined });
+});
+
+test('parseCallback: buatpick li:text', () => {
+  assert.deepEqual(parseCallback('buatpick:default:li:text'), { t: 'buatpick', slug: 'default', platform: 'linkedin', format: 'text' });
+});
+
+test('parseCallback: genpick with invalid slug chars → null', () => {
+  assert.equal(parseCallback('genpick:bad slug!:natural'), null);
+});
+
 // ---------- parseCallback: override flow buttons ----------
 
 test('parseCallback: ovtype:mix / image_only / text_only', () => {

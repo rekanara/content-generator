@@ -23,7 +23,7 @@ import { jakartaToday } from './cronmath.ts';
 import type { Override } from '@workspace/shared';
 
 type Job =
-  | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string }
+  | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string; brief?: string }
   | { kind: 'resend'; slug: string; postId: string }
   | { kind: 'approve'; slug: string; postId: string }
   | { kind: 'rerender'; slug: string; postId: string }
@@ -62,7 +62,7 @@ async function drain(): Promise<void> {
       startRun(job.kind, job.slug); // live telemetry for /api/queue/live
       try {
         cfg = await getGroupCfg(job.slug);
-        if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source);
+        if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source, job.brief);
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
@@ -118,6 +118,7 @@ async function runGenerate(
   forced?: { platform: Platform; format?: Format },
   notifyChat = true,
   source = 'cli',
+  brief?: string,
 ): Promise<void> {
   const today = jakartaToday();
   const plan = await getPlanByDate(cfg.id, today);
@@ -185,7 +186,7 @@ async function runGenerate(
     // the plan owns the date — say so instead of silently ignoring the /gen args
     await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
   }
-  const r = await generateDraft(cfg, slot, source);
+  const r = await generateDraft(cfg, slot, source, brief);
   postRef(r.postId);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
@@ -560,11 +561,13 @@ async function runResend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: s
   console.log(`[queue] post #${postId} resent (${cfg.slug})`);
 }
 
-// Best-effort run-failure alert to the group's Telegram chat. Never throws.
+// Best-effort run-failure alert to the group's Telegram chat — WITH retry:
+// a run that fails while the network is flaky must not fail silently too
+// (bit us: quota-exhausted run + telegram 502s = total silence).
 async function notifyRunFailed(cfg: Awaited<ReturnType<typeof getGroupCfg>>, e: unknown): Promise<void> {
   const msg = String((e as Error)?.message ?? e).slice(0, 300);
   try {
-    await sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`);
+    await withRetry(() => sendMessage(cfg, `Run failed — ${cfg.slug}: ${msg}\nThe slot's rotation was NOT consumed. Regenerate: /gen ${cfg.slug}`), 3, 10_000);
   } catch (te) {
     console.warn(`[queue] failure alert not delivered (${cfg.slug}): ${(te as Error).message}`);
   }

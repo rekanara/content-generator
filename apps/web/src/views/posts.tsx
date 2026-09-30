@@ -48,7 +48,7 @@ function IdeasCard({ slug, ideas, reload }: { slug: string; ideas: Idea[] | unde
         Topik yang kamu simpan — pipeline memakainya FIFO di run berikutnya (sebelum ideation AI). Telegram: <code>/ide [group] &lt;ide&gt;</code>
       </p>
       <form onSubmit={submit} className="mt-3 flex gap-2">
-        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Kenapa sprint estimation selalu meleset 2x" maxLength={400} />
+        <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Kenapa sprint estimation selalu meleset 2x" maxLength={4000} />
         <Button type="submit" size="sm" disabled={busy || text.trim().length < 3}>Add</Button>
       </form>
       {(ideas ?? []).length > 0 && (
