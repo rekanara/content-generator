@@ -65,7 +65,7 @@ export function DashboardView({ slug }: { slug: string }) {
         <Stat label="Cron" value={cron.enabled ? cron.expr : "off"} sub={cron.running ? "running" : "stopped"} mono />
         <Stat label="Queue" value={queue.running ? "active" : "idle"} sub={`${queue.pending} pending`} />
         <Stat label="Last rotation" value={rotation.last_platform} sub={rotation.updated_at ? new Date(rotation.updated_at).toLocaleString("en-US") : "—"} />
-        <Stat label="Next slot" value={`${next_slot.platform}/${next_slot.format}`} sub={`pillar #${next_slot.pillar_id}`} />
+        <Stat label="Next slot" value={next_slot ? `${next_slot.platform}/${next_slot.format}` : "—"} sub={next_slot ? `pillar #${next_slot.pillar_id}` : "no active pillars"} />
       </section>
 
       <section className="space-y-2">

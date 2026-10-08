@@ -1,17 +1,18 @@
-import { useState } from "react"
-import { Pencil, Trash2 } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Pencil, Sparkles, Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
+import { Textarea } from "@workspace/ui/components/textarea"
 import { Checkbox } from "@workspace/ui/components/checkbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@workspace/ui/components/dialog"
 import { api, ApiError } from "@/lib/api"
-import { usePillars, useCron } from "@/lib/hooks"
-import type { Pillar } from "@workspace/shared"
+import { usePillars, useCron, useGroup } from "@/lib/hooks"
+import type { Pillar, PillarSuggestion } from "@workspace/shared"
 
 export function PillarsView({ slug }: { slug: string }) {
   const { data: pillars, error, loading, reload } = usePillars(slug)
@@ -20,6 +21,61 @@ export function PillarsView({ slug }: { slug: string }) {
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [editing, setEditing] = useState<Pillar | null>(null)
+  const [suggesting, setSuggesting] = useState(false)
+  const [suggestRows, setSuggestRows] = useState<Row[] | null>(null)
+  const [suggestErr, setSuggestErr] = useState<string | null>(null)
+  const [suggestBusy, setSuggestBusy] = useState(false)
+  const [suggestStarted, setSuggestStarted] = useState(0)
+  const ctrlRef = useRef<AbortController | null>(null)
+  const [, tick] = useState(0)
+
+  useEffect(() => {
+    if (!suggestBusy) return
+    const id = setInterval(() => tick((n) => n + 1), 1000)
+    return () => clearInterval(id)
+  }, [suggestBusy])
+
+  const generatePillars = async (brief: string) => {
+    const ctrl = new AbortController()
+    ctrlRef.current = ctrl
+    setSuggesting(false); setSuggestRows(null); setSuggestErr(null); setSuggestBusy(true); setSuggestStarted(Date.now())
+    try {
+      const r = await api.suggestPillars(slug, brief, ctrl.signal)
+      setSuggestRows(r.pillars.map((p) => ({ ...p, pick: true })))
+      if (r.pillars.length === 0) setSuggestErr("AI did not find any new pillar beyond the existing ones.")
+    } catch (e) {
+      setSuggestErr(e instanceof ApiError ? e.message : "failed to generate")
+    } finally {
+      setSuggestBusy(false); ctrlRef.current = null
+    }
+  }
+
+  const cancelSuggest = () => {
+    ctrlRef.current?.abort()
+    ctrlRef.current = null
+    setSuggestBusy(false)
+    setSuggestErr("Generation canceled.")
+  }
+
+  const addSuggested = async () => {
+    const picked = (suggestRows ?? []).filter(valid)
+    const nextOrder = (pillars ?? []).reduce((m, p) => Math.max(m, p.sort_order), 0) + 1
+    setSuggestBusy(true); setSuggestErr(null)
+    const failed: string[] = []
+    const done = new Set<Row>()
+    for (const [i, r] of picked.entries()) {
+      try {
+        await api.addPillar(slug, { name: r.name.trim(), description: r.description.trim(), is_news: r.is_news, sort_order: nextOrder + i })
+        done.add(r)
+      } catch (e) {
+        failed.push(`${r.name}: ${e instanceof ApiError ? e.message : "failed"}`)
+      }
+    }
+    setSuggestBusy(false)
+    if (failed.length === 0) { setSuggestRows(null); reload(); return }
+    setSuggestRows((rs) => rs!.filter((r) => !done.has(r)))
+    setSuggestErr(failed.join(" · "))
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,11 +105,29 @@ export function PillarsView({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-lg font-semibold">Pillars &amp; schedule</h1>
-        <p className="text-sm text-muted-foreground">Regular posts only: the topics the AI rotates through, and when the daily auto-post runs. News topics are configured under News.</p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg font-semibold">Pillars &amp; schedule</h1>
+          <p className="text-sm text-muted-foreground">Regular posts only: the topics the AI rotates through, and when the daily auto-post runs. News topics are configured under News.</p>
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setSuggesting(true)}>
+          <Sparkles className="size-4" /> Generate pillars
+        </Button>
       </div>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
+
+      {(suggestBusy || suggestErr || suggestRows) && (
+        <PillarSuggestCard
+          rows={suggestRows}
+          err={suggestErr}
+          busy={suggestBusy}
+          elapsed={suggestStarted ? Math.max(0, Math.round((Date.now() - suggestStarted) / 1000)) : 0}
+          onCancel={cancelSuggest}
+          onClear={() => { setSuggestRows(null); setSuggestErr(null) }}
+          onAdd={addSuggested}
+          onRow={(i, p) => setSuggestRows((rs) => rs!.map((r, j) => (j === i ? { ...r, ...p } : r)))}
+        />
+      )}
 
       {cron && <CronEditor cron={cron} onSave={saveCron} />}
 
@@ -115,7 +189,87 @@ export function PillarsView({ slug }: { slug: string }) {
           onSaved={() => { setEditing(null); reload() }}
         />
       )}
+
+      {suggesting && (
+        <SuggestPillarsDialog
+          slug={slug}
+          onClose={() => setSuggesting(false)}
+          onGenerate={generatePillars}
+        />
+      )}
     </div>
+  )
+}
+
+type Row = PillarSuggestion & { pick: boolean }
+const valid = (r: Row) => r.pick && r.name.trim() !== "" && r.description.trim() !== ""
+
+function PillarSuggestCard({ rows, err, busy, elapsed, onCancel, onClear, onAdd, onRow }: {
+  rows: Row[] | null; err: string | null; busy: boolean; elapsed: number;
+  onCancel: () => void; onClear: () => void; onAdd: () => void; onRow: (i: number, p: Partial<Row>) => void
+}) {
+  const pickedN = (rows ?? []).filter(valid).length
+  return (
+    <Card className={err ? "border-destructive/40" : "border-amber-500/40"}>
+      <CardContent className="space-y-3 p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">Generating pillars</p>
+            <p className="text-xs text-muted-foreground">
+              {busy ? `AI is designing pillars from your brief… ${elapsed}s` : err ? "Generation stopped." : "Review and edit the generated pillars before adding."}
+            </p>
+          </div>
+          {busy ? <Button size="sm" variant="outline" onClick={onCancel}>Cancel</Button> : <Button size="sm" variant="ghost" onClick={onClear}>Dismiss</Button>}
+        </div>
+        {err && <p className="text-sm text-destructive">{err}</p>}
+        {rows && rows.length > 0 && (
+          <div className="space-y-2">
+            {rows.map((r, i) => (
+              <div key={i} className="flex gap-3 rounded-lg border p-3">
+                <Checkbox aria-label={`select ${r.name}`} checked={r.pick} className="mt-2"
+                  onCheckedChange={(c) => onRow(i, { pick: c === true })} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <Input aria-label="pillar name" value={r.name} onChange={(e) => onRow(i, { name: e.target.value })} />
+                  <Textarea aria-label="description" className="min-h-16" value={r.description} onChange={(e) => onRow(i, { description: e.target.value })} />
+                  {r.is_news && <p className="text-xs text-amber-500">News pillar — needs RSS (set it up in News), otherwise the pipeline falls back to another pillar.</p>}
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-end">
+              <Button disabled={busy || pickedN === 0} onClick={onAdd}>{busy ? "adding…" : `Add ${pickedN}`}</Button>
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function SuggestPillarsDialog({ slug, onClose, onGenerate }: {
+  slug: string; onClose: () => void; onGenerate: (brief: string) => void
+}) {
+  const { data: group } = useGroup(slug)
+  const [brief, setBrief] = useState<string | null>(null)
+  const text = brief ?? group?.brief ?? ""
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Generate pillars</DialogTitle>
+          <DialogDescription>Describe this account: target audience, goals, voice, topics to cover, and topics to avoid. The dialog closes immediately; progress and results appear on this page.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="pillar-brief">Brief</Label>
+          <Textarea id="pillar-brief" className="min-h-40" value={text}
+            placeholder="e.g. an account for Indonesian junior developers with 0-2 years of work experience. Goal: help them survive at work — code review, task estimates, PM communication…"
+            onChange={(e) => setBrief(e.target.value)} />
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button disabled={text.trim().length < 20} onClick={() => onGenerate(text)}><Sparkles className="size-4" /> Generate</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

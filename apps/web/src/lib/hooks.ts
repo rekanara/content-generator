@@ -23,6 +23,7 @@ export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
 }
 
 export const useGroups = () => useApi<Group[]>(api.groups);
+export const useGroup = (slug: string) => useApi<Group>(() => api.group(slug), [slug]);
 export const useDashboard = (slug: string) => useApi<Dashboard>(() => api.dashboard(slug), [slug]);
 export const usePillars = (slug: string) => useApi<Pillar[]>(() => api.pillars(slug), [slug]);
 export const usePosts = (slug: string) => useApi<PostSummary[]>(() => api.posts(slug), [slug]);

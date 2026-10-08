@@ -318,6 +318,76 @@ export function plannerPrompt(runs: PlannerRun[], templates: PlannerTemplate[], 
   ];
 }
 
+// ——— AI pillar suggestions (pure) ———
+// Owner's free-text brief → content pillars that ROTATE daily (each pillar must sustain
+// many distinct posts). Existing pillars are shown so it only fills gaps.
+export function pillarSuggestPrompt(
+  brief: string,
+  existing: { name: string; description: string; is_news: boolean }[],
+): Msg[] {
+  const ex = existing.length
+    ? `Pillars that ALREADY exist (do NOT repeat or rename them — only fill gaps):\n${existing.map((p) => `- ${p.name}${p.is_news ? ' (news)' : ''}: ${p.description}`).join('\n')}`
+    : 'No pillars yet.';
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a content strategist designing CONTENT PILLARS for a social media account (Instagram + LinkedIn, one post per day).',
+        'A pillar is a recurring theme the daily generator rotates through; each needs to sustain dozens of DISTINCT posts.',
+        'Rules:',
+        '- Derive audience, intent, and voice from the owner\'s brief — do not assume developers unless the brief says so.',
+        `- Propose ${existing.length ? '2-5 NEW' : '4-6'} pillars that are clearly different from each other (no overlap).`,
+        '- name: short, 2-5 words. description: 1-3 sentences that tell a writer exactly what posts in this pillar cover and for whom — this text is fed to the writer verbatim.',
+        '- Write name and description in the language the brief is written in.',
+        '- is_news=true ONLY for a pillar that is about reacting to current news (needs an RSS feed). At most ONE news pillar, and none if one already exists. Everything else is_news=false.',
+        R,
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Owner brief:\n${brief}\n\n${ex}\n\nOutput JSON: {"pillars": [{"name": "...", "description": "...", "is_news": false}]}`,
+    },
+  ];
+}
+
+// ——— AI style-sample suggestions (pure) ———
+// Style samples are the VOICE reference every writer imitates — so these must read
+// like finished, real posts in the account's voice, not outlines. Built from the
+// ACTIVE pillars (+ brief when set); existing samples shown so it adds variety.
+export function styleSuggestPrompt(
+  pillars: { name: string; description: string }[],
+  brief: string | null,
+  existing: { title: string; body: string }[],
+): Msg[] {
+  const ex = existing.length
+    ? `Style samples that ALREADY exist (match their voice, but do not repeat their titles or topics):\n${existing.slice(0, 4).map((s) => `- ${s.title}: ${s.body.slice(0, 300)}`).join('\n')}`
+    : 'No style samples yet.';
+  return [
+    {
+      role: 'system',
+      content: [
+        'You write STYLE SAMPLES for a social media account: complete example posts that define the account\'s voice. An AI writer will imitate their tone, rhythm, and structure (not their topics).',
+        'Rules:',
+        '- Write 3-4 samples, each grounded in a DIFFERENT pillar below.',
+        '- Mix platforms: at least one "instagram" (short caption: hook line, 3-6 short lines, light CTA, max 2 emoji) and at least one "linkedin" (120-220 words: hook → story/insight → reflection → closing question, no emoji). Use null only for a voice that fits both.',
+        '- Each body is a FINISHED post a human would publish — concrete moments, specific details, no placeholders like [name] or "...", no outlines, no hashtags.',
+        '- Derive audience and voice from the brief and pillars; write in the language of the pillar descriptions.',
+        '- Avoid clichés ("in today\'s digital era", "game changer") and their local equivalents.',
+        '- title: short label of what the sample shows (max 8 words).',
+        R,
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `${brief ? `Account brief:\n${brief}\n\n` : ''}Active pillars:\n${pillars.map((p) => `- ${p.name}: ${p.description}`).join('\n')}
+
+${ex}
+
+Output JSON: {"samples": [{"title": "...", "body": "...", "platform": "instagram" | "linkedin" | null}]}`,
+    },
+  ];
+}
+
 // ——— override description polish (pure) ———
 // Manual override content: the human brings the MESSAGE, the AI brings the craft.
 // Keeps facts and meaning intact — fixes wording, sharpens the hook, kills fluff.

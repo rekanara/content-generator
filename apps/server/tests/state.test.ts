@@ -140,8 +140,8 @@ test('previewSlots: n=0 → empty, cycle repeats', () => {
   assert.equal(seq[0], seq[4]); // 4-format cycle → 5th equals 1st
 });
 
-test('previewSlots: no active pillars → throw (same as nextSlot)', () => {
-  assert.throws(() => previewSlots(S({}), [], 3), /no active pillars/);
+test('previewSlots: no active pillars → empty (fresh group views must load)', () => {
+  assert.deepEqual(previewSlots(S({}), [], 3), []);
 });
 
 // ---------- plannedSlot (plans slot_override — pure) ----------

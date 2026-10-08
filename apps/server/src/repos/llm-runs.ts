@@ -3,7 +3,7 @@
 import { sql } from '../db/pool.ts';
 import { stepUsage } from '../llm-costs.ts';
 
-export type LlmRunKind = 'planner' | 'news_score' | 'news_autofill' | 'promo' | 'polish' | 'failed_run';
+export type LlmRunKind = 'planner' | 'news_score' | 'news_autofill' | 'promo' | 'polish' | 'failed_run' | 'pillars' | 'styles';
 
 export async function recordLlmRun(
   groupId: string | null,

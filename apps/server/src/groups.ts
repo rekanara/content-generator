@@ -9,6 +9,7 @@ export type GroupRow = {
   tts_provider: string | null; tts_voice: string | null; tts_base_url: string | null; tts_api_key: string | null; tts_model: string | null;
   telegram_bot_token: string | null; telegram_chat_id: string | null; caption_footer: string | null; caption_cta: string | null;
   daily_budget: string | null; // numeric → string from postgres.js
+  brief: string | null;
 };
 
 // Effective config for one run: groups row merged over env.
@@ -60,10 +61,10 @@ export function toGroupCfg(row: GroupRow): GroupCfg {
 const COLS = sql`select id, slug, name, user_id, cron_expr, cron_enabled, approval_required, auto_plan, created_at,
   llm_base_url, llm_api_key, llm_model, llm_model_critic, image_model,
   tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
-  telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget from groups`;
+  telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget, brief from groups`;
 
 // returning-list for sql.unsafe (dynamic patch) — identical to COLS.
-const RET = 'id, slug, name, user_id, cron_expr, cron_enabled, approval_required, auto_plan, created_at, llm_base_url, llm_api_key, llm_model, llm_model_critic, image_model, tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model, telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget';
+const RET = 'id, slug, name, user_id, cron_expr, cron_enabled, approval_required, auto_plan, created_at, llm_base_url, llm_api_key, llm_model, llm_model_critic, image_model, tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model, telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget, brief';
 
 export async function listGroups(): Promise<GroupRow[]> {
   return sql<GroupRow[]>`${COLS} order by id`;
@@ -111,7 +112,7 @@ export async function createGroup(d: {
     returning id, slug, name, user_id, cron_expr, cron_enabled, approval_required, auto_plan, created_at,
       llm_base_url, llm_api_key, llm_model, llm_model_critic, image_model,
       tts_provider, tts_voice, tts_base_url, tts_api_key, tts_model,
-      telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget`;
+      telegram_bot_token, telegram_chat_id, caption_footer, caption_cta, daily_budget, brief`;
   // every group must have a rotation_state (005: PK group_id)
   await sql`insert into rotation_state (group_id, last_platform) values (${row!.id}, 'linkedin')
     on conflict (group_id) do nothing`;
@@ -149,6 +150,10 @@ export async function getGroupOwner(slug: string): Promise<{ id: string; user_id
   return row ?? null;
 }
 
+export async function saveBrief(groupId: string, brief: string): Promise<void> {
+  await sql`update groups set brief = ${brief} where id = ${groupId}`;
+}
+
 export async function saveCron(groupId: string, expr: string, enabled: boolean): Promise<void> {
   await sql`update groups set cron_expr = ${expr}, cron_enabled = ${enabled} where id = ${groupId}`;
 }
@@ -167,6 +172,7 @@ export function groupOut(row: GroupRow) {
     caption_footer: row.caption_footer,
     caption_cta: row.caption_cta,
     daily_budget: row.daily_budget === null ? null : Number(row.daily_budget),
+    brief: row.brief,
     llm_api_key_set: !!row.llm_api_key,
     tts_api_key_set: !!row.tts_api_key,
     telegram_bot_token_set: !!row.telegram_bot_token,

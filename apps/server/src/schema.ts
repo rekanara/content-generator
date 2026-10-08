@@ -164,6 +164,56 @@ export function isPlannerOut(x: unknown): x is PlannerOut {
   });
 }
 
+// ——— AI pillar suggestions ———
+export type PillarsOut = { pillars: { name: string; description: string; is_news: boolean }[] };
+export function isPillarsOut(x: unknown): x is PillarsOut {
+  return obj(x) && Array.isArray(x.pillars) && x.pillars.length >= 1 && x.pillars.length <= 10 &&
+    x.pillars.every((p: unknown) => obj(p) && str(p.name) && p.name.trim().length > 0 && p.name.length <= 80 &&
+      str(p.description) && p.description.trim().length >= 10 && typeof p.is_news === 'boolean');
+}
+
+// Referential cleanup: trim, drop names that already exist / repeat (case-insensitive),
+// keep at most ONE news pillar (and none if the group already has one), cap 8.
+export function cleanPillarSuggestions(out: PillarsOut, existing: { name: string; is_news: boolean }[]): PillarsOut['pillars'] {
+  const seen = new Set(existing.map((p) => p.name.trim().toLowerCase()));
+  let news = existing.some((p) => p.is_news);
+  const res: PillarsOut['pillars'] = [];
+  for (const p of out.pillars) {
+    const name = p.name.trim();
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    if (p.is_news && news) continue;
+    seen.add(key);
+    if (p.is_news) news = true;
+    res.push({ name, description: p.description.trim(), is_news: p.is_news });
+    if (res.length === 8) break;
+  }
+  return res;
+}
+
+// ——— AI style-sample suggestions ———
+export type StyleSuggestOut = { samples: { title: string; body: string; platform: 'instagram' | 'linkedin' | null }[] };
+export function isStylesOut(x: unknown): x is StyleSuggestOut {
+  return obj(x) && Array.isArray(x.samples) && x.samples.length >= 1 && x.samples.length <= 10 &&
+    x.samples.every((s: unknown) => obj(s) && str(s.title) && s.title.trim().length > 0 && s.title.length <= 120 &&
+      str(s.body) && s.body.trim().length >= 50 &&
+      (s.platform === null || s.platform === 'instagram' || s.platform === 'linkedin'));
+}
+
+// Trim, drop titles that already exist / repeat (case-insensitive), cap 6.
+export function cleanStyleSuggestions(out: StyleSuggestOut, existing: { title: string }[]): StyleSuggestOut['samples'] {
+  const seen = new Set(existing.map((s) => s.title.trim().toLowerCase()));
+  const res: StyleSuggestOut['samples'] = [];
+  for (const s of out.samples) {
+    const title = s.title.trim();
+    if (seen.has(title.toLowerCase())) continue;
+    seen.add(title.toLowerCase());
+    res.push({ title, body: s.body.trim(), platform: s.platform });
+    if (res.length === 6) break;
+  }
+  return res;
+}
+
 // ——— override description polish ———
 export type PolishOut = { polished: string };
 export function isPolishOut(x: unknown): x is PolishOut {

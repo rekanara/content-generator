@@ -37,8 +37,17 @@ function parseLoose(body: string): any {
   throw new Error(`LLM: no JSON found in body; head=${body.slice(0, 120)}`);
 }
 
-async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens: number): Promise<RawResp> {
-  const res = await fetch(`${cfg.llm.baseUrl}/chat/completions`, {
+function retryableLlmError(e: Error): boolean {
+  const m = e.message;
+  if (/\b(400|401|402|403|404)\b/.test(m)) return false;
+  if (/stok habis|quota|insufficient|forbidden|unauthori[sz]ed|invalid api/i.test(m)) return false;
+  return /\b(408|429|500|502|503|504)\b/.test(m) || /timeout|temporar|capacity|rate/i.test(m);
+}
+
+async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens: number, timeoutMs: number): Promise<RawResp> {
+  let res: Response;
+  try {
+    res = await fetch(`${cfg.llm.baseUrl}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },
     body: JSON.stringify({
@@ -49,8 +58,12 @@ async function chatOnce(cfg: GroupCfg, model: string, messages: Msg[], maxTokens
       response_format: { type: 'json_object' },
       stream: false, // provider ag/* defaults to SSE — force non-stream for a single JSON body
     }),
-    signal: AbortSignal.timeout(600_000), // reasoning models via slow gateways need more room
+    signal: AbortSignal.timeout(timeoutMs), // reasoning models via slow gateways need more room
   });
+  } catch (e) {
+    if ((e as Error).name === 'TimeoutError') throw new Error(`LLM timeout: no response within ${Math.round(timeoutMs / 1000)}s`);
+    throw e;
+  }
   if (!res.ok) throw new Error(`LLM ${res.status}: ${(await res.text()).slice(0, 300)}`);
   const text = await res.text();
   const json = parseLoose(text);
@@ -94,19 +107,20 @@ export async function chatJson<T>(
   messages: Msg[],
   guard: (x: unknown) => x is T,
   maxTokens = 4000, // reasoning models burn tokens on thinking; 2000 is not enough
+  timeoutMs = 600_000, // interactive callers (FE waits) pass a shorter bound
 ): Promise<LlmResult<T>> {
   await assertBudget(cfg);
   let lastErr = new Error('no attempt');
   for (let attempt = 0; attempt < 2; attempt++) {
     let content: string, usage: Usage;
     try {
-      ({ content, usage } = await chatOnce(cfg, model, messages, maxTokens));
+      ({ content, usage } = await chatOnce(cfg, model, messages, maxTokens, timeoutMs));
     } catch (e) {
       // router/upstream sometimes 503s on capacity — wait before retrying (typical retryDelay 52s)
       lastErr = e as Error;
       console.warn(`[llm] attempt ${attempt + 1} failed: ${lastErr.message.slice(0, 150)}`);
-      if (attempt === 0) {
-        await new Promise((r) => setTimeout(r, 60_000));
+      if (attempt === 0 && retryableLlmError(lastErr)) {
+        await new Promise((r) => setTimeout(r, 10_000));
         continue;
       }
       throw lastErr;

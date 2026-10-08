@@ -9,8 +9,8 @@ import { sql } from './db/pool.ts';
 import { enqueue, queueStatus } from './queue.ts';
 import { readRun } from './progress.ts';
 import { chatJson, writerModel } from './llm.ts';
-import { overridePolishPrompt } from './prompts.ts';
-import { isPolishOut } from './schema.ts';
+import { overridePolishPrompt, pillarSuggestPrompt, styleSuggestPrompt } from './prompts.ts';
+import { isPolishOut, isPillarsOut, cleanPillarSuggestions, isStylesOut, cleanStyleSuggestions } from './schema.ts';
 import { refreshCron, cronStatus } from './cron.ts';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
@@ -18,12 +18,12 @@ import { getGroupUsage, getAllGroupsUsage } from './usecases/usage.ts';
 import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
-  PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
+  PillarInput, PillarSuggestInput, CronInput, StyleInput, TemplateInput, GenerateInput,
   GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
-  getGroupOwner, saveCron,
+  getGroupOwner, saveCron, saveBrief,
 } from './groups.ts';
 import { listPillars, createPillar, togglePillar, deletePillar, updatePillar } from './repos/pillars.ts';
 import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
@@ -45,6 +45,24 @@ import {
 } from './auth/index.ts';
 
 export const api = new Hono<{ Variables: { user: AuthUser } }>();
+
+function publicError(e: unknown): { message: string; status: 500 | 502 } {
+  const raw = e instanceof Error ? e.message : String(e);
+  if (/\b(LLM|image|AI suggestion)\b/i.test(raw)) {
+    const msg = raw
+      .replace(/Bearer\s+[^\s"']+/gi, 'Bearer [redacted]')
+      .replace(/api[_-]?key[^,"'}]*/gi, 'api_key [redacted]')
+      .slice(0, 300);
+    return { status: 502, message: msg };
+  }
+  return { status: 500, message: 'internal server error' };
+}
+
+api.onError((err, c) => {
+  const e = publicError(err);
+  console.error(`[api] ${err.message}`);
+  return c.json({ error: e.message }, e.status);
+});
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -232,6 +250,25 @@ g.post('/:slug/pillars', async (c) => {
     throw e; // infra errors stay 500s
   }
   return c.json({ ok: true }, 201);
+});
+
+// AI pillar suggestions — saves the brief (reusable context), returns proposals only.
+// The human picks/edits in the FE and inserts via POST /pillars (no DB write of pillars here).
+g.post('/:slug/pillars/suggest', async (c) => {
+  const parsed = PillarSuggestInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'brief must be 20-8000 characters', issues: parsed.error.issues }, 400);
+  const group = gr(c);
+  await saveBrief(group.id, parsed.data.brief);
+  const cfg = await getGroupCfg(group.slug);
+  const existing = await listPillars(group.id);
+  let out;
+  try {
+    out = await chatJson(cfg, writerModel(cfg), pillarSuggestPrompt(parsed.data.brief, existing), isPillarsOut, 3000, 120_000);
+  } catch (e) {
+    return c.json({ error: `AI suggestion failed: ${(e as Error).message}` }, 502); // brief is saved — retry is one click
+  }
+  await recordLlmRun(group.id, 'pillars', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
+  return c.json({ pillars: cleanPillarSuggestions(out.data, existing) });
 });
 
 g.post('/:slug/pillars/:id/toggle', async (c) => {
@@ -430,6 +467,24 @@ g.post('/:slug/styles', async (c) => {
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   await createStyle(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
+});
+
+// AI style samples from the ACTIVE pillars (+ group brief) — proposals only;
+// the human edits/picks in the FE and inserts via POST /styles.
+g.post('/:slug/styles/suggest', async (c) => {
+  const group = gr(c);
+  const pillars = (await listPillars(group.id)).filter((p) => p.active);
+  if (pillars.length === 0) return c.json({ error: 'add at least one active pillar first' }, 400);
+  const cfg = await getGroupCfg(group.slug);
+  const existing = await listStyles(group.id, 20);
+  let out;
+  try {
+    out = await chatJson(cfg, writerModel(cfg), styleSuggestPrompt(pillars, group.brief, existing), isStylesOut, 4000, 120_000);
+  } catch (e) {
+    return c.json({ error: `AI suggestion failed: ${(e as Error).message}` }, 502);
+  }
+  await recordLlmRun(group.id, 'styles', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
+  return c.json({ samples: cleanStyleSuggestions(out.data, existing) });
 });
 
 g.delete('/:slug/styles/:id', async (c) => {

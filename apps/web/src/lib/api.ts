@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea, NewsTopic, NewsTopicDetail, NewsRule } from '@workspace/shared';
+import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea, NewsTopic, NewsTopicDetail, NewsRule, PillarSuggestion, StyleSuggestion } from '@workspace/shared';
 
 export type IngestProgress = {
   state: 'running' | 'done' | 'failed';
@@ -31,10 +31,21 @@ function onUnauthorized() {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, {
-    headers: init?.body && !(init.body instanceof FormData) ? { 'content-type': 'application/json' } : undefined,
-    ...init,
-  });
+  const ctrl = new AbortController();
+  const timeout = window.setTimeout(() => ctrl.abort(), 180_000);
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      headers: init?.body && !(init.body instanceof FormData) ? { 'content-type': 'application/json' } : undefined,
+      ...init,
+      signal: init?.signal ?? ctrl.signal,
+    });
+  } catch (e) {
+    if ((e as Error).name === 'AbortError') throw new ApiError(408, 'Request timed out. The server may still be working; refresh status before retrying.');
+    throw e;
+  } finally {
+    window.clearTimeout(timeout);
+  }
   if (!res.ok) {
     if (res.status === 401) onUnauthorized();
     const body = await res.json().catch(() => ({}));
@@ -84,6 +95,8 @@ export const api = {
   delPillar: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/pillars/${id}`, { method: 'DELETE' }),
   patchPillar: (slug: string, id: string, p: { name: string; description: string; is_news: boolean; sort_order: number }) =>
     req<Pillar[]>(`${g(slug)}/pillars/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
+  suggestPillars: (slug: string, brief: string, signal?: AbortSignal) =>
+    req<{ pillars: PillarSuggestion[] }>(`${g(slug)}/pillars/suggest`, { method: 'POST', body: JSON.stringify({ brief }), signal }),
   cron: (slug: string) => req<CronSettings>(`${g(slug)}/cron`),
   saveCron: (slug: string, expr: string, enabled: boolean) =>
     req<CronSettings>(`${g(slug)}/cron`, { method: 'POST', body: JSON.stringify({ expr, enabled }) }),
@@ -149,6 +162,7 @@ export const api = {
   styles: (slug: string) => req<StyleSample[]>(`${g(slug)}/styles`),
   addStyle: (slug: string, s: { title: string; body: string; platform?: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/styles`, { method: 'POST', body: JSON.stringify(s) }),
+  suggestStyles: (slug: string, signal?: AbortSignal) => req<{ samples: StyleSuggestion[] }>(`${g(slug)}/styles/suggest`, { method: 'POST', signal }),
   delStyle: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'DELETE' }),
   patchStyle: (slug: string, id: string, s: { title: string; body: string; platform: string | null }) =>
     req<{ ok: true }>(`${g(slug)}/styles/${id}`, { method: 'PATCH', body: JSON.stringify(s) }),

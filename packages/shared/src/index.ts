@@ -48,6 +48,7 @@ const GROUP_CONFIG_FIELDS = {
   caption_footer: z.string().nullable(),
   caption_cta: z.string().nullable(),
   daily_budget: z.number().nullable(), // USD/day, null = unlimited
+  brief: z.string().nullable(), // account story — context for AI pillar suggestions
   llm_api_key_set: z.boolean(),
   tts_api_key_set: z.boolean(),
   telegram_bot_token_set: z.boolean(),
@@ -139,6 +140,11 @@ export type PillarInput = z.infer<typeof PillarInput>;
 export const PillarEdit = PillarInput;
 export type PillarEdit = z.infer<typeof PillarEdit>;
 
+// AI pillar suggestions: brief in (saved to groups.brief), editable proposals out — no insert.
+export const PillarSuggestInput = z.object({ brief: z.string().trim().min(20).max(8000) });
+export type PillarSuggestInput = z.infer<typeof PillarSuggestInput>;
+export type PillarSuggestion = { name: string; description: string; is_news: boolean };
+
 export const CronSettings = z.object({
   expr: z.string(),
   enabled: z.boolean(),
@@ -208,6 +214,9 @@ export type StyleInput = z.infer<typeof StyleInput>;
 export const StyleEdit = StyleInput;
 export type StyleEdit = z.infer<typeof StyleEdit>;
 
+// AI style-sample suggestions (from active pillars) — proposals only, inserted via POST /styles.
+export type StyleSuggestion = { title: string; body: string; platform: 'instagram' | 'linkedin' | null };
+
 export const Template = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -268,7 +277,7 @@ export const Dashboard = z.object({
   cron: CronSettings, // active group's cron
   queue: z.object({ running: z.boolean(), pending: z.number() }), // active group's queue
   rotation: RotationView,
-  next_slot: NextSlot,
+  next_slot: NextSlot.nullable(), // null = no active pillars yet
   last_posts: z.array(PostSummary),
 });
 export type Dashboard = z.infer<typeof Dashboard>;

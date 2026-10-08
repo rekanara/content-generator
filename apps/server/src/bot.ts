@@ -188,11 +188,13 @@ async function handleStatus(slug?: string): Promise<string> {
   const [ideasN] = await sql`select count(*)::int as n from ideas
     where group_id = ${cfg.id} and used_at is null`;
   const spent = await spentToday(cfg.id);
-  const next = nextSlot(state, pillars, true);
+  const next = pillars.length === 0 ? null : nextSlot(state, pillars, true);
   const lines = [
     `Group: ${s}`,
     `Schedule: \`${grp?.cron_expr ?? '-'}\` ${grp?.cron_enabled ? 'ON' : 'OFF'}`,
-    `Rotation: last=${state.last_platform ?? '-'} → next **${next.platform} ${next.format}** (pillar ${next.pillar_id})`,
+    next
+      ? `Rotation: last=${state.last_platform ?? '-'} → next **${next.platform} ${next.format}** (pillar ${next.pillar_id})`
+      : `Rotation: no active pillars — tambah pillar dulu`,
     `Queue: ${q.running ? 'running' : 'idle'}${q.pending > 0 ? `, ${q.pending} pending` : ''}`,
     `Awaiting approval: ${awaiting?.n ?? 0}${(awaiting?.n ?? 0) > 0 ? ' — buka FE atau tap tombolnya' : ''}`,
     `Ideas queued: ${ideasN?.n ?? 0}`,

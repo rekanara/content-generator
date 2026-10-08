@@ -10,7 +10,7 @@ import { getRotationRow, getActivePillars } from '../repos/rotation.ts';
 export async function getDashboard(groupId: string): Promise<Dashboard> {
   const rot = await getRotationRow(groupId);
   const pillars = await getActivePillars(groupId);
-  const next = nextSlot(
+  const next = pillars.length === 0 ? null : nextSlot(
     {
       last_platform: rot.last_platform as Platform,
       last_ig_format: rot.last_ig_format,
