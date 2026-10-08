@@ -49,7 +49,9 @@ export function toGroupCfg(row: GroupRow): GroupCfg {
       model: row.tts_model ?? config.tts.model,
     },
     telegram: {
-      botToken: row.telegram_bot_token ?? config.telegram.botToken,
+      // One polled bot for all groups. Per-group chat_id routes messages; per-group
+      // bot tokens are ignored so buttons/commands always reach the daemon.
+      botToken: config.telegram.botToken,
       chatId: row.telegram_chat_id ?? config.telegram.chatId,
     },
     captionFooter: row.caption_footer ?? '',

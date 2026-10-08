@@ -168,6 +168,24 @@ export function parseOverrideDate(input: string, today: string): { date: string;
   return { date, past: date < today };
 }
 
+// ——— chat → group routing (pure, unit-test) ———
+// One bot, one chat per group. A command without a slug targets the group whose chat
+// it was typed in. Chats not mapped to any group are ignored (anyone can DM a bot).
+export function groupsForChat<G extends { slug: string; telegram_chat_id: string | null }>(
+  groups: G[], chatId: string, fallbackChatId: string,
+): G[] {
+  return groups.filter((g) => (g.telegram_chat_id ?? fallbackChatId) === chatId);
+}
+
+const SLUG_CMDS = ['gen', 'ide', 'buat', 'rerender', 'override', 'plan', 'status'] as const;
+
+export function withChatSlug(cmd: Cmd, chatSlug: string | undefined): Cmd {
+  if (!chatSlug) return cmd;
+  if (!(SLUG_CMDS as readonly string[]).includes(cmd.t)) return cmd;
+  if ((cmd as { slug?: string }).slug) return cmd;
+  return { ...cmd, slug: chatSlug } as Cmd;
+}
+
 // ——— handler ———
 
 async function defaultSlug(): Promise<string> {
@@ -406,11 +424,22 @@ export async function startBot(): Promise<void> {
   while (!stopped) {
     try {
       const updates = await getUpdates(config.telegram.botToken, offset);
-      const slugs = (await listGroups()).map((x) => x.slug);
+      const groups = await listGroups();
+      const slugs = groups.map((x) => x.slug);
       for (const u of updates) {
         offset = u.update_id + 1;
         // per-update isolation: one bad update must never silently kill the rest of the batch
         try {
+          const fromChat = String(u.callback_query?.message?.chat?.id ?? u.message?.chat?.id ?? '');
+          const chatGroups = groupsForChat(groups, fromChat, config.telegram.chatId);
+          if (chatGroups.length === 0) {
+            console.warn(`[bot] ignored update from unmapped chat ${fromChat || '(none)'}`);
+            if (u.callback_query) await answerCallback(config.telegram.botToken, String(u.callback_query.id)).catch(() => {});
+            continue;
+          }
+          // one group in this chat → commands without a slug target it; several → first (as before)
+          const chatSlug = chatGroups[0]!.slug;
+
           // approval-gate / override-flow inline keyboard buttons
           if (u.callback_query) {
             const cb = u.callback_query;
@@ -465,7 +494,7 @@ export async function startBot(): Promise<void> {
             continue;
           }
 
-          const cmd = parseCmd(text, slugs);
+          const cmd = withChatSlug(parseCmd(text, slugs), chatSlug);
           const reply = await handleCmd(cmd);
           // reply via the global bot (env token) to the chat the command came from
           await replyGlobal(chatId, reply);

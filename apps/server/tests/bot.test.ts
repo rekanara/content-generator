@@ -244,3 +244,18 @@ test('parseCmd: /override with and without slug', () => {
 test('parseCmd: /cancel', () => {
   assert.deepEqual(parseCmd('/cancel', SLUGS), { t: 'cancel' });
 });
+
+import { groupsForChat, withChatSlug } from '../src/bot.ts';
+
+test('groupsForChat: per-group chat id, null falls back to env chat, unknown → none', () => {
+  const gs = [{ slug: 'a', telegram_chat_id: '-100a' }, { slug: 'b', telegram_chat_id: null }];
+  assert.deepEqual(groupsForChat(gs, '-100a', 'env').map((g) => g.slug), ['a']);
+  assert.deepEqual(groupsForChat(gs, 'env', 'env').map((g) => g.slug), ['b']);
+  assert.deepEqual(groupsForChat(gs, 'stranger', 'env'), []);
+});
+
+test('withChatSlug: fills missing slug only', () => {
+  assert.deepEqual(withChatSlug({ t: 'gen' }, 'a'), { t: 'gen', slug: 'a' });
+  assert.deepEqual(withChatSlug({ t: 'gen', slug: 'b' }, 'a'), { t: 'gen', slug: 'b' });
+  assert.deepEqual(withChatSlug({ t: 'help' }, 'a'), { t: 'help' });
+});

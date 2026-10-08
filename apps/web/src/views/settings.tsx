@@ -29,7 +29,6 @@ const TTS_FIELDS: Field[] = [
   { key: "tts_model", label: "Model", ph: "tts-1" },
 ]
 const TG_FIELDS: Field[] = [
-  { key: "telegram_bot_token", label: "Bot Token", ph: "123456:ABC-…", secret: true },
   { key: "telegram_chat_id", label: "Chat ID", ph: "-1001234567890" },
 ]
 
@@ -171,6 +170,7 @@ export function SettingsView({ slug }: { slug: string }) {
           ))}
         </Section>
         <Section title="Telegram">
+          <p className="text-xs text-muted-foreground md:col-span-2">All groups use the server bot token from env. Add that bot to this group's Telegram chat, then set this Chat ID.</p>
           {TG_FIELDS.map((f) => (
             <FieldRow key={f.key} f={f} group={group} value={patch[f.key] ?? ""} onChange={(v) => set(f.key, v)} />
           ))}

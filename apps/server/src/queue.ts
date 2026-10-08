@@ -1,7 +1,6 @@
 // In-process FIFO, one active run. Cron, bot, FE → same enqueue.
 // Job carries group slug — cfg resolved at run time (config edits don't wait for old jobs).
 import { sql } from './db/pool.ts';
-import { config } from './config.ts';
 import { resolveSlot, generateDraft, markSent, markFailed } from './pipeline.ts';
 import { startRun, stage as runStage, postRef, endRun } from './progress.ts';
 import type { Slot, Platform, Format } from './state.ts';
@@ -35,10 +34,6 @@ type Job =
 
 const jobs: Job[] = [];
 
-function callbackCfg(cfg: Awaited<ReturnType<typeof getGroupCfg>>): Awaited<ReturnType<typeof getGroupCfg>> {
-  if (!config.telegram.botToken) return cfg;
-  return { ...cfg, telegram: { ...cfg.telegram, botToken: config.telegram.botToken } };
-}
 let running = false;
 let lastActivity = Date.now(); // liveness: any queue touch updates this
 
@@ -275,7 +270,7 @@ async function parkAwaitingCover(
           'Sudah menyiapkan gambar cover? Upload fotonya langsung di chat ini —',
           'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
         ];
-    await withRetry(() => sendMessageWithButtons(callbackCfg(cfg), lines.join('\n'), [
+    await withRetry(() => sendMessageWithButtons(cfg, lines.join('\n'), [
       [{ text: 'Lewati — render tanpa cover', callback_data: `skip_cover:${postId}` }],
     ]));
   } catch (e) {
@@ -359,7 +354,7 @@ async function prepareForApproval(
   runStage('awaiting', post.topic.slice(0, 60)); // terminal for this run — human input needed
   console.log(`[queue] post #${postId} awaiting approval (${cfg.slug})`);
   // Approval request is best-effort: if Telegram flakes, the post stays awaiting — FE can approve.
-  // Buttons are sent through the polled env bot; final delivery may still use the group bot.
+  // One polled bot for all groups (groups.ts) — callbacks always come back to this daemon.
   try {
     await sendApprovalRequest(cfg, postId, 'Approval needed');
   } catch (e) {
@@ -391,21 +386,18 @@ async function sendApprovalRequest(
     ],
   ];
   const meta = `${header} — ${cfg.slug}\nTopic: ${post.topic}\n${post.platform}/${post.format} · rotation unchanged until sent`;
-  // Inline callbacks only reach the bot that sent the message. The daemon polls the env bot,
-  // so approval/cover buttons must use that token even when the group delivers with its own bot.
-  const tgCfg = callbackCfg(cfg);
   if (post.format === 'text') {
     // nothing visual — show the actual post body instead of just the caption
     const body = (JSON.parse(post.body) as TextOut).body;
-    await withRetry(() => sendMessageWithButtons(tgCfg, `${meta}\n\n${body.slice(0, 1500)}`, buttons));
+    await withRetry(() => sendMessageWithButtons(cfg, `${meta}\n\n${body.slice(0, 1500)}`, buttons));
     return;
   }
   const cap = `${meta}\n\n${(post.caption ?? '').slice(0, 700)}`.slice(0, 1000);
   const prefix = post.artifact_prefix ?? `${cfg.slug}/posts/${postId}/`;
   if (post.format === 'reels') {
-    await withRetry(() => sendVideo(tgCfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, cap, buttons));
+    await withRetry(() => sendVideo(cfg, `${prefix}reel.mp4`, `reel-${postId}.mp4`, cap, buttons));
   } else {
-    await withRetry(() => sendPhoto(tgCfg, `${prefix}slide-01.png`, cap, buttons));
+    await withRetry(() => sendPhoto(cfg, `${prefix}slide-01.png`, cap, buttons));
   }
 }
 
