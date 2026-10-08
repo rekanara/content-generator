@@ -49,7 +49,10 @@ export function PillarsView({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold">Pillars &amp; Schedule</h1>
+      <div>
+        <h1 className="text-lg font-semibold">Pillars &amp; schedule</h1>
+        <p className="text-sm text-muted-foreground">Regular posts only: the topics the AI rotates through, and when the daily auto-post runs. News topics are configured under News.</p>
+      </div>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
 
       {cron && <CronEditor cron={cron} onSave={saveCron} />}

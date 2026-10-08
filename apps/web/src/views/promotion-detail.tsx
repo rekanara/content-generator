@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { api, ApiError } from "@/lib/api"
 import { usePromotion, useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
+import { CaptionOverrideCard } from "@/components/caption-override-fields"
 
 const STATUS_BADGE: Record<string, string> = {
   draft: "bg-muted text-muted-foreground border-transparent",
@@ -115,6 +116,9 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           {data.price_sale ? <><span className="font-semibold text-emerald-600">{data.price_sale}</span> <span className="text-muted-foreground line-through">{data.price}</span></> : data.price || null}
         </p>
       </CardContent></Card>
+
+      <CaptionOverrideCard initial={data} note="Appended to the promo caption on send. Blank = use the CTA/footer from Settings."
+        save={(v) => api.savePromoCaption(slug, id, v).then(reload)} />
 
       <section className="flex flex-wrap gap-2">
         <Button size="sm" disabled={busy || !!data.content} onClick={() => act(() => api.generatePromoContent(slug, id), "generate content")}>

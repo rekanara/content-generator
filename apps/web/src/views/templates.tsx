@@ -19,7 +19,7 @@ import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateType } from "@workspace/shared"
 
-const FORMATS: TemplateFormat[] = ["ig-carousel", "li-carousel", "reel", "ig-carousel-promo", "li-carousel-promo"]
+const FORMATS: TemplateFormat[] = ["ig-carousel", "ig-news-card", "li-carousel", "reel", "ig-carousel-promo", "li-carousel-promo"]
 const isPromoFormat = (f: TemplateFormat) => f.endsWith("-promo")
 const TYPES: TemplateType[] = ["regular", "mix", "image_only", "text_only"]
 

@@ -1,5 +1,16 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea } from '@workspace/shared';
+import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea, NewsTopic, NewsTopicDetail, NewsRule } from '@workspace/shared';
+
+export type IngestProgress = {
+  state: 'running' | 'done' | 'failed';
+  phase: string;
+  feeds: { total: number; done: number; failed: number };
+  items: { total: number; done: number };
+  result: { fetched: number; saved: number; valid: number; rejected: number; skipped: number; feedsFailed: number } | null;
+  error: string | null;
+  startedAt: number;
+  updatedAt: number;
+};
 
 const BASE = '/api';
 const g = (slug: string) => `${BASE}/g/${slug}`;
@@ -144,6 +155,21 @@ export const api = {
   ideas: (slug: string) => req<Idea[]>(`${g(slug)}/ideas`),
   addIdea: (slug: string, text: string) => req<Idea>(`${g(slug)}/ideas`, { method: 'POST', body: JSON.stringify({ text }) }),
   delIdea: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/ideas/${id}`, { method: 'DELETE' }),
+  newsTopics: (slug: string) => req<NewsTopic[]>(`${g(slug)}/news/topics`),
+  addNewsTopic: (slug: string, p: { name: string; description?: string }) => req<NewsTopic>(`${g(slug)}/news/topics`, { method: 'POST', body: JSON.stringify(p) }),
+  newsTopic: (slug: string, id: string) => req<NewsTopicDetail>(`${g(slug)}/news/topics/${id}`),
+  addNewsSource: (slug: string, topicId: string, p: { name: string; url: string }) => req<NewsTopicDetail['sources'][number]>(`${g(slug)}/news/topics/${topicId}/sources`, { method: 'POST', body: JSON.stringify(p) }),
+  delNewsSource: (slug: string, topicId: string, sourceId: string) => req<{ ok: true }>(`${g(slug)}/news/topics/${topicId}/sources/${sourceId}`, { method: 'DELETE' }),
+  saveNewsRules: (slug: string, topicId: string, p: { freshness_hours: number; min_sources: number; allowed_domains: string[]; blocked_domains: string[]; keywords: string[] }) => req<NewsRule>(`${g(slug)}/news/topics/${topicId}/rules`, { method: 'PUT', body: JSON.stringify(p) }),
+  ingestNews: (slug: string, topicId: string) => req<{ ok: true; started: boolean; progress: IngestProgress | null }>(`${g(slug)}/news/topics/${topicId}/ingest`, { method: 'POST' }),
+  ingestStatus: (slug: string, topicId: string) => req<{ progress: IngestProgress | null }>(`${g(slug)}/news/topics/${topicId}/ingest/status`),
+  autofillNews: (slug: string, topicId: string) => req<NewsTopicDetail>(`${g(slug)}/news/topics/${topicId}/autofill`, { method: 'POST' }),
+  deleteNewsItems: (slug: string, topicId: string, p: { ids?: string[]; status?: 'pending' | 'valid' | 'rejected' | 'used' }) => req<{ ok: true; deleted: number }>(`${g(slug)}/news/topics/${topicId}/items/delete`, { method: 'POST', body: JSON.stringify(p) }),
+  saveNewsCaption: (slug: string, topicId: string, p: { caption_cta: string; caption_footer: string }) => req<{ ok: true }>(`${g(slug)}/news/topics/${topicId}/caption`, { method: 'PUT', body: JSON.stringify(p) }),
+  savePromoCaption: (slug: string, id: string, p: { caption_cta: string; caption_footer: string }) => req<{ ok: true }>(`${g(slug)}/promotions/${id}/caption`, { method: 'PUT', body: JSON.stringify(p) }),
+  patchOverrideCaption: (slug: string, id: string, p: { caption_cta: string; caption_footer: string }) => req<{ ok: true }>(`${g(slug)}/overrides/${id}`, { method: 'PATCH', body: JSON.stringify(p) }),
+  saveNewsTemplate: (slug: string, topicId: string, template_id: string | null) => req<{ ok: true }>(`${g(slug)}/news/topics/${topicId}/template`, { method: 'PUT', body: JSON.stringify({ template_id }) }),
+  generateNews: (slug: string, topicId: string, p: { item_id?: string; language?: string } = {}) => req<{ ok: true; queued: { running: boolean; pending: number } }>(`${g(slug)}/news/topics/${topicId}/generate`, { method: 'POST', body: JSON.stringify(p) }),
   templates: (slug: string) => req<Template[]>(`${g(slug)}/templates`),
   template: (slug: string, id: string) => req<TemplateDetail>(`${g(slug)}/templates/${id}`),
   patchTemplate: (slug: string, id: string, t: { name: string; html: string; html_first: string | null; html_last: string | null }) =>

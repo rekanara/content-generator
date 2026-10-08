@@ -85,12 +85,14 @@ export async function renderCarousel(
   //   3. pool pick        — fresh render: random among active templates for the
   //                         format, avoiding the group's last-used one (variety)
   // A dangling id (template deleted) falls through to the next step.
-  const [ownRow] = await sql<{ template_id: string | null }[]>`select template_id from posts where id = ${postId}`;
+  const [ownRow] = await sql<{ template_id: string | null; is_news: boolean | null }[]>`select p.template_id, pi.is_news
+    from posts p left join pillars pi on pi.id = p.pillar_id
+    where p.id = ${postId}`;
   const pinnedId = opts.templateId ?? ownRow?.template_id ?? null;
   const pinnedSet = pinnedId ? await getTemplateSetById(cfg.id, pinnedId) : null;
   const picked: { id: string | null; set: TemplateSet } = pinnedSet
     ? { id: pinnedId, set: pinnedSet }
-    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
+    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`), ownRow?.is_news === true);
   const set = picked.set;
   const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
   const htmls = buildSlides(set, draft, cover?.buf);

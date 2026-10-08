@@ -210,8 +210,15 @@ body::before {
 
 /* ——— CRT scanline (sidebar chrome) ———
    Barely-there horizontal lines — texture, not decoration. */
-.scanline {
-  position: relative;
+/* The ::after overlay needs a positioned parent, but this must NEVER override the
+   element's own positioning: the sidebar container is `fixed`. Unlayered CSS beats
+   ANY layered rule regardless of specificity, so a bare `.scanline { position:
+   relative }` beat Tailwind's `.fixed` (layer utilities) and the sidebar scrolled
+   away with the page. In layer `components` it sits below `utilities` → `.fixed` wins. */
+@layer components {
+  .scanline {
+    position: relative;
+  }
 }
 .scanline::after {
   content: "";

@@ -51,6 +51,17 @@ const DEFAULT_IG = `<!doctype html>
 // LinkedIn PDF: A4 landscape-ish 1080x1350 works too — spec says LI carousel = 6-10 page PDF.
 // Same visuals, different context. Keep it simple: use the same template.
 const DEFAULT_LI = DEFAULT_IG;
+const DEFAULT_NEWS = `<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  * { margin: 0; box-sizing: border-box; }
+  body { width: 1080px; height: 1350px; font-family: -apple-system, 'Helvetica Neue', sans-serif;
+    background: #080b12; color: #f8fafc; display: flex; flex-direction: column; justify-content: center; padding: 82px; }
+  .tag { position: absolute; top: 64px; left: 76px; border: 1px solid #38bdf8; color: #38bdf8; border-radius: 999px; padding: 12px 22px; font-size: 28px; font-weight: 700; letter-spacing: .08em; }
+  .idx { position: absolute; top: 68px; right: 76px; font-size: 30px; color: #64748b; font-variant-numeric: tabular-nums; }
+  h1 { font-size: 74px; line-height: 1.08; letter-spacing: -2px; margin-bottom: 42px; }
+  p { font-size: 42px; line-height: 1.45; color: #cbd5e1; }
+  .bar { position: absolute; left: 76px; bottom: 76px; width: 260px; height: 10px; background: linear-gradient(90deg,#38bdf8,#22c55e); border-radius: 999px; }
+</style></head><body><div class="tag">NEWS</div><div class="idx">{{index}}/{{total}}</div><h1>{{headline}}</h1><p>{{body}}</p><div class="bar"></div></body></html>`;
 
 // Template package pinned by id (plan slot_override, or the post's own previous
 // render) — status-agnostic: a planned template renders even if not "active"
@@ -75,14 +86,18 @@ export async function pickTemplateSet(
   platform: Platform,
   groupId: string,
   hasCover = false,
+  newsCard = false,
 ): Promise<{ id: string | null; set: TemplateSet }> {
-  // db format: ig-carousel | li-carousel | reel — pdf (LI) uses li-carousel
-  const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
-  const rows = (await sql`select id, html, html_first, html_last from templates
+  const dbFormat = newsCard && platform === 'instagram' ? 'ig-news-card' : platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
+  let rows = (await sql`select id, html, html_first, html_last from templates
     where format = ${dbFormat} and is_active and group_id = ${groupId}`) as unknown as { id: string; html: string; html_first: string | null; html_last: string | null }[];
+  if (rows.length === 0 && dbFormat === 'ig-news-card') {
+    rows = (await sql`select id, html, html_first, html_last from templates
+      where format = 'ig-carousel' and is_active and group_id = ${groupId}`) as unknown as { id: string; html: string; html_first: string | null; html_last: string | null }[];
+  }
   let pool = rows;
   if (pool.length === 0) {
-    return { id: null, set: { body: platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI, first: null, last: null } };
+    return { id: null, set: { body: newsCard && platform === 'instagram' ? DEFAULT_NEWS : platform === 'instagram' ? DEFAULT_IG : DEFAULT_LI, first: null, last: null } };
   }
   if (hasCover) {
     const withCover = pool.filter((r) => r.html_first !== null);
@@ -105,9 +120,9 @@ export async function pickTemplateSet(
 // cover part? (Pool-aware — with several active templates, one cover-capable row
 // is enough for the cover question to make sense.)
 export async function anyActiveCoverTemplate(platform: Platform, groupId: string): Promise<boolean> {
-  const dbFormat = platform === 'instagram' ? 'ig-carousel' : 'li-carousel';
+  const formats = platform === 'instagram' ? ['ig-carousel', 'ig-news-card'] : ['li-carousel'];
   const r = await sql`select 1 from templates
-    where format = ${dbFormat} and is_active and group_id = ${groupId} and html_first is not null limit 1`;
+    where format = any(${formats}::text[]) and is_active and group_id = ${groupId} and html_first is not null limit 1`;
   return r.length > 0;
 }
 

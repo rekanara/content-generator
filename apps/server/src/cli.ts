@@ -98,14 +98,14 @@ async function main() {
 
 function preview(d: unknown): string {
   if (d && typeof d === 'object' && 'slides' in d) {
-    const c = d as { caption: string; slides: { headline: string; body: string }[] };
+    const c = d as { caption: unknown; slides: { headline: string; body: string }[] };
     return c.slides.map((s, i) => `Slide ${i + 1}: ${s.headline}\n  ${s.body}`).join('\n') +
-      `\n\nCAPTION:\n${c.caption}`;
+      `\n\nCAPTION:\n${JSON.stringify(c.caption, null, 2)}`;
   }
   if (d && typeof d === 'object' && 'scenes' in d) {
-    const r = d as { caption: string; scenes: { overlay_text: string; narration: string }[] };
+    const r = d as { caption: unknown; scenes: { overlay_text: string; narration: string }[] };
     return r.scenes.map((s, i) => `Scene ${i + 1}: [${s.overlay_text}]\n  ${s.narration}`).join('\n') +
-      `\n\nCAPTION:\n${r.caption}`;
+      `\n\nCAPTION:\n${JSON.stringify(r.caption, null, 2)}`;
   }
   return String((d as { body: string }).body);
 }

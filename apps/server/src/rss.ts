@@ -2,6 +2,7 @@
 // Fail-safe: any error → null → pipeline falls back to non-news pillar.
 import Parser from 'rss-parser';
 import { sql } from './db/pool.ts';
+import { parseFeed } from './article.ts';
 
 export const FEEDS: string[] = [
   'https://hnrss.org/frontpage',
@@ -38,7 +39,7 @@ export function formatContext(items: Item[]): string | null {
 }
 
 async function fetchOne(p: Parser, url: string): Promise<Item[]> {
-  const feed = await p.parseURL(url);
+  const feed = await parseFeed(p, url);
   return (feed.items ?? []).map((it) => ({
     title: String(it.title ?? ''),
     link: String(it.link ?? ''),
@@ -54,7 +55,7 @@ async function cachedFetch(url: string, p: Parser): Promise<Item[]> {
     return (Array.isArray(cached) ? cached : []) as Item[];
   }
   const items = await fetchOne(p, url); // throws → caller handles per-feed
-  await sql`insert into feeds_cache (url, fetched_at, items) values (${url}, now(), ${JSON.stringify(items)}::jsonb)
+  await sql`insert into feeds_cache (url, fetched_at, items) values (${url}, now(), ${sql.json(items as never)})
     on conflict (url) do update set fetched_at = now(), items = excluded.items`;
   return items;
 }

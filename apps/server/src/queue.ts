@@ -20,10 +20,11 @@ import { getTemplate } from './repos/templates.ts';
 import { getPlanByDate } from './repos/plans.ts';
 import { resolvePlannedSlot } from './pipeline.ts';
 import { jakartaToday } from './cronmath.ts';
+import { resolveCaptionParts, appendCaptionParts } from './schema.ts';
 import type { Override } from '@workspace/shared';
 
 type Job =
-  | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string; brief?: string }
+  | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string; brief?: string; newsTopicId?: string; newsItemId?: string; newsLanguage?: string; templateId?: string }
   | { kind: 'resend'; slug: string; postId: string }
   | { kind: 'approve'; slug: string; postId: string }
   | { kind: 'rerender'; slug: string; postId: string }
@@ -62,7 +63,7 @@ async function drain(): Promise<void> {
       startRun(job.kind, job.slug); // live telemetry for /api/queue/live
       try {
         cfg = await getGroupCfg(job.slug);
-        if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source, job.brief);
+        if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source, job.brief, job.newsTopicId || job.newsItemId ? { topicId: job.newsTopicId, itemId: job.newsItemId, language: job.newsLanguage } : undefined, job.templateId);
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
@@ -94,7 +95,7 @@ async function drain(): Promise<void> {
 // unused by delivery for now).
 async function deliverOverride(cfg: Awaited<ReturnType<typeof getGroupCfg>>, ov: Override): Promise<void> {
   const keys = ov.images.map((f) => `overrides/${ov.id}/${f}`);
-  const caption = ov.description || ov.name;
+  const caption = appendCaptionParts(ov.description || ov.name, resolveCaptionParts(ov, cfg), 1024);
   if (ov.type === 'text_only' || keys.length === 0) {
     await withRetry(() => sendMessage(cfg, caption.slice(0, 4000)));
   } else if (keys.length === 1) {
@@ -119,6 +120,8 @@ async function runGenerate(
   notifyChat = true,
   source = 'cli',
   brief?: string,
+  news?: { topicId?: string; itemId?: string; language?: string },
+  templateId?: string,
 ): Promise<void> {
   const today = jakartaToday();
   const plan = await getPlanByDate(cfg.id, today);
@@ -180,13 +183,17 @@ async function runGenerate(
   const slot = planned
     ? await resolvePlannedSlot(cfg.id, plan)
     : await resolveSlot(cfg.id, forced);
-  const renderOpts = { coverRequired: true, templateId: planned ? (plan.template_id ?? undefined) : undefined };
+  const renderOpts = { coverRequired: true, templateId: templateId ?? (planned ? (plan.template_id ?? undefined) : undefined) };
   console.log(`[queue] run ${cfg.slug}: ${slot.platform} ${slot.format} pillar=${slot.pillar_id} source=${source}${planned ? ` (plan ${plan!.id.slice(0, 8)}${plan!.note ? ` "${plan!.note.slice(0, 40)}"` : ''})` : ''}`);
   if (planned && forced) {
     // the plan owns the date — say so instead of silently ignoring the /gen args
     await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
   }
-  const r = await generateDraft(cfg, slot, source, brief);
+  // failure before a post row exists (budget gate, LLM down) must not be silent either
+  const r = await generateDraft(cfg, slot, source, brief, news).catch(async (e) => {
+    await notifyRunFailed(cfg, e);
+    throw e;
+  });
   postRef(r.postId);
   await addEvent(r.postId, cfg.id, 'generated');
   try {
@@ -215,10 +222,11 @@ async function runGenerate(
 // Image generation happens at render time — this is the single bookkeeping point.
 async function attachCoverCost(postId: string, coverCost: number, coverModel: string | null): Promise<void> {
   if (!coverCost || !coverModel) return;
-  const [row] = await sql<{ llm_usage: PostUsage | null }[]>`select llm_usage from posts where id = ${postId}`;
-  const u = row?.llm_usage ?? { steps: {}, totalCost: 0 };
+  const [row] = await sql<{ llm_usage: PostUsage | string | null }[]>`select llm_usage from posts where id = ${postId}`;
+  const raw = row?.llm_usage;
+  const u: PostUsage = (typeof raw === 'string' ? JSON.parse(raw) : raw) ?? { steps: {}, totalCost: 0 };
   const cover = { model: coverModel, images: (u.cover?.images ?? 0) + 1, cost: Math.round(((u.cover?.cost ?? 0) + coverCost) * 10000) / 10000 };
-  await sql`update posts set llm_usage = ${JSON.stringify(postUsage(u.steps, cover))}::jsonb where id = ${postId}`;
+  await sql`update posts set llm_usage = ${sql.json(postUsage(u.steps, cover) as never)} where id = ${postId}`;
 }
 
 // Park the post at awaiting_cover + ask Telegram for the image (skip button included).

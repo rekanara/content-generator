@@ -1,5 +1,6 @@
 // Promotion usecases: AI content generation, brief drafting, image-slot reporting.
 import { chatJson, writerModel } from '../llm.ts';
+import { recordLlmRun } from '../repos/llm-runs.ts';
 import { isPromoContentOut, isPromoBriefOut, type PromoContentOut, type PromoBriefOut } from '../schema.ts';
 import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts.ts';
 import { getPromotion, setContent, setContentWithTemplate, imageSlots, markPromotionSent } from '../repos/promotions.ts';
@@ -7,6 +8,7 @@ import { getTemplate } from '../repos/templates.ts';
 import { cssVocabOf, promoVocabOf, sanitizePromoFragment, defaultTemplate, renderPromotion } from '../render/promotion.ts';
 import { artifactExists, uploadPromotionImage } from '../storage.ts';
 import { sendMessage } from '../telegram.ts';
+import { resolveCaptionParts, appendCaptionParts } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
 import type { Promotion } from '@workspace/shared';
 
@@ -24,6 +26,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContent(promoId, slides);
   console.log(`[promo] #${promoId} content generated — ${slides.length} slides`);
@@ -33,6 +36,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
 // AI drafts promo DATA from a rough brief (dashboard flow).
 export async function draftPromotionFromBrief(cfg: GroupCfg, brief: string): Promise<PromoBriefOut> {
   const out = await chatJson<PromoBriefOut>(cfg, writerModel(cfg), promoBriefPrompt(brief), isPromoBriefOut, 3000);
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   return out.data;
 }
 
@@ -61,6 +65,7 @@ export async function regeneratePromotionContent(
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContentWithTemplate(promoId, slides, chosenId);
   const templateChanged = (chosenId ?? null) !== (promo.template_id ?? null);
@@ -91,7 +96,7 @@ export async function deliverPromotion(cfg: GroupCfg, promoId: string, platform:
   if (!promo || !promo.content) throw new Error(`promotion ${promoId} has no content`);
   const r = await renderPromotion(promo, cfg, platform);
   const { sendMediaGroupPhoto, sendDocument, sendMessage } = await import('../telegram.ts');
-  const caption = promoCaption(promo);
+  const caption = appendCaptionParts(promoCaption(promo), resolveCaptionParts(promo, cfg));
   if (r.missingImages.length > 0) {
     await sendMessage(cfg, `Promo "${promo.name}": ${r.missingImages.length} slide tanpa gambar (slot kosong) — tetap dikirim. Slide: ${r.missingImages.join(', ')}`).catch(() => {});
   }

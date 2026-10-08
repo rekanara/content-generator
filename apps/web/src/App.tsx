@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { AppSidebar } from "@/components/app-sidebar.tsx"
 import { DashboardView } from "@/views/dashboard.tsx"
+import { StudioView } from "@/views/studio.tsx"
 import { PillarsView } from "@/views/pillars.tsx"
 import { PostsView } from "@/views/posts.tsx"
 import { StylesView } from "@/views/styles.tsx"
@@ -11,6 +12,9 @@ import { PostDetailView } from "@/views/post-detail.tsx"
 import { OverridesView } from "@/views/overrides.tsx"
 import { PromotionsView } from "@/views/promotions.tsx"
 import { PromotionDetailView } from "@/views/promotion-detail.tsx"
+import { NewsView } from "@/views/news.tsx"
+import { NewsTopicDetailView } from "@/views/news-topic-detail.tsx"
+import { NewsItemDetailView } from "@/views/news-item-detail.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
@@ -112,11 +116,15 @@ export function App() {
               {route.name === "templateDetail" && <TemplateDetailView slug={route.slug} id={route.id} />}
               {route.name === "postDetail" && <PostDetailView slug={route.slug} id={route.id} />}
               {route.name === "promoDetail" && <PromotionDetailView slug={route.slug} id={route.id} />}
+              {route.name === "newsTopicDetail" && <NewsTopicDetailView slug={route.slug} id={route.id} />}
+              {route.name === "newsItemDetail" && <NewsItemDetailView slug={route.slug} topicId={route.topicId} itemId={route.itemId} />}
               {route.name === "groupView" && (
                 <>
                   {route.view === "dashboard" && <DashboardView slug={route.slug} />}
+                  {route.view === "studio" && <StudioView slug={route.slug} />}
                   {route.view === "pillars" && <PillarsView slug={route.slug} />}
                   {route.view === "posts" && <PostsView slug={route.slug} />}
+                  {route.view === "news" && <NewsView slug={route.slug} />}
                   {route.view === "styles" && <StylesView slug={route.slug} />}
                   {route.view === "templates" && <TemplatesView slug={route.slug} />}
                   {route.view === "overrides" && <OverridesView slug={route.slug} />}
@@ -139,12 +147,19 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "groups": return "Groups"
     case "users": return "Users"
     case "resetPassword": return "Reset password"
-    case "templateDetail": return "Template detail"
-    case "postDetail": return "Post detail"
+    case "templateDetail": return "Configure › Template"
+    case "postDetail": return "Overview › Post"
+    case "promoDetail": return "Manual content › Promotion"
+    case "newsTopicDetail": return "News › Topic"
+    case "newsItemDetail": return "News › Item"
     case "groupView": {
+      // "Section › Page" — mirrors the sidebar sections so the user always knows which content source a page belongs to
       const label: Record<string, string> = {
-        dashboard: "Dashboard", pillars: "Pillars & Schedule", posts: "Posts",
-        styles: "Style Samples", templates: "Templates", overrides: "Override Content", promotions: "Promotions", settings: "Settings",
+        dashboard: "Overview › Dashboard", studio: "Overview › Studio", posts: "Overview › Posts",
+        pillars: "Regular posts › Pillars & schedule", styles: "Configure › Style samples",
+        news: "News › Topics",
+        overrides: "Manual content › Overrides", promotions: "Manual content › Promotions",
+        templates: "Configure › Templates", settings: "Configure › Settings",
       }
       return label[route.view] ?? route.view
     }

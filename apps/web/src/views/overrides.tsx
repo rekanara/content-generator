@@ -1,5 +1,5 @@
 import { useRef, useState } from "react"
-import { Ban, Check, Plus, Send, Sparkles, Trash2, X } from "lucide-react"
+import { Ban, Check, MessageSquareText, Plus, Send, Sparkles, Trash2, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -15,6 +15,7 @@ import {
 } from "@workspace/ui/components/select"
 import { api, ApiError } from "@/lib/api"
 import { useOverrides, useTemplates } from "@/lib/hooks"
+import { CaptionOverrideCard, CaptionOverrideFields } from "@/components/caption-override-fields"
 import type { OverrideType } from "@workspace/shared"
 
 const TYPE_RULES: Record<OverrideType, string> = {
@@ -34,9 +35,10 @@ export function OverridesView({ slug }: { slug: string }) {
   const { data: templates } = useTemplates(slug)
   const [form, setForm] = useState({
     name: "", type: "mix" as OverrideType, template_id: "none",
-    description: "", for_date: "",
+    description: "", for_date: "", caption_cta: "", caption_footer: "",
   })
   const [files, setFiles] = useState<File[]>([])
+  const [captionOpen, setCaptionOpen] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [polishing, setPolishing] = useState(false)
@@ -101,10 +103,12 @@ export function OverridesView({ slug }: { slug: string }) {
       fd.set("template_id", form.template_id === "none" ? "" : form.template_id)
       fd.set("description", form.description)
       fd.set("for_date", form.for_date)
+      fd.set("caption_cta", form.caption_cta)
+      fd.set("caption_footer", form.caption_footer)
       const imgs = form.type === "text_only" ? [] : files
       for (const f of imgs) fd.append("images", f, f.name)
       await api.addOverride(slug, fd)
-      setForm({ name: "", type: "mix", template_id: "none", description: "", for_date: "" })
+      setForm({ name: "", type: "mix", template_id: "none", description: "", for_date: "", caption_cta: "", caption_footer: "" })
       setFiles([])
       if (fileInput.current) fileInput.current.value = ""
       reload()
@@ -238,6 +242,8 @@ export function OverridesView({ slug }: { slug: string }) {
               </div>
             )}
 
+            <CaptionOverrideFields id="ov" value={form} onChange={(v) => setForm({ ...form, ...v })} />
+
             <Button type="submit" disabled={busy} className="justify-self-start">
               <Plus className="size-4" /> {busy ? "creating…" : "Create override"}
             </Button>
@@ -247,7 +253,8 @@ export function OverridesView({ slug }: { slug: string }) {
 
       <div className="divide-y rounded-lg border">
         {(data ?? []).map((o) => (
-          <div key={o.id} className="flex flex-wrap items-center gap-3 p-3 text-sm">
+          <div key={o.id}>
+          <div className="flex flex-wrap items-center gap-3 p-3 text-sm">
             <Badge variant="secondary" className={STATUS_BADGE[o.status]}>{o.status}</Badge>
             <Badge variant="outline">{o.type}</Badge>
             <span className="w-24 shrink-0 font-mono text-xs text-muted-foreground">{o.for_date}</span>
@@ -282,9 +289,23 @@ export function OverridesView({ slug }: { slug: string }) {
                 <Ban className="size-4" />
               </Button>
             )}
+            {o.status !== "cancelled" && (
+              <Button variant="ghost" size="icon" aria-label="caption CTA and footer" aria-expanded={captionOpen === o.id}
+                title="Override CTA / footer" onClick={() => setCaptionOpen(captionOpen === o.id ? null : o.id)}>
+                <MessageSquareText className={`size-4 ${o.caption_cta || o.caption_footer ? "text-emerald-500" : ""}`} />
+              </Button>
+            )}
             <Button variant="ghost" size="icon" aria-label="delete" onClick={() => api.delOverride(slug, o.id).then(reload)}>
               <Trash2 className="size-4" />
             </Button>
+          </div>
+          {captionOpen === o.id && (
+            <div className="px-3 pb-3">
+              <CaptionOverrideCard initial={o}
+                note={o.status === "sent" ? "Already sent — changes apply to the next Resend. Blank = Settings." : undefined}
+                save={(v) => api.patchOverrideCaption(slug, o.id, v).then(reload)} />
+            </div>
+          )}
           </div>
         ))}
         {data?.length === 0 && <p className="p-4 text-sm text-muted-foreground">no overrides yet</p>}

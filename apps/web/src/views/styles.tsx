@@ -43,7 +43,10 @@ export function StylesView({ slug }: { slug: string }) {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold">Style Samples</h1>
+      <div>
+        <h1 className="text-lg font-semibold">Style samples</h1>
+        <p className="text-sm text-muted-foreground">Example posts whose tone and rhythm every AI writer imitates — regular posts, news, and override polish.</p>
+      </div>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
 
       <Card>

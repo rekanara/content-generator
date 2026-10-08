@@ -2,6 +2,10 @@
 import type { Format } from './state.ts';
 
 export type IdeationOut = { topic: string; angle: string };
+export type NewsScoreOut = { score: number; reason: string };
+// Research step output: concrete facts pulled from the article BEFORE writing.
+export type NewsResearchOut = { facts: string[]; reader_scenario: string; open_questions: string[] };
+export type NewsAutofillOut = { allowed_domains: string[]; keywords: string[]; sources: { name: string; url: string }[] };
 export type Slide = { headline: string; body: string };
 export type Scene = { overlay_text: string; narration: string };
 
@@ -20,6 +24,24 @@ export function isIdeationOut(x: unknown): x is IdeationOut {
   return obj(x) && str(x.topic) && str(x.angle) && x.topic.length > 0 && x.angle.length > 0;
 }
 
+export function isNewsScoreOut(x: unknown): x is NewsScoreOut {
+  return obj(x) && typeof x.score === 'number' && Number.isFinite(x.score) && x.score >= 0 && x.score <= 100 && str(x.reason) && x.reason.length > 0;
+}
+
+export function isNewsResearchOut(x: unknown): x is NewsResearchOut {
+  return obj(x) &&
+    Array.isArray(x.facts) && x.facts.length >= 1 && x.facts.length <= 10 && x.facts.every((f) => str(f) && f.trim().length > 0) &&
+    str(x.reader_scenario) &&
+    Array.isArray(x.open_questions) && x.open_questions.every(str);
+}
+
+export function isNewsAutofillOut(x: unknown): x is NewsAutofillOut {
+  return obj(x) &&
+    Array.isArray(x.allowed_domains) && x.allowed_domains.every(str) &&
+    Array.isArray(x.keywords) && x.keywords.every(str) &&
+    Array.isArray(x.sources) && x.sources.every((s) => obj(s) && str(s.name) && str(s.url));
+}
+
 export function isCaptionOut(x: unknown): x is CaptionOut {
   // tolerant: some models answer with the caption as a plain string (old shape) —
   // normalize it into the structured form (title = the string, rest empty) so a
@@ -34,9 +56,16 @@ export function isCaptionOut(x: unknown): x is CaptionOut {
 }
 
 // Coerce a guard-passing caption into the structured shape (string → {title}).
+// Trailing hashtag-only lines move into tags — otherwise assembleCaption would put
+// CTA/footer AFTER the hashtags (models, the critic especially, often answer this way).
 export function toCaptionOut(x: unknown): CaptionOut {
-  if (typeof x === 'string') return { title: x.trim(), subtitle: '', cta: '', tags: [] };
-  return x as CaptionOut;
+  if (typeof x !== 'string') return x as CaptionOut;
+  const lines = x.trim().split('\n');
+  const tags: string[] = [];
+  while (lines.length > 1 && /^\s*(#[^\s#]+\s*)+$/.test(lines[lines.length - 1]!)) {
+    tags.unshift(...lines.pop()!.trim().split(/\s+/));
+  }
+  return { title: lines.join('\n').trim(), subtitle: '', cta: '', tags: tags.slice(0, 8) };
 }
 
 function isSlide(x: unknown): x is Slide {
@@ -170,6 +199,54 @@ export function assembleCaption(c: CaptionOut, footer: string, ctaOverride?: str
     .filter((t) => t && !seen.has(t) && seen.add(t));
   if (tags.length > 0) lines.push('', tags.join(' '));
   return lines.join('\n').replace(/^\n+/, '').trim();
+}
+
+// ——— caption CTA/footer resolution (pure) ———
+// Item override (news topic / override / promotion) wins; blank or null falls back
+// to the group Settings value.
+export function resolveCaptionParts(
+  item: { caption_cta?: string | null; caption_footer?: string | null } | null | undefined,
+  group: { captionCta: string; captionFooter: string },
+): { cta: string; footer: string } {
+  const pick = (own: string | null | undefined, fallback: string) => (own && own.trim() ? own.trim() : fallback);
+  return { cta: pick(item?.caption_cta, group.captionCta), footer: pick(item?.caption_footer, group.captionFooter) };
+}
+
+// Plain caption text (override/promo: no structured LLM caption) + CTA + footer.
+// Idempotent-ish guard: a part already present verbatim is not appended again.
+export function appendCaptionParts(text: string, parts: { cta: string; footer: string }, max = 1024): string {
+  let out = text.trim();
+  for (const p of [parts.cta, parts.footer]) {
+    const v = p.trim();
+    if (v && !out.includes(v)) out = out ? `${out}\n\n${v}` : v;
+  }
+  return out.slice(0, max);
+}
+
+// ——— news source attribution (pure) ———
+// Guarantees the source is visible no matter what the LLM wrote: caption gets the
+// full URL (Telegram/IG caption = where Jack copies it from), the last slide gets a
+// short "source: domain" credit appended (no dedicated "read the source" slide —
+// that is filler), reels name the publisher, text posts end with the link. Idempotent.
+export function withNewsSource<T extends object>(d: T, src: { url: string; domain: string }, label = 'Sumber'): T {
+  const line = `${label}: ${src.url}`;
+  const out = structuredClone(d) as Record<string, unknown>;
+  const cap = out.caption as CaptionOut | undefined;
+  if (cap && typeof cap === 'object' && !`${cap.subtitle}`.includes(src.url)) {
+    cap.subtitle = [cap.subtitle?.trim(), line].filter(Boolean).join('\n\n');
+  }
+  const slides = out.slides as Slide[] | undefined;
+  const last = slides?.[slides.length - 1];
+  if (last && !`${last.headline} ${last.body}`.toLowerCase().includes(src.domain.toLowerCase())) {
+    last.body = `${last.body.trim()}\n\n${label.toLowerCase()}: ${src.domain}`;
+  }
+  const scenes = out.scenes as Scene[] | undefined;
+  const lastScene = scenes?.[scenes.length - 1];
+  if (lastScene && !`${lastScene.overlay_text} ${lastScene.narration}`.toLowerCase().includes(src.domain.toLowerCase())) {
+    lastScene.overlay_text = `${lastScene.overlay_text} · ${src.domain}`.slice(0, 80);
+  }
+  if (typeof out.body === 'string' && !out.body.includes(src.url)) out.body = `${out.body.trim()}\n\n${line}`;
+  return out as T;
 }
 
 // ——— promotion content (AI-authored slides) ———

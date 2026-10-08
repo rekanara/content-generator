@@ -12,7 +12,7 @@ export const Format = z.enum(['carousel', 'reels', 'pdf', 'text']);
 export type Format = z.infer<typeof Format>;
 
 // Template format (DB check constraint) — different domain from Format.
-export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel', 'ig-carousel-promo', 'li-carousel-promo']);
+export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel', 'ig-carousel-promo', 'li-carousel-promo', 'ig-news-card']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
 // Template role: 'regular' = pipeline rendering (default), the others mark a template
@@ -47,6 +47,7 @@ const GROUP_CONFIG_FIELDS = {
   telegram_chat_id: z.string().nullable(),
   caption_footer: z.string().nullable(),
   caption_cta: z.string().nullable(),
+  daily_budget: z.number().nullable(), // USD/day, null = unlimited
   llm_api_key_set: z.boolean(),
   tts_api_key_set: z.boolean(),
   telegram_bot_token_set: z.boolean(),
@@ -109,6 +110,7 @@ export const GroupPatch = z.object({
   telegram_chat_id: z.string().nullable().optional(),
   caption_footer: z.string().nullable().optional(),
   caption_cta: z.string().nullable().optional(),
+  daily_budget: z.number().min(0.01).max(10000).nullable().optional(), // null = unlimited
   approval_required: z.boolean().optional(),
   auto_plan: z.boolean().optional(),
 });
@@ -298,6 +300,12 @@ export const CalendarRun = z.object({
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
 
+// Per-item caption override: blank → null (= fall back to the group's Settings value).
+// absent key → undefined (PATCH: leave as-is); '' / '  ' / null → null (clear → use Settings).
+export const CaptionOverride = z.string().max(1000).nullish().transform((v) => (v === undefined ? undefined : v && v.trim() ? v.trim() : null));
+export const NewsCaptionInput = z.object({ caption_cta: CaptionOverride, caption_footer: CaptionOverride });
+export type NewsCaptionInput = z.infer<typeof NewsCaptionInput>;
+
 // ---------- override content ----------
 // Manual content that replaces the automatic pipeline for a specific date.
 export const Override = z.object({
@@ -308,6 +316,8 @@ export const Override = z.object({
   description: z.string(),
   for_date: z.string(), // YYYY-MM-DD (Asia/Jakarta)
   images: z.array(z.string()), // artifact file names (MinIO overrides/<id>/)
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
   status: z.enum(['scheduled', 'sent', 'cancelled']),
   created_at: z.string(),
 });
@@ -320,6 +330,8 @@ export const OverrideInput = z.object({
   template_id: z.string().uuid().nullable().default(null),
   description: z.string().default(''),
   for_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  caption_cta: CaptionOverride.optional(),
+  caption_footer: CaptionOverride.optional(),
 });
 export type OverrideInput = z.infer<typeof OverrideInput>;
 
@@ -372,6 +384,11 @@ export const TEMPLATE_TOKENS: Record<TemplateFormat, { body: string[]; first?: s
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
   'li-carousel': {
+    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+  },
+  'ig-news-card': {
     first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
     body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
@@ -443,6 +460,93 @@ export const UsageReport = z.object({
 });
 export type UsageReport = z.infer<typeof UsageReport>;
 
+// ---------- news ----------
+export const NewsTopic = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string(),
+  active: z.boolean(),
+  template_id: z.string().uuid().nullable(),
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
+  source_count: z.number(),
+  created_at: z.string(),
+});
+export type NewsTopic = z.infer<typeof NewsTopic>;
+
+export const NewsTopicInput = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().default(''),
+});
+export type NewsTopicInput = z.infer<typeof NewsTopicInput>;
+
+export const NewsSource = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  url: z.string(),
+  active: z.boolean(),
+  created_at: z.string(),
+});
+export type NewsSource = z.infer<typeof NewsSource>;
+
+export const NewsSourceInput = z.object({
+  name: z.string().trim().min(1),
+  url: z.string().trim().url(),
+});
+export type NewsSourceInput = z.infer<typeof NewsSourceInput>;
+
+export const NewsRule = z.object({
+  freshness_hours: z.number(),
+  min_sources: z.number(),
+  allowed_domains: z.array(z.string()),
+  blocked_domains: z.array(z.string()),
+  keywords: z.array(z.string()),
+  updated_at: z.string(),
+});
+export type NewsRule = z.infer<typeof NewsRule>;
+
+export const NewsRuleInput = z.object({
+  freshness_hours: z.number().int().positive(),
+  min_sources: z.number().int().positive(),
+  allowed_domains: z.array(z.string().trim().min(1)).default([]),
+  blocked_domains: z.array(z.string().trim().min(1)).default([]),
+  keywords: z.array(z.string().trim().min(1)).default([]),
+});
+export type NewsRuleInput = z.infer<typeof NewsRuleInput>;
+
+export const NewsTemplateInput = z.object({
+  template_id: z.string().uuid().nullable(),
+});
+export type NewsTemplateInput = z.infer<typeof NewsTemplateInput>;
+
+export const NewsGenerateInput = z.object({
+  item_id: z.string().uuid().optional(),
+  language: z.enum(['original', 'id', 'en', 'ms', 'ja', 'ko', 'zh', 'es']).default('original'),
+});
+export type NewsGenerateInput = z.infer<typeof NewsGenerateInput>;
+
+export const NewsItem = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  url: z.string(),
+  domain: z.string(),
+  summary: z.string(),
+  published_at: z.string().nullable(),
+  status: z.enum(['pending', 'valid', 'rejected', 'used']),
+  score: z.number().nullable(),
+  reason: z.string().nullable(),
+  post_id: z.string().uuid().nullable(),
+  created_at: z.string(),
+});
+export type NewsItem = z.infer<typeof NewsItem>;
+
+export const NewsTopicDetail = NewsTopic.extend({
+  sources: z.array(NewsSource),
+  rules: NewsRule,
+  items: z.array(NewsItem),
+});
+export type NewsTopicDetail = z.infer<typeof NewsTopicDetail>;
+
 // ---------- promotions ----------
 export const PromoSlide = z.object({
   html: z.string(),               // free-form slide html (uses the template's css classes)
@@ -461,6 +565,8 @@ export const Promotion = z.object({
   price_sale: z.string(),
   template_id: z.string().uuid().nullable(),
   content: z.array(PromoSlide).nullable(),
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
   status: z.enum(['draft', 'content_ready', 'awaiting_images', 'ready', 'sent']),
   created_at: z.string(),
 });
@@ -475,6 +581,8 @@ export const PromotionInput = z.object({
   price: z.string().default(''),
   price_sale: z.string().default(''),
   template_id: z.string().uuid().nullable().default(null),
+  caption_cta: CaptionOverride.optional(),
+  caption_footer: CaptionOverride.optional(),
 });
 export type PromotionInput = z.infer<typeof PromotionInput>;
 

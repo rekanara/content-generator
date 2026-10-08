@@ -19,7 +19,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -30,12 +30,15 @@ import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
+import { listNewsTopics, createNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
-import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription } from './repos/overrides.ts';
+import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
-import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate } from './repos/promotions.ts';
+import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate, setPromotionCaption } from './repos/promotions.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
+import { autofillNewsTopic, startIngest, getIngestProgress } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
+import { recordLlmRun } from './repos/llm-runs.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
   touchSession, destroySession, revokeUserSessions, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
@@ -463,6 +466,159 @@ g.delete('/:slug/ideas/:id', async (c) => {
   return c.json({ ok: true });
 });
 
+// ---------- news ----------
+g.get('/:slug/news/topics', async (c) => c.json(await listNewsTopics(gr(c).id)));
+
+g.post('/:slug/news/topics', async (c) => {
+  const parsed = NewsTopicInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  try {
+    return c.json(await createNewsTopic(gr(c).id, parsed.data), 201);
+  } catch (e) {
+    if ((e as { code?: string }).code === '23505') return c.json({ error: 'news topic already exists in this group' }, 400);
+    throw e;
+  }
+});
+
+g.get('/:slug/news/topics/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const topic = await getNewsTopic(gr(c).id, id);
+  if (!topic) return c.json({ error: 'news topic not found' }, 404);
+  return c.json(topic);
+});
+
+g.post('/:slug/news/topics/:id/autofill', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const topic = await getNewsTopic(gr(c).id, id);
+  if (!topic) return c.json({ error: 'news topic not found' }, 404);
+  const fill = await autofillNewsTopic(await getGroupCfg(gr(c).slug), topic);
+  await upsertNewsRules(gr(c).id, id, {
+    freshness_hours: topic.rules.freshness_hours,
+    min_sources: topic.rules.min_sources,
+    allowed_domains: fill.allowed_domains,
+    blocked_domains: topic.rules.blocked_domains,
+    keywords: fill.keywords,
+  });
+  for (const source of fill.sources) {
+    await addNewsSource(gr(c).id, id, source).catch((e) => {
+      if ((e as { code?: string }).code !== '23505') throw e;
+    });
+  }
+  return c.json(await getNewsTopic(gr(c).id, id));
+});
+
+g.post('/:slug/news/topics/:id/sources', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsSourceInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  try {
+    const source = await addNewsSource(gr(c).id, id, parsed.data);
+    if (!source) return c.json({ error: 'news topic not found' }, 404);
+    return c.json(source, 201);
+  } catch (e) {
+    if ((e as { code?: string }).code === '23505') return c.json({ error: 'source URL already exists in this topic' }, 400);
+    throw e;
+  }
+});
+
+g.delete('/:slug/news/topics/:id/sources/:sourceId', async (c) => {
+  const id = c.req.param('id');
+  const sourceId = c.req.param('sourceId');
+  if (!isUuid(id) || !isUuid(sourceId)) return c.json({ error: 'invalid id' }, 400);
+  await deleteNewsSource(gr(c).id, id, sourceId);
+  return c.json({ ok: true });
+});
+
+g.put('/:slug/news/topics/:id/rules', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsRuleInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const rules = await upsertNewsRules(gr(c).id, id, parsed.data);
+  if (!rules) return c.json({ error: 'news topic not found' }, 404);
+  return c.json(rules);
+});
+
+g.put('/:slug/news/topics/:id/template', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsTemplateInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if (parsed.data.template_id) {
+    const t = await getTemplate(gr(c).id, parsed.data.template_id);
+    if (!t) return c.json({ error: 'template not found' }, 404);
+    if (t.type !== 'regular' || !['ig-news-card', 'ig-carousel'].includes(t.format)) return c.json({ error: 'template must be regular ig-news-card or ig-carousel' }, 400);
+  }
+  const ok = await setNewsTopicTemplate(gr(c).id, id, parsed.data.template_id);
+  if (!ok) return c.json({ error: 'news topic not found' }, 404);
+  return c.json({ ok: true });
+});
+
+g.put('/:slug/news/topics/:id/caption', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsCaptionInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ok = await setNewsTopicCaption(gr(c).id, id, parsed.data);
+  if (!ok) return c.json({ error: 'news topic not found' }, 404);
+  return c.json({ ok: true });
+});
+
+g.post('/:slug/news/topics/:id/generate', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsGenerateInput.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const templateId = await getNewsTopicTemplate(gr(c).id, id);
+  if (templateId === undefined) return c.json({ error: 'news topic not found' }, 404);
+  const item = await claimValidNewsItem(gr(c).id, { topicId: id, itemId: parsed.data.item_id });
+  if (!item) return c.json({ error: 'valid news item not found' }, 404);
+  enqueue({
+    kind: 'generate',
+    slug: gr(c).slug,
+    forced: { platform: 'instagram', format: 'carousel' },
+    notifyChat: true,
+    source: 'web',
+    newsTopicId: id,
+    newsItemId: item.id,
+    newsLanguage: parsed.data.language,
+    templateId: templateId ?? undefined,
+  });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+// async: starts the fetch and returns 202 — the FE polls /ingest/status (a fetch with
+// AI scoring takes minutes; a blocking request looked frozen and forced a page refresh)
+g.post('/:slug/news/topics/:id/ingest', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
+  const started = startIngest(gr(c).id, id, await getGroupCfg(gr(c).slug));
+  return c.json({ ok: true, started, progress: getIngestProgress(id) }, 202);
+});
+
+g.get('/:slug/news/topics/:id/ingest/status', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
+  return c.json({ progress: getIngestProgress(id) });
+});
+
+g.post('/:slug/news/topics/:id/items/delete', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = z.object({
+    ids: z.array(z.string().uuid()).optional(),
+    status: z.enum(['pending', 'valid', 'rejected', 'used']).optional(),
+  }).safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const n = await deleteNewsItems(gr(c).id, id, parsed.data.ids, parsed.data.status ?? 'rejected');
+  return c.json({ ok: true, deleted: n });
+});
+
 // ---------- templates ----------
 g.get('/:slug/templates', async (c) => c.json(await listTemplates(gr(c).id)));
 
@@ -525,6 +681,7 @@ g.post('/:slug/overrides/polish', async (c) => {
     overridePolishPrompt(parsed.data, samples as { title: string; body: string; platform: string | null }[]),
     isPolishOut, 4000,
   );
+  await recordLlmRun(group.id, 'polish', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   return c.json({ polished: out.data.polished.trim() });
 });
 
@@ -550,9 +707,11 @@ g.post('/:slug/overrides', async (c) => {
     template_id: templateIdRaw === '' ? null : templateIdRaw,
     description: field('description'),
     for_date: field('for_date'),
+    caption_cta: field('caption_cta'),
+    caption_footer: field('caption_footer'),
   });
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const { name, type, description, for_date } = parsed.data;
+  const { name, type, description, for_date, caption_cta, caption_footer } = parsed.data;
   const template_id = parsed.data.template_id;
 
   // image count rules per type — enforced here so both FE and API callers get the same guard
@@ -574,7 +733,7 @@ g.post('/:slug/overrides', async (c) => {
       const ext = f.type === 'image/jpeg' ? 'jpg' : f.type === 'image/webp' ? 'webp' : 'png';
       staged.push({ fname: `img-${String(i + 1).padStart(2, '0')}.${ext}`, buf: Buffer.from(await f.arrayBuffer()) });
     }
-    const ov = await createOverrideWithPlan(group.id, { name, type, template_id, description, for_date, images: [] });
+    const ov = await createOverrideWithPlan(group.id, { name, type, template_id, description, for_date, images: [], caption_cta, caption_footer });
     const names: string[] = [];
     for (const { fname, buf } of staged) {
       await uploadOverrideBuffer(ov.id, buf, fname);
@@ -607,13 +766,21 @@ g.post('/:slug/overrides/:id/resend', async (c) => {
 g.patch('/:slug/overrides/:id', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  const parsed = z.object({ description: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+  const parsed = z.object({ description: z.string().min(1).optional() })
+    .and(NewsCaptionInput.partial())
+    .safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const ov = await getOverride(gr(c).id, id);
   if (!ov) return c.json({ error: 'override not found' }, 404);
-  if (ov.status !== 'scheduled') return c.json({ error: `status ${ov.status} — only scheduled overrides can be edited` }, 400);
-  const ok = await updateOverrideDescription(gr(c).id, id, parsed.data.description);
-  if (!ok) return c.json({ error: 'override not found' }, 404);
+  const { description } = parsed.data;
+  // description is what shipped — frozen after send; CTA/footer still editable (affects Resend)
+  if (description !== undefined) {
+    if (ov.status !== 'scheduled') return c.json({ error: `status ${ov.status} — only scheduled overrides can be edited` }, 400);
+    if (!(await updateOverrideDescription(gr(c).id, id, description))) return c.json({ error: 'override not found' }, 404);
+  }
+  if (parsed.data.caption_cta !== undefined || parsed.data.caption_footer !== undefined) {
+    await updateOverrideCaptionParts(gr(c).id, id, { caption_cta: parsed.data.caption_cta, caption_footer: parsed.data.caption_footer });
+  }
   return c.json({ ok: true });
 });
 
@@ -759,12 +926,25 @@ g.post('/:slug/promotions', async (c) => {
   if (brief && typeof templateIdRaw === 'string' && templateIdRaw !== '') {
     input.template_id = templateIdRaw;
   }
+  if (brief) {
+    const cap = NewsCaptionInput.safeParse(raw);
+    if (cap.success) Object.assign(input, cap.data);
+  }
   try {
     const p = await createPromotion(gr(c).id, input);
     return c.json(p, 201);
   } catch (e) {
     return c.json({ error: `failed to create promotion: ${(e as Error).message}` }, 400);
   }
+});
+
+g.put('/:slug/promotions/:id/caption', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsCaptionInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if (!(await setPromotionCaption(gr(c).id, id, parsed.data))) return c.json({ error: 'promotion not found' }, 404);
+  return c.json({ ok: true });
 });
 
 g.patch('/:slug/promotions/:id', async (c) => {

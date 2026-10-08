@@ -16,6 +16,8 @@ import {
   SparklesIcon,
   MegaphoneIcon,
   CoinsIcon,
+  ActivityIcon,
+  InboxIcon,
 } from "lucide-react"
 
 import {
@@ -36,16 +38,31 @@ import { navigate } from "@/lib/router"
 import type { Route } from "@/lib/router"
 import type { AuthMe } from "@workspace/shared"
 
-// group-scoped views (order = sidebar order)
-const VIEWS: { id: string; label: string; icon: React.ReactNode }[] = [
-  { id: "dashboard", label: "Dashboard", icon: <LayoutDashboardIcon /> },
-  { id: "posts", label: "Posts", icon: <NewspaperIcon /> },
-  { id: "pillars", label: "Pillars", icon: <LayersIcon /> },
-  { id: "styles", label: "Styles", icon: <PaletteIcon /> },
-  { id: "templates", label: "Templates", icon: <FileStackIcon /> },
-  { id: "overrides", label: "Overrides", icon: <SparklesIcon /> },
-  { id: "promotions", label: "Promotions", icon: <MegaphoneIcon /> },
-  { id: "settings", label: "Settings", icon: <SettingsIcon /> },
+// Group-scoped views, grouped by WHAT they feed — one section per content source,
+// so a source's config (e.g. Pillars → regular posts) never sits next to an
+// unrelated source (News). Order = sidebar order.
+type View = { id: string; label: string; icon: React.ReactNode; hint?: string }
+const SECTIONS: { label: string; views: View[] }[] = [
+  { label: "Overview", views: [
+    { id: "dashboard", label: "Dashboard", icon: <LayoutDashboardIcon /> },
+    { id: "studio", label: "Studio", icon: <ActivityIcon />, hint: "Live pipeline" },
+    { id: "posts", label: "Posts", icon: <InboxIcon />, hint: "Everything generated" },
+  ] },
+  { label: "Regular posts", views: [
+    { id: "pillars", label: "Pillars & schedule", icon: <LayersIcon />, hint: "Topics + cron for auto posts" },
+  ] },
+  { label: "News", views: [
+    { id: "news", label: "News topics", icon: <NewspaperIcon />, hint: "Sources, rules, valid items" },
+  ] },
+  { label: "Manual content", views: [
+    { id: "overrides", label: "Overrides", icon: <SparklesIcon />, hint: "Your own content for a date" },
+    { id: "promotions", label: "Promotions", icon: <MegaphoneIcon />, hint: "Product promo decks" },
+  ] },
+  { label: "Configure (all content)", views: [
+    { id: "styles", label: "Style samples", icon: <PaletteIcon />, hint: "Voice every AI writer imitates" },
+    { id: "templates", label: "Templates", icon: <FileStackIcon />, hint: "Visuals for every content type" },
+    { id: "settings", label: "Settings", icon: <SettingsIcon />, hint: "Group, LLM, Telegram, caption" },
+  ] },
 ]
 
 export function AppSidebar({
@@ -62,13 +79,15 @@ export function AppSidebar({
 } & React.ComponentProps<typeof Sidebar>) {
   const { theme, setTheme } = useTheme()
   // group context — active inside a group (list views + detail pages)
-  const groupSlug = route.name === "groupView" || route.name === "templateDetail" || route.name === "postDetail"
+  const groupSlug = route.name === "groupView" || route.name === "templateDetail" || route.name === "postDetail" || route.name === "newsTopicDetail" || route.name === "newsItemDetail" || route.name === "promoDetail"
     ? route.slug : null
   // active view id for highlight (detail pages highlight their parent tab)
   const activeView = route.name === "groupView"
     ? route.view
     : route.name === "templateDetail" ? "templates"
-      : route.name === "postDetail" ? "posts" : null
+      : route.name === "postDetail" ? "posts"
+        : route.name === "newsTopicDetail" || route.name === "newsItemDetail" ? "news"
+          : route.name === "promoDetail" ? "promotions" : null
 
   const go = (path: string) => (e: React.MouseEvent) => {
     e.preventDefault()
@@ -125,27 +144,29 @@ export function AppSidebar({
         {groupSlug && (
           <>
             <SidebarSeparator />
-            <SidebarGroup>
-              <SidebarGroupLabel>{groupSlug}</SidebarGroupLabel>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  {VIEWS.map((v) => (
-                    <SidebarMenuItem key={v.id}>
-                      <SidebarMenuButton
-                        asChild
-                        isActive={activeView === v.id}
-                        tooltip={v.label}
-                      >
-                        <a href={`/app/${groupSlug}/${v.id}`} onClick={go(`/app/${groupSlug}/${v.id}`)}>
-                          {v.icon}
-                          <span>{v.label}</span>
-                        </a>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
+            {SECTIONS.map((sec) => (
+              <SidebarGroup key={sec.label} className="py-1">
+                <SidebarGroupLabel>{sec.label}</SidebarGroupLabel>
+                <SidebarGroupContent>
+                  <SidebarMenu>
+                    {sec.views.map((v) => (
+                      <SidebarMenuItem key={v.id}>
+                        <SidebarMenuButton
+                          asChild
+                          isActive={activeView === v.id}
+                          tooltip={v.hint ? `${v.label} — ${v.hint}` : v.label}
+                        >
+                          <a href={`/app/${groupSlug}/${v.id}`} onClick={go(`/app/${groupSlug}/${v.id}`)} title={v.hint}>
+                            {v.icon}
+                            <span>{v.label}</span>
+                          </a>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroupContent>
+              </SidebarGroup>
+            ))}
           </>
         )}
 
