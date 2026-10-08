@@ -7,6 +7,7 @@ type OverrideRow = {
   id: string; group_id: string; name: string; type: OverrideType;
   template_id: string | null; description: string; for_date: string;
   images: string[]; status: 'scheduled' | 'sent' | 'cancelled';
+  caption_cta: string | null; caption_footer: string | null;
   created_at: Date;
 };
 
@@ -17,20 +18,22 @@ function toOut(r: OverrideRow): Override {
     description: r.description,
     for_date: typeof r.for_date === 'string' ? r.for_date : new Date(r.for_date).toISOString().slice(0, 10),
     images: Array.isArray(r.images) ? r.images : [],
+    caption_cta: r.caption_cta ?? null,
+    caption_footer: r.caption_footer ?? null,
     status: r.status,
     created_at: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at)).toISOString(),
   };
 }
 
 export async function listOverrides(groupId: string, limit = 100): Promise<Override[]> {
-  const rows = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, status, created_at
+  const rows = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer, status, created_at
     from overrides where group_id = ${groupId} order by for_date desc, id desc limit ${limit}`;
   return rows.map(toOut);
 }
 
 // The override row by id — plan flow (plans.override_id) resolves through this.
 export async function getOverride(groupId: string, id: string): Promise<Override | null> {
-  const [r] = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, status, created_at
+  const [r] = await sql<OverrideRow[]>`select id, group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer, status, created_at
     from overrides where id = ${id} and group_id = ${groupId}`;
   return r ? toOut(r) : null;
 }
@@ -40,11 +43,12 @@ export async function getOverride(groupId: string, id: string): Promise<Override
 export async function createOverrideWithPlan(groupId: string, d: {
   name: string; type: OverrideType; template_id: string | null;
   description: string; for_date: string; images: string[];
+  caption_cta?: string | null; caption_footer?: string | null;
 }): Promise<Override> {
   return sql.begin(async (tx) => {
-    const [r] = await tx<OverrideRow[]>`insert into overrides (group_id, name, type, template_id, description, for_date, images)
-      values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${JSON.stringify(d.images)}::jsonb)
-      returning id, group_id, name, type, template_id, description, for_date, images, status, created_at`;
+    const [r] = await tx<OverrideRow[]>`insert into overrides (group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer)
+      values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${JSON.stringify(d.images)}::jsonb, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
+      returning id, group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer, status, created_at`;
     if (!r) throw new Error('insert override failed');
     await tx`insert into plans (group_id, for_date, type, override_id, note)
       values (${groupId}, ${d.for_date}, 'override_content', ${r.id}, ${d.name})`;
@@ -82,5 +86,15 @@ export async function cancelOverride(groupId: string, id: string): Promise<boole
 
 export async function deleteOverride(groupId: string, id: string): Promise<boolean> {
   const r = await sql`delete from overrides where id = ${id} and group_id = ${groupId} returning id`;
+  return r.length > 0;
+}
+
+// CTA/footer edit — allowed on sent too (affects the next Resend only).
+// undefined = leave as-is, null = clear (→ group Settings)
+export async function updateOverrideCaptionParts(groupId: string, id: string, d: { caption_cta?: string | null; caption_footer?: string | null }): Promise<boolean> {
+  const r = await sql`update overrides set
+    caption_cta = ${d.caption_cta === undefined ? sql`caption_cta` : d.caption_cta},
+    caption_footer = ${d.caption_footer === undefined ? sql`caption_footer` : d.caption_footer}
+    where id = ${id} and group_id = ${groupId} and status <> 'cancelled' returning id`;
   return r.length > 0;
 }

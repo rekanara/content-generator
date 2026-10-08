@@ -298,6 +298,12 @@ export const CalendarRun = z.object({
 });
 export type CalendarRun = z.infer<typeof CalendarRun>;
 
+// Per-item caption override: blank → null (= fall back to the group's Settings value).
+// absent key → undefined (PATCH: leave as-is); '' / '  ' / null → null (clear → use Settings).
+export const CaptionOverride = z.string().max(1000).nullish().transform((v) => (v === undefined ? undefined : v && v.trim() ? v.trim() : null));
+export const NewsCaptionInput = z.object({ caption_cta: CaptionOverride, caption_footer: CaptionOverride });
+export type NewsCaptionInput = z.infer<typeof NewsCaptionInput>;
+
 // ---------- override content ----------
 // Manual content that replaces the automatic pipeline for a specific date.
 export const Override = z.object({
@@ -308,6 +314,8 @@ export const Override = z.object({
   description: z.string(),
   for_date: z.string(), // YYYY-MM-DD (Asia/Jakarta)
   images: z.array(z.string()), // artifact file names (MinIO overrides/<id>/)
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
   status: z.enum(['scheduled', 'sent', 'cancelled']),
   created_at: z.string(),
 });
@@ -320,6 +328,8 @@ export const OverrideInput = z.object({
   template_id: z.string().uuid().nullable().default(null),
   description: z.string().default(''),
   for_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  caption_cta: CaptionOverride.optional(),
+  caption_footer: CaptionOverride.optional(),
 });
 export type OverrideInput = z.infer<typeof OverrideInput>;
 
@@ -455,6 +465,8 @@ export const NewsTopic = z.object({
   description: z.string(),
   active: z.boolean(),
   template_id: z.string().uuid().nullable(),
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
   source_count: z.number(),
   created_at: z.string(),
 });
@@ -551,6 +563,8 @@ export const Promotion = z.object({
   price_sale: z.string(),
   template_id: z.string().uuid().nullable(),
   content: z.array(PromoSlide).nullable(),
+  caption_cta: z.string().nullable(),       // null = group setting
+  caption_footer: z.string().nullable(),    // null = group setting
   status: z.enum(['draft', 'content_ready', 'awaiting_images', 'ready', 'sent']),
   created_at: z.string(),
 });
@@ -565,6 +579,8 @@ export const PromotionInput = z.object({
   price: z.string().default(''),
   price_sale: z.string().default(''),
   template_id: z.string().uuid().nullable().default(null),
+  caption_cta: CaptionOverride.optional(),
+  caption_footer: CaptionOverride.optional(),
 });
 export type PromotionInput = z.infer<typeof PromotionInput>;
 

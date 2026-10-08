@@ -7,6 +7,7 @@ type Row = {
   features: string[]; stacks: string[]; stats: string[];
   price: string; price_sale: string; template_id: string | null;
   content: PromoSlide[] | string | null; status: Promotion['status'];
+  caption_cta: string | null; caption_footer: string | null;
   created_at: Date; sent_at: Date | null;
 };
 
@@ -24,31 +25,33 @@ function toOut(r: Row): Promotion {
     stats: Array.isArray(r.stats) ? r.stats : [],
     price: r.price, price_sale: r.price_sale, template_id: r.template_id ?? null,
     content: parseJson<PromoSlide[]>(r.content),
+    caption_cta: r.caption_cta ?? null,
+    caption_footer: r.caption_footer ?? null,
     status: r.status,
     created_at: (r.created_at instanceof Date ? r.created_at : new Date(r.created_at)).toISOString(),
   };
 }
 
-const COLS = 'id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, status, created_at, sent_at';
+const COLS = 'id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at';
 
 export async function listPromotions(groupId: string): Promise<Promotion[]> {
-  const rows = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, status, created_at, sent_at
+  const rows = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at
     from promotions where group_id = ${groupId} order by id desc limit 100`;
   return rows.map(toOut);
 }
 
 export async function getPromotion(groupId: string, id: string): Promise<Promotion | null> {
-  const [r] = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, status, created_at, sent_at
+  const [r] = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at
     from promotions where id = ${id} and group_id = ${groupId}`;
   return r ? toOut(r) : null;
 }
 
 export async function createPromotion(groupId: string, d: PromotionInput): Promise<Promotion> {
   const j = (v: unknown) => JSON.stringify(v ?? []);
-  const [r] = await sql<Row[]>`insert into promotions (group_id, name, topic, features, stacks, stats, price, price_sale, template_id)
+  const [r] = await sql<Row[]>`insert into promotions (group_id, name, topic, features, stacks, stats, price, price_sale, template_id, caption_cta, caption_footer)
     values (${groupId}, ${d.name}, ${d.topic}, ${j(d.features)}::jsonb, ${j(d.stacks)}::jsonb, ${j(d.stats)}::jsonb,
-      ${d.price}, ${d.price_sale}, ${d.template_id})
-    returning id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, status, created_at, sent_at`;
+      ${d.price}, ${d.price_sale}, ${d.template_id}, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
+    returning id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at`;
   if (!r) throw new Error('insert promotion failed');
   return toOut(r);
 }
@@ -57,7 +60,9 @@ export async function updatePromotion(groupId: string, id: string, d: PromotionI
   const j = (v: unknown) => JSON.stringify(v ?? []);
   const r = await sql`update promotions set
     name = ${d.name}, topic = ${d.topic}, features = ${j(d.features)}::jsonb, stacks = ${j(d.stacks)}::jsonb,
-    stats = ${j(d.stats)}::jsonb, price = ${d.price}, price_sale = ${d.price_sale}, template_id = ${d.template_id}
+    stats = ${j(d.stats)}::jsonb, price = ${d.price}, price_sale = ${d.price_sale}, template_id = ${d.template_id},
+    caption_cta = ${d.caption_cta === undefined ? sql`caption_cta` : d.caption_cta},
+    caption_footer = ${d.caption_footer === undefined ? sql`caption_footer` : d.caption_footer}
     where id = ${id} and group_id = ${groupId} returning id`;
   return r.length > 0;
 }
@@ -101,4 +106,13 @@ export function imageSlots(p: Promotion): { slide: number; prompt: string }[] {
     if (s.html.includes('{{image}}')) out.push({ slide: i + 1, prompt: s.image_prompt ?? '' });
   });
   return out;
+}
+
+// undefined = leave as-is, null = clear (→ group Settings). Sent promos too (affects Re-render/resend).
+export async function setPromotionCaption(groupId: string, id: string, d: { caption_cta?: string | null; caption_footer?: string | null }): Promise<boolean> {
+  const r = await sql`update promotions set
+    caption_cta = ${d.caption_cta === undefined ? sql`caption_cta` : d.caption_cta},
+    caption_footer = ${d.caption_footer === undefined ? sql`caption_footer` : d.caption_footer}
+    where id = ${id} and group_id = ${groupId} returning id`;
+  return r.length > 0;
 }

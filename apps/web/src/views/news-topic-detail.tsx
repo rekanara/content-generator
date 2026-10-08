@@ -7,6 +7,7 @@ import { Label } from "@workspace/ui/components/label"
 import { api, ApiError, type IngestProgress } from "@/lib/api"
 import { useNewsTopic, useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
+import { CaptionOverrideCard } from "@/components/caption-override-fields"
 
 const LANGUAGES = [
   ["original", "Bahasa asli item"],
@@ -145,6 +146,8 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
         </div>
       )}
 
+      <CaptionOverrideCard initial={topic} note="Applies to content generated from this topic. Blank = use the CTA/footer from Settings."
+        save={(v) => api.saveNewsCaption(slug, id, v).then(reload)} />
       <RulesCard slug={slug} topicId={id} rules={topic.rules} onSaved={() => { setMsg("rules saved"); reload() }} />
       <SourcesCard slug={slug} topicId={id} sources={topic.sources} reload={reload} setMsg={setMsg} />
       <ItemsCard slug={slug} topicId={id} items={topic.items} reload={reload} setMsg={setMsg} onGenerate={openGenerate} />

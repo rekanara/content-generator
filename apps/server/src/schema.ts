@@ -194,6 +194,28 @@ export function assembleCaption(c: CaptionOut, footer: string, ctaOverride?: str
   return lines.join('\n').replace(/^\n+/, '').trim();
 }
 
+// ——— caption CTA/footer resolution (pure) ———
+// Item override (news topic / override / promotion) wins; blank or null falls back
+// to the group Settings value.
+export function resolveCaptionParts(
+  item: { caption_cta?: string | null; caption_footer?: string | null } | null | undefined,
+  group: { captionCta: string; captionFooter: string },
+): { cta: string; footer: string } {
+  const pick = (own: string | null | undefined, fallback: string) => (own && own.trim() ? own.trim() : fallback);
+  return { cta: pick(item?.caption_cta, group.captionCta), footer: pick(item?.caption_footer, group.captionFooter) };
+}
+
+// Plain caption text (override/promo: no structured LLM caption) + CTA + footer.
+// Idempotent-ish guard: a part already present verbatim is not appended again.
+export function appendCaptionParts(text: string, parts: { cta: string; footer: string }, max = 1024): string {
+  let out = text.trim();
+  for (const p of [parts.cta, parts.footer]) {
+    const v = p.trim();
+    if (v && !out.includes(v)) out = out ? `${out}\n\n${v}` : v;
+  }
+  return out.slice(0, max);
+}
+
 // ——— news source attribution (pure) ———
 // Guarantees the source is visible no matter what the LLM wrote: caption gets the
 // full URL (Telegram/IG caption = where Jack copies it from), the last slide gets a

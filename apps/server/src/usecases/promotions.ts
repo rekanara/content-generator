@@ -7,6 +7,7 @@ import { getTemplate } from '../repos/templates.ts';
 import { cssVocabOf, promoVocabOf, sanitizePromoFragment, defaultTemplate, renderPromotion } from '../render/promotion.ts';
 import { artifactExists, uploadPromotionImage } from '../storage.ts';
 import { sendMessage } from '../telegram.ts';
+import { resolveCaptionParts, appendCaptionParts } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
 import type { Promotion } from '@workspace/shared';
 
@@ -91,7 +92,7 @@ export async function deliverPromotion(cfg: GroupCfg, promoId: string, platform:
   if (!promo || !promo.content) throw new Error(`promotion ${promoId} has no content`);
   const r = await renderPromotion(promo, cfg, platform);
   const { sendMediaGroupPhoto, sendDocument, sendMessage } = await import('../telegram.ts');
-  const caption = promoCaption(promo);
+  const caption = appendCaptionParts(promoCaption(promo), resolveCaptionParts(promo, cfg));
   if (r.missingImages.length > 0) {
     await sendMessage(cfg, `Promo "${promo.name}": ${r.missingImages.length} slide tanpa gambar (slot kosong) — tetap dikirim. Slide: ${r.missingImages.join(', ')}`).catch(() => {});
   }

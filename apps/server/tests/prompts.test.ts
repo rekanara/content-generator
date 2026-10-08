@@ -73,6 +73,20 @@ test('criticPrompt: kind-aware rules', () => {
   assert.match(criticPrompt('instagram', 'carousel', {}, 'brief')[1]!.content, /BRIEF RULES/);
 });
 
+import { resolveCaptionParts, appendCaptionParts } from '../src/schema.ts';
+
+test('resolveCaptionParts: item override wins, blank/null falls back to Settings', () => {
+  const g = { captionCta: 'Follow @dev', captionFooter: 'Settings footer' };
+  assert.deepEqual(resolveCaptionParts({ caption_cta: 'Join kelas', caption_footer: null }, g), { cta: 'Join kelas', footer: 'Settings footer' });
+  assert.deepEqual(resolveCaptionParts({ caption_cta: '   ', caption_footer: 'Promo footer' }, g), { cta: 'Follow @dev', footer: 'Promo footer' });
+  assert.deepEqual(resolveCaptionParts(null, g), { cta: 'Follow @dev', footer: 'Settings footer' });
+});
+
+test('appendCaptionParts: appends CTA then footer, skips empty + duplicates', () => {
+  assert.equal(appendCaptionParts('Body', { cta: 'CTA', footer: 'FOOT' }), 'Body\n\nCTA\n\nFOOT');
+  assert.equal(appendCaptionParts('Body\n\nCTA', { cta: 'CTA', footer: '' }), 'Body\n\nCTA');
+});
+
 import { HASHTAG_RULES, overridePolishPrompt } from '../src/prompts.ts';
 
 test('hashtag rules reach writer, critic and override polish', () => {

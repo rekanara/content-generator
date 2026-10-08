@@ -18,7 +18,7 @@ function itemOut(r: Record<string, unknown>): NewsItem {
 }
 
 export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
-  const rows = await sql`select t.id, t.name, t.description, t.active, t.template_id, t.created_at, count(s.id)::int as source_count
+  const rows = await sql`select t.id, t.name, t.description, t.active, t.template_id, t.caption_cta, t.caption_footer, t.created_at, count(s.id)::int as source_count
     from news_topics t
     left join news_sources s on s.topic_id = t.id
     where t.group_id = ${groupId}
@@ -30,6 +30,8 @@ export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
     description: r.description as string,
     active: r.active as boolean,
     template_id: (r.template_id as string | null) ?? null,
+    caption_cta: (r.caption_cta as string | null) ?? null,
+    caption_footer: (r.caption_footer as string | null) ?? null,
     source_count: r.source_count as number,
     created_at: r.created_at as string,
   }));
@@ -38,20 +40,22 @@ export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
 export async function createNewsTopic(groupId: string, d: { name: string; description: string }): Promise<NewsTopic> {
   const [r] = await sql`insert into news_topics (group_id, name, description)
     values (${groupId}, ${d.name}, ${d.description})
-    returning id, name, description, active, template_id, created_at`;
+    returning id, name, description, active, template_id, caption_cta, caption_footer, created_at`;
   return {
     id: r!.id as string,
     name: r!.name as string,
     description: r!.description as string,
     active: r!.active as boolean,
     template_id: (r!.template_id as string | null) ?? null,
+    caption_cta: null,
+    caption_footer: null,
     source_count: 0,
     created_at: r!.created_at as string,
   };
 }
 
 export async function getNewsTopic(groupId: string, id: string): Promise<NewsTopicDetail | null> {
-  const [topic] = await sql`select id, name, description, active, template_id, created_at
+  const [topic] = await sql`select id, name, description, active, template_id, caption_cta, caption_footer, created_at
     from news_topics where id = ${id} and group_id = ${groupId}`;
   if (!topic) return null;
   const sources = await sql`select id, name, url, active, created_at
@@ -67,6 +71,8 @@ export async function getNewsTopic(groupId: string, id: string): Promise<NewsTop
     description: topic.description as string,
     active: topic.active as boolean,
     template_id: (topic.template_id as string | null) ?? null,
+    caption_cta: (topic.caption_cta as string | null) ?? null,
+    caption_footer: (topic.caption_footer as string | null) ?? null,
     source_count: sources.length,
     created_at: topic.created_at as string,
     sources: sources.map((s) => ({
@@ -208,12 +214,26 @@ export async function setNewsTopicTemplate(groupId: string, topicId: string, tem
   return rows.length > 0;
 }
 
-// The news topic an item belongs to (the writer's audience/angle comes from the
-// TOPIC, not a hardcoded persona).
-export async function getNewsItemTopic(itemId: string): Promise<{ name: string; description: string } | null> {
-  const [r] = await sql`select t.name, t.description
+// undefined = leave as-is, null = clear (→ group Settings)
+export async function setNewsTopicCaption(groupId: string, topicId: string, d: { caption_cta?: string | null; caption_footer?: string | null }): Promise<boolean> {
+  const rows = await sql`update news_topics set
+    caption_cta = ${d.caption_cta === undefined ? sql`caption_cta` : d.caption_cta},
+    caption_footer = ${d.caption_footer === undefined ? sql`caption_footer` : d.caption_footer}
+    where id = ${topicId} and group_id = ${groupId} returning id`;
+  return rows.length > 0;
+}
+
+// Caption override of the topic a news item belongs to (pipeline: generate time).
+// The news topic an item belongs to: caption overrides + the topic definition
+// (the writer's audience/angle comes from the TOPIC, not a hardcoded persona).
+export async function getNewsItemTopic(itemId: string): Promise<{ name: string; description: string; caption_cta: string | null; caption_footer: string | null } | null> {
+  const [r] = await sql`select t.name, t.description, t.caption_cta, t.caption_footer
     from news_items i join news_topics t on t.id = i.topic_id where i.id = ${itemId}`;
-  return r ? { name: r.name as string, description: r.description as string } : null;
+  if (!r) return null;
+  return {
+    name: r.name as string, description: r.description as string,
+    caption_cta: (r.caption_cta as string | null) ?? null, caption_footer: (r.caption_footer as string | null) ?? null,
+  };
 }
 
 export async function getNewsTopicTemplate(groupId: string, topicId: string): Promise<string | null | undefined> {

@@ -8,7 +8,7 @@ import { ingestNewsGroup } from './usecases/news.ts';
 import { stage as runStage, postRef } from './progress.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
-import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, withNewsSource, isNewsResearchOut, type CaptionOut, type NewsResearchOut } from './schema.ts';
+import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, withNewsSource, resolveCaptionParts, isNewsResearchOut, type CaptionOut, type NewsResearchOut } from './schema.ts';
 import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
 import { ideationPrompt, writerPrompt, criticPrompt, newsResearchPrompt, type ContentBrief } from './prompts.ts';
 import { fetchArticleText } from './article.ts';
@@ -279,11 +279,14 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli', b
   // news: source attribution enforced in code, never left to the LLM
   if (newsItem) final = withNewsSource(final, newsItem, languageHint && languageHint !== 'id' ? 'Source' : 'Sumber');
 
+  // news topic may override the group's CTA/footer (blank = group Settings)
+  const parts = resolveCaptionParts(newsTopic, cfg);
+
   // 4. persist post (status draft)
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${topic},
-      ${captionOf(final, cfg.captionFooter, cfg.captionCta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
+      ${captionOf(final, parts.footer, parts.cta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
     returning id`;
   if (!post) throw new Error('insert post failed');
   if (idea && !brief) await markIdeaUsed(idea.id); // consumed only once the draft exists

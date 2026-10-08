@@ -20,6 +20,7 @@ import { getTemplate } from './repos/templates.ts';
 import { getPlanByDate } from './repos/plans.ts';
 import { resolvePlannedSlot } from './pipeline.ts';
 import { jakartaToday } from './cronmath.ts';
+import { resolveCaptionParts, appendCaptionParts } from './schema.ts';
 import type { Override } from '@workspace/shared';
 
 type Job =
@@ -94,7 +95,7 @@ async function drain(): Promise<void> {
 // unused by delivery for now).
 async function deliverOverride(cfg: Awaited<ReturnType<typeof getGroupCfg>>, ov: Override): Promise<void> {
   const keys = ov.images.map((f) => `overrides/${ov.id}/${f}`);
-  const caption = ov.description || ov.name;
+  const caption = appendCaptionParts(ov.description || ov.name, resolveCaptionParts(ov, cfg), 1024);
   if (ov.type === 'text_only' || keys.length === 0) {
     await withRetry(() => sendMessage(cfg, caption.slice(0, 4000)));
   } else if (keys.length === 1) {

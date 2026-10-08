@@ -19,7 +19,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -30,11 +30,11 @@ import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
-import { listNewsTopics, createNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
+import { listNewsTopics, createNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
-import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription } from './repos/overrides.ts';
+import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
-import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate } from './repos/promotions.ts';
+import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate, setPromotionCaption } from './repos/promotions.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
 import { autofillNewsTopic, startIngest, getIngestProgress } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
@@ -556,6 +556,16 @@ g.put('/:slug/news/topics/:id/template', async (c) => {
   return c.json({ ok: true });
 });
 
+g.put('/:slug/news/topics/:id/caption', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsCaptionInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const ok = await setNewsTopicCaption(gr(c).id, id, parsed.data);
+  if (!ok) return c.json({ error: 'news topic not found' }, 404);
+  return c.json({ ok: true });
+});
+
 g.post('/:slug/news/topics/:id/generate', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
@@ -695,9 +705,11 @@ g.post('/:slug/overrides', async (c) => {
     template_id: templateIdRaw === '' ? null : templateIdRaw,
     description: field('description'),
     for_date: field('for_date'),
+    caption_cta: field('caption_cta'),
+    caption_footer: field('caption_footer'),
   });
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const { name, type, description, for_date } = parsed.data;
+  const { name, type, description, for_date, caption_cta, caption_footer } = parsed.data;
   const template_id = parsed.data.template_id;
 
   // image count rules per type — enforced here so both FE and API callers get the same guard
@@ -719,7 +731,7 @@ g.post('/:slug/overrides', async (c) => {
       const ext = f.type === 'image/jpeg' ? 'jpg' : f.type === 'image/webp' ? 'webp' : 'png';
       staged.push({ fname: `img-${String(i + 1).padStart(2, '0')}.${ext}`, buf: Buffer.from(await f.arrayBuffer()) });
     }
-    const ov = await createOverrideWithPlan(group.id, { name, type, template_id, description, for_date, images: [] });
+    const ov = await createOverrideWithPlan(group.id, { name, type, template_id, description, for_date, images: [], caption_cta, caption_footer });
     const names: string[] = [];
     for (const { fname, buf } of staged) {
       await uploadOverrideBuffer(ov.id, buf, fname);
@@ -752,13 +764,21 @@ g.post('/:slug/overrides/:id/resend', async (c) => {
 g.patch('/:slug/overrides/:id', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  const parsed = z.object({ description: z.string().min(1) }).safeParse(await c.req.json().catch(() => null));
+  const parsed = z.object({ description: z.string().min(1).optional() })
+    .and(NewsCaptionInput.partial())
+    .safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
   const ov = await getOverride(gr(c).id, id);
   if (!ov) return c.json({ error: 'override not found' }, 404);
-  if (ov.status !== 'scheduled') return c.json({ error: `status ${ov.status} — only scheduled overrides can be edited` }, 400);
-  const ok = await updateOverrideDescription(gr(c).id, id, parsed.data.description);
-  if (!ok) return c.json({ error: 'override not found' }, 404);
+  const { description } = parsed.data;
+  // description is what shipped — frozen after send; CTA/footer still editable (affects Resend)
+  if (description !== undefined) {
+    if (ov.status !== 'scheduled') return c.json({ error: `status ${ov.status} — only scheduled overrides can be edited` }, 400);
+    if (!(await updateOverrideDescription(gr(c).id, id, description))) return c.json({ error: 'override not found' }, 404);
+  }
+  if (parsed.data.caption_cta !== undefined || parsed.data.caption_footer !== undefined) {
+    await updateOverrideCaptionParts(gr(c).id, id, { caption_cta: parsed.data.caption_cta, caption_footer: parsed.data.caption_footer });
+  }
   return c.json({ ok: true });
 });
 
@@ -904,12 +924,25 @@ g.post('/:slug/promotions', async (c) => {
   if (brief && typeof templateIdRaw === 'string' && templateIdRaw !== '') {
     input.template_id = templateIdRaw;
   }
+  if (brief) {
+    const cap = NewsCaptionInput.safeParse(raw);
+    if (cap.success) Object.assign(input, cap.data);
+  }
   try {
     const p = await createPromotion(gr(c).id, input);
     return c.json(p, 201);
   } catch (e) {
     return c.json({ error: `failed to create promotion: ${(e as Error).message}` }, 400);
   }
+});
+
+g.put('/:slug/promotions/:id/caption', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsCaptionInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if (!(await setPromotionCaption(gr(c).id, id, parsed.data))) return c.json({ error: 'promotion not found' }, 404);
+  return c.json({ ok: true });
 });
 
 g.patch('/:slug/promotions/:id', async (c) => {
