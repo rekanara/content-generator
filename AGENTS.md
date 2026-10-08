@@ -79,6 +79,8 @@ One process: Hono server + scheduler (`cron` package's `CronJob` — NOT node-cr
 
 Dev utilities in `apps/server/scripts/` (run via tsx): `reset-db.ts`, `check-db.ts`, `test-login.ts`, `test-rss.ts` (live feed check).
 
+Backup: `scripts/backup.sh` (root) — pg_dump + MinIO mirror via the docker containers → `$BACKUP_DIR` (default `~/Backups/content-generator`), keeps 14 days. Daily 03:00 via `scripts/com.content-generator.backup.plist` (install steps inside).
+
 Setup: `cp .env.example apps/server/.env` — Postgres + MinIO + LLM + Telegram required (full list SPEC §10). NOTE: workspace scripts run with CWD `apps/server`, so the daemon reads `.env` from there, not repo root.
 
 ## Frontend gotchas

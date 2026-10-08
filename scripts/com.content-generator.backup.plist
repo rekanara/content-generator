@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Daily 03:00 backup. Install:
+  cp scripts/com.content-generator.backup.plist ~/Library/LaunchAgents/
+  launchctl load ~/Library/LaunchAgents/com.content-generator.backup.plist
+  Edit the script path below if the repo moves. Missed runs (machine asleep) fire on wake. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.content-generator.backup</string>
+  <key>ProgramArguments</key>
+  <array><string>/bin/bash</string><string>/Users/zidanfath/Documents/Dev/private/zidanfath/git/content-generator/scripts/backup.sh</string></array>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string></dict>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>0</integer></dict>
+  <key>StandardOutPath</key><string>/tmp/content-generator-backup.log</string>
+  <key>StandardErrorPath</key><string>/tmp/content-generator-backup.log</string>
+</dict>
+</plist>
