@@ -42,7 +42,7 @@ export function StudioView({ slug }: { slug: string }) {
           <div>
             <p className="readout text-xs uppercase tracking-[0.35em] text-emerald-300">AI content studio</p>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{run?.active ? run.kind : "standby"}</h1>
-            <p className="mt-2 max-w-2xl text-sm text-zinc-300">Visual source of truth untuk queue, plan, news, dan proses generate yang sedang jalan.</p>
+            <p className="mt-2 max-w-2xl text-sm text-zinc-300">Visual source of truth for the queue, plans, news, and the generate run in progress.</p>
           </div>
           <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3 backdrop-blur">
             <p className="text-xs uppercase tracking-widest text-zinc-400">queue</p>
@@ -80,7 +80,7 @@ export function StudioView({ slug }: { slug: string }) {
           </div>
         </div>
         <div className="relative mt-5 rounded-2xl border border-white/10 bg-black/25 p-4">
-          <p className="text-sm text-zinc-300"><span className="text-white">{activeStage}</span>{run?.detail ? ` · ${run.detail}` : " · menunggu pekerjaan baru"}</p>
+          <p className="text-sm text-zinc-300"><span className="text-white">{activeStage}</span>{run?.detail ? ` · ${run.detail}` : " · waiting for new work"}</p>
           {run?.postId && <p className="mt-1 text-xs text-zinc-500">post #{run.postId}</p>}
           {run?.error && <p className="mt-2 text-sm text-red-300">{run.error}</p>}
         </div>
@@ -113,13 +113,13 @@ export function StudioView({ slug }: { slug: string }) {
         </Card>
 
         <div className="space-y-4">
-          <Panel title="Plans" icon={<SparklesIcon className="size-4" />} empty="Belum ada active plan.">
+          <Panel title="Plans" icon={<SparklesIcon className="size-4" />} empty="No active plans yet.">
             {activePlans.map((p) => <Row key={p.id} title={`${p.for_date} · ${p.type}`} meta={p.note || `${p.platform ?? "natural"}/${p.format ?? "natural"}`} />)}
           </Panel>
-          <Panel title="Need action" icon={<Clock3Icon className="size-4" />} empty="Tidak ada approval/cover pending.">
+          <Panel title="Need action" icon={<Clock3Icon className="size-4" />} empty="No pending approvals/covers.">
             {awaiting.map((p) => <Row key={p.id} title={p.topic || "(no topic)"} meta={p.status} action={() => navigate(`/app/${slug}/posts/${p.id}`)} />)}
           </Panel>
-          <Panel title="News radar" icon={<RadioIcon className="size-4" />} empty="Belum ada topic/source news.">
+          <Panel title="News radar" icon={<RadioIcon className="size-4" />} empty="No news topics/sources yet.">
             {newsReady.map((n) => <Row key={n.id} title={n.name} meta={`${n.source_count} sources`} action={() => navigate(`/app/${slug}/news/${n.id}`)} />)}
           </Panel>
         </div>

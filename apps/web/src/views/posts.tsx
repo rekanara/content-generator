@@ -45,7 +45,7 @@ function IdeasCard({ slug, ideas, reload }: { slug: string; ideas: Idea[] | unde
         {unused.length > 0 && <Badge variant="secondary" className="bg-amber-500/15 text-amber-500 border-transparent">{unused.length} queued</Badge>}
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
-        Topik yang kamu simpan — pipeline memakainya FIFO di run berikutnya (sebelum ideation AI). Telegram: <code>/ide [group] &lt;ide&gt;</code>
+        Saved topics — the pipeline uses them FIFO on the next runs (before AI ideation). Telegram: <code>/ide [group] &lt;idea&gt;</code>
       </p>
       <form onSubmit={submit} className="mt-3 flex gap-2">
         <Input value={text} onChange={(e) => setText(e.target.value)} placeholder="e.g. Kenapa sprint estimation selalu meleset 2x" maxLength={4000} />

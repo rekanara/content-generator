@@ -126,7 +126,7 @@ export function SettingsView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="space-y-1.5 p-4">
           <Label htmlFor="caption-cta">Caption CTA</Label>
-          <Input id="caption-cta" placeholder="e.g. Follow untuk tips developer tiap hari 🚀"
+          <Input id="caption-cta" placeholder="e.g. Follow for daily developer tips 🚀"
             value={patch["caption_cta"] ?? group.caption_cta ?? ""}
             onChange={(e) => set("caption_cta", e.target.value)} />
           <p className="text-xs text-muted-foreground">
@@ -138,7 +138,7 @@ export function SettingsView({ slug }: { slug: string }) {
       <Card>
         <CardContent className="space-y-1.5 p-4">
           <Label htmlFor="caption-footer">Caption footer</Label>
-          <Textarea id="caption-footer" placeholder="e.g. 💡 Tips developer tiap hari — follow untuk lanjutan"
+          <Textarea id="caption-footer" placeholder="e.g. 💡 Daily developer tips — follow for more"
             value={patch["caption_footer"] ?? group.caption_footer ?? ""}
             onChange={(e) => set("caption_footer", e.target.value)} />
           <p className="text-xs text-muted-foreground">

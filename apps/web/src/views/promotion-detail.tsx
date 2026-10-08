@@ -53,7 +53,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
       const r = await api.uploadPromoImage(slug, id, slide, file)
       refreshSlots()
       setMsg(r.allImagesPresent
-        ? `Slide ${slide} uploaded ✓ — semua gambar lengkap, promo siap dikirim.`
+        ? `Slide ${slide} uploaded ✓ — all images present, promo ready to send.`
         : `Slide ${slide} uploaded ✓.`)
     } catch (e) {
       setMsg(e instanceof ApiError ? e.message : `upload slide ${slide} failed`)
@@ -126,16 +126,16 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
         </Button>
         {data.content && data.status !== "sent" && (
           <Button size="sm" variant="outline" disabled={busy}
-            title="AI menulis ulang slide dari data yang sama — template bisa diganti"
+            title="AI rewrites the slides from the same data — template can be switched"
             onClick={() => setRegenTemplate(regenTemplate === null ? (data.template_id ?? "none") : null)}>
-            <RotateCcw className="size-4" /> {regenTemplate !== null ? "Batal" : "Re-generate"}
+            <RotateCcw className="size-4" /> {regenTemplate !== null ? "Cancel" : "Re-generate"}
           </Button>
         )}
         {data.status === "sent" && (
           <Button size="sm" variant="outline" disabled={busy}
-            title="Render ulang (template bisa diganti) + kirim lagi"
+            title="Re-render (template can be switched) + send again"
             onClick={() => setRerenderTemplate(rerenderTemplate === null ? (data.template_id ?? "none") : null)}>
-            <RefreshCw className="size-4" /> {rerenderTemplate !== null ? "Batal" : "Re-render & resend"}
+            <RefreshCw className="size-4" /> {rerenderTemplate !== null ? "Cancel" : "Re-render & resend"}
           </Button>
         )}
         {data.content && data.status !== "sent" && (
@@ -158,7 +158,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           <div>
             <p className="text-sm font-medium">Re-generate content</p>
             <p className="text-xs text-muted-foreground">
-              Data promo tetap (name / features / price) — AI menulis ulang slidanya. Pilih template: sama seperti sekarang, atau ganti.
+              Promo data stays (name / features / price) — AI rewrites the slides. Pick a template: keep the current one or switch.
             </p>
           </div>
           <div className="max-w-xs space-y-1.5">
@@ -166,7 +166,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
             <Select value={regenChoice} onValueChange={(v) => setRegenTemplate(v)}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">default{data.template_id ? " (ganti dari current)" : ""}</SelectItem>
+                <SelectItem value="none">default{data.template_id ? " (switch from current)" : ""}</SelectItem>
                 {promoTemplates.map((t) => (
                   <SelectItem key={t.id} value={t.id}>
                     {t.name}{t.id === data.template_id ? " · current" : ""}
@@ -177,12 +177,12 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={busy} onClick={confirmRegen}>
-              <RotateCcw className="size-4" /> {busy ? "regenerating…" : "Generate ulang"}
+              <RotateCcw className="size-4" /> {busy ? "regenerating…" : "Generate again"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setRegenTemplate(null)}>Batal</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRegenTemplate(null)}>Cancel</Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Catatan: slide baru = slot gambar baru — gambar yang sudah diupload dipakai ulang kalau indeks slotnya sama.
+            Note: new slides = new image slots — uploaded images are reused when the slot index matches.
           </p>
         </CardContent></Card>
       )}
@@ -192,7 +192,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           <div>
             <p className="text-sm font-medium">Re-render &amp; resend</p>
             <p className="text-xs text-muted-foreground">
-              Konten slide tetap — tampilannya dirender ulang. Pilih template: sama seperti sekarang, atau ganti tampilan.
+              Slide content stays — only the visuals are re-rendered. Pick a template: keep the current one or switch.
             </p>
           </div>
           <div className="max-w-xs space-y-1.5">
@@ -200,7 +200,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
             <Select value={rerenderChoice} onValueChange={(v) => setRerenderTemplate(v)}>
               <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">default{data.template_id ? " (ganti dari current)" : ""}</SelectItem>
+                <SelectItem value="none">default{data.template_id ? " (switch from current)" : ""}</SelectItem>
                 {promoTemplates.map((t) => (
                   <SelectItem key={t.id} value={t.id}>
                     {t.name}{t.id === data.template_id ? " · current" : ""} · {t.format.startsWith("li") ? "LinkedIn" : "IG"}
@@ -214,9 +214,9 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
           </div>
           <div className="flex gap-2">
             <Button size="sm" disabled={busy} onClick={confirmRerender}>
-              <RefreshCw className="size-4" /> {busy ? "rendering…" : "Render ulang & kirim"}
+              <RefreshCw className="size-4" /> {busy ? "rendering…" : "Re-render & send"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => setRerenderTemplate(null)}>Batal</Button>
+            <Button size="sm" variant="ghost" onClick={() => setRerenderTemplate(null)}>Cancel</Button>
           </div>
         </CardContent></Card>
       )}
@@ -241,7 +241,7 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
       {(slots ?? []).length > 0 && (
         <Card><CardContent className="space-y-3 p-4">
           <h3 className="text-xs font-medium text-muted-foreground">
-            Images ({slots!.filter((s) => s.present).length}/{slots!.length} uploaded) — slide yang pakai {"{{image}}"}
+            Images ({slots!.filter((s) => s.present).length}/{slots!.length} uploaded) — slides using {"{{image}}"}
           </h3>
           {slots!.map((s) => (
             <div key={s.slide} className="flex flex-wrap items-center gap-2">
@@ -262,12 +262,12 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
                 onClick={() => fileInputs.current[s.slide]?.click()}>
                 {uploadingSlide === s.slide
                   ? <><Upload className="size-4 animate-pulse" /> uploading…</>
-                  : s.present ? <><Upload className="size-4" /> Ganti</> : <><Upload className="size-4" /> Upload</>}
+                  : s.present ? <><Upload className="size-4" /> Replace</> : <><Upload className="size-4" /> Upload</>}
               </Button>
             </div>
           ))}
           {slots!.every((s) => s.present) && (
-            <p className="text-xs text-emerald-600">Semua gambar lengkap — promo siap dikirim.</p>
+            <p className="text-xs text-emerald-600">All images present — promo ready to send.</p>
           )}
         </CardContent></Card>
       )}

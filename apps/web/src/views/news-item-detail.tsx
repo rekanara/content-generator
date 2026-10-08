@@ -21,7 +21,7 @@ export function NewsItemDetailView({ slug, topicId, itemId }: { slug: string; to
           {item.reason && <p className="text-muted-foreground">{item.reason}</p>}
         </CardContent>
       </Card>
-      {item.post_id ? <PostDetailView slug={slug} id={item.post_id} /> : <p className="text-sm text-muted-foreground">Belum ada hasil generate.</p>}
+      {item.post_id ? <PostDetailView slug={slug} id={item.post_id} /> : <p className="text-sm text-muted-foreground">Nothing generated yet.</p>}
     </div>
   )
 }

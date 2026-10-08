@@ -83,7 +83,7 @@ export function PromotionsView({ slug }: { slug: string }) {
         <Card><CardContent className="p-4">
           <form onSubmit={submitBrief} className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="brief">Brief kasar — AI akan draft data promo lengkap</Label>
+              <Label htmlFor="brief">Rough brief — AI drafts the full promo data</Label>
               <Textarea id="brief" className="min-h-24" required placeholder="e.g. jasa audit & refactor codebase, target startup, harga 1.5jt, pernah 10+ proyek…" value={brief} onChange={(e) => setBrief(e.target.value)} />
             </div>
             <div className="max-w-xs space-y-1.5">
@@ -92,7 +92,7 @@ export function PromotionsView({ slug }: { slug: string }) {
                 <option value="none">default</option>
                 {promoTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.format}</option>)}
               </select>
-              <p className="text-xs text-muted-foreground">AI draft datanya; konten slide nulis di template ini.</p>
+              <p className="text-xs text-muted-foreground">AI drafts the data; slide content is written into this template.</p>
             </div>
             <Button type="submit" disabled={busy || !brief.trim()}>{busy ? "drafting…" : "Draft with AI"}</Button>
           </form>

@@ -192,7 +192,7 @@ export function OverridesView({ slug }: { slug: string }) {
                 <div className="flex items-center justify-between">
                   <Label htmlFor="ov-desc">Description</Label>
                   <Button type="button" variant="ghost" size="sm" disabled={polishing || form.description.trim().length < 5}
-                    onClick={polish} title="AI mempercantik kata-kata & hook — kamu tetap memilih hasilnya">
+                    onClick={polish} title="AI polishes the wording & hook — you still choose the result">
                     <Sparkles className="size-3.5 text-amber-400" /> {polishing ? "polishing…" : "Polish with AI"}
                   </Button>
                 </div>
@@ -272,13 +272,13 @@ export function OverridesView({ slug }: { slug: string }) {
               </div>
             )}
             {o.status === "scheduled" && o.description && (
-              <Button variant="ghost" size="icon" aria-label="polish" title="AI polish description — preview dulu, kamu yang pilih"
+              <Button variant="ghost" size="icon" aria-label="polish" title="AI polish description — preview first, you choose"
                 disabled={polishing || !!rowPolish} onClick={() => polishRow(o)}>
                 <Sparkles className="size-4 text-amber-400" />
               </Button>
             )}
             {o.status === "sent" && (
-              <Button variant="ghost" size="icon" aria-label="resend" title="Kirim ulang konten yang sama ke Telegram"
+              <Button variant="ghost" size="icon" aria-label="resend" title="Resend the same content to Telegram"
                 onClick={() => api.resendOverride(slug, o.id).then(() => setMsg("resend queued")).catch(() => setMsg("resend failed"))}>
                 <Send className="size-4" />
               </Button>
