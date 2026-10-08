@@ -89,4 +89,13 @@ test('isCaptionOut: plain string accepted (old shape tolerated)', () => {
 test('toCaptionOut: string → structured {title}', () => {
   assert.deepEqual(toCaptionOut('Judul string'), { title: 'Judul string', subtitle: '', cta: '', tags: [] });
   assert.deepEqual(toCaptionOut({ title: 'T', subtitle: 'S', cta: 'C', tags: ['#x'] }), { title: 'T', subtitle: 'S', cta: 'C', tags: ['#x'] });
+  // trailing hashtag lines → tags, so CTA/footer land BEFORE the hashtags after assembly
+  const c = toCaptionOut('Isi caption.\n\nPertanyaan?\n\n#freelance #klien');
+  assert.deepEqual(c, { title: 'Isi caption.\n\nPertanyaan?', subtitle: '', cta: '', tags: ['#freelance', '#klien'] });
+  assert.equal(assembleCaption(c, 'FOOT', 'CTA'), 'Isi caption.\n\nPertanyaan?\n\nCTA\n\nFOOT\n\n#freelance #klien');
+  assert.equal(toCaptionOut('#cuma #tag').title, '#cuma #tag'); // never empty the title
+  // no catastrophic backtracking on glued tags + a trailing word
+  const t0 = Date.now();
+  toCaptionOut('x\n' + '#a'.repeat(40) + ' word');
+  assert.ok(Date.now() - t0 < 100);
 });

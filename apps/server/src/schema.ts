@@ -56,9 +56,16 @@ export function isCaptionOut(x: unknown): x is CaptionOut {
 }
 
 // Coerce a guard-passing caption into the structured shape (string → {title}).
+// Trailing hashtag-only lines move into tags — otherwise assembleCaption would put
+// CTA/footer AFTER the hashtags (models, the critic especially, often answer this way).
 export function toCaptionOut(x: unknown): CaptionOut {
-  if (typeof x === 'string') return { title: x.trim(), subtitle: '', cta: '', tags: [] };
-  return x as CaptionOut;
+  if (typeof x !== 'string') return x as CaptionOut;
+  const lines = x.trim().split('\n');
+  const tags: string[] = [];
+  while (lines.length > 1 && /^\s*(#[^\s#]+\s*)+$/.test(lines[lines.length - 1]!)) {
+    tags.unshift(...lines.pop()!.trim().split(/\s+/));
+  }
+  return { title: lines.join('\n').trim(), subtitle: '', cta: '', tags: tags.slice(0, 8) };
 }
 
 function isSlide(x: unknown): x is Slide {
