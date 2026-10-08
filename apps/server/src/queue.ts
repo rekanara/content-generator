@@ -218,10 +218,11 @@ async function runGenerate(
 // Image generation happens at render time — this is the single bookkeeping point.
 async function attachCoverCost(postId: string, coverCost: number, coverModel: string | null): Promise<void> {
   if (!coverCost || !coverModel) return;
-  const [row] = await sql<{ llm_usage: PostUsage | null }[]>`select llm_usage from posts where id = ${postId}`;
-  const u = row?.llm_usage ?? { steps: {}, totalCost: 0 };
+  const [row] = await sql<{ llm_usage: PostUsage | string | null }[]>`select llm_usage from posts where id = ${postId}`;
+  const raw = row?.llm_usage;
+  const u: PostUsage = (typeof raw === 'string' ? JSON.parse(raw) : raw) ?? { steps: {}, totalCost: 0 };
   const cover = { model: coverModel, images: (u.cover?.images ?? 0) + 1, cost: Math.round(((u.cover?.cost ?? 0) + coverCost) * 10000) / 10000 };
-  await sql`update posts set llm_usage = ${JSON.stringify(postUsage(u.steps, cover))}::jsonb where id = ${postId}`;
+  await sql`update posts set llm_usage = ${sql.json(postUsage(u.steps, cover) as never)} where id = ${postId}`;
 }
 
 // Park the post at awaiting_cover + ask Telegram for the image (skip button included).

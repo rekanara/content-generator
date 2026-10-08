@@ -47,9 +47,9 @@ export async function getPromotion(groupId: string, id: string): Promise<Promoti
 }
 
 export async function createPromotion(groupId: string, d: PromotionInput): Promise<Promotion> {
-  const j = (v: unknown) => JSON.stringify(v ?? []);
+  const j = (v: unknown) => sql.json((v ?? []) as never);
   const [r] = await sql<Row[]>`insert into promotions (group_id, name, topic, features, stacks, stats, price, price_sale, template_id, caption_cta, caption_footer)
-    values (${groupId}, ${d.name}, ${d.topic}, ${j(d.features)}::jsonb, ${j(d.stacks)}::jsonb, ${j(d.stats)}::jsonb,
+    values (${groupId}, ${d.name}, ${d.topic}, ${j(d.features)}, ${j(d.stacks)}, ${j(d.stats)},
       ${d.price}, ${d.price_sale}, ${d.template_id}, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
     returning id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at`;
   if (!r) throw new Error('insert promotion failed');
@@ -57,10 +57,10 @@ export async function createPromotion(groupId: string, d: PromotionInput): Promi
 }
 
 export async function updatePromotion(groupId: string, id: string, d: PromotionInput): Promise<boolean> {
-  const j = (v: unknown) => JSON.stringify(v ?? []);
+  const j = (v: unknown) => sql.json((v ?? []) as never);
   const r = await sql`update promotions set
-    name = ${d.name}, topic = ${d.topic}, features = ${j(d.features)}::jsonb, stacks = ${j(d.stacks)}::jsonb,
-    stats = ${j(d.stats)}::jsonb, price = ${d.price}, price_sale = ${d.price_sale}, template_id = ${d.template_id},
+    name = ${d.name}, topic = ${d.topic}, features = ${j(d.features)}, stacks = ${j(d.stacks)},
+    stats = ${j(d.stats)}, price = ${d.price}, price_sale = ${d.price_sale}, template_id = ${d.template_id},
     caption_cta = ${d.caption_cta === undefined ? sql`caption_cta` : d.caption_cta},
     caption_footer = ${d.caption_footer === undefined ? sql`caption_footer` : d.caption_footer}
     where id = ${id} and group_id = ${groupId} returning id`;
@@ -68,8 +68,8 @@ export async function updatePromotion(groupId: string, id: string, d: PromotionI
 }
 
 export async function setContent(id: string, slides: PromoSlide[]): Promise<void> {
-  await sql`update promotions set content = ${JSON.stringify(slides)}::jsonb,
-    status = case when ${JSON.stringify(slides)}::jsonb::text like '%{{image}}%' then 'awaiting_images' else 'ready' end
+  await sql`update promotions set content = ${sql.json(slides as never)},
+    status = case when ${JSON.stringify(slides)} like '%{{image}}%' then 'awaiting_images' else 'ready' end
     where id = ${id}`;
 }
 
@@ -77,8 +77,8 @@ export async function setContent(id: string, slides: PromoSlide[]): Promise<void
 // the AI re-writes against the new template's CSS vocabulary. Image slots
 // recompute from the new content; uploaded images at surviving indices persist.
 export async function setContentWithTemplate(id: string, slides: PromoSlide[], templateId: string | null): Promise<void> {
-  await sql`update promotions set content = ${JSON.stringify(slides)}::jsonb, template_id = ${templateId},
-    status = case when ${JSON.stringify(slides)}::jsonb::text like '%{{image}}%' then 'awaiting_images' else 'ready' end
+  await sql`update promotions set content = ${sql.json(slides as never)}, template_id = ${templateId},
+    status = case when ${JSON.stringify(slides)} like '%{{image}}%' then 'awaiting_images' else 'ready' end
     where id = ${id}`;
 }
 

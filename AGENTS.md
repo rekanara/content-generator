@@ -19,7 +19,7 @@ One process: Hono server + scheduler (`cron` package's `CronJob` — NOT node-cr
 
 1. **Layering**: `api.ts` = transport only (zod parse, cookies, status codes) — ZERO raw SQL. `repos/` = SQL only — zero HTTP. `usecases/` = aggregation. Adapters (`llm.ts`, `tts.ts`, `telegram.ts`, `storage.ts`, `render/`) = external systems.
 2. **All PKs UUID v7 strings.** `:id` route params guarded by UUID regex → 400.
-3. **SQL always parameterized** via postgres.js tagged template. jsonb inserts: pass object or `${JSON.stringify(x)}::jsonb` — never bare JSON.stringify (double-encode bug, bit us once). NEVER build column lists with `sql('a, b')` — postgres.js treats it as a single quoted Identifier, not a fragment; inline columns literally (broke getRotation/listPosts silently until 2026-09-21).
+3. **SQL always parameterized** via postgres.js tagged template. jsonb writes: ALWAYS `${sql.json(x)}` — `${JSON.stringify(x)}::jsonb` stores a jsonb STRING scalar, so `->>` returns NULL (silently zeroed cost today/digest until migration 034, 2026-10-08). NEVER build column lists with `sql('a, b')` — postgres.js treats it as a single quoted Identifier, not a fragment; inline columns literally (broke getRotation/listPosts silently until 2026-09-21).
 4. **Zod-parse every input** at API boundary via `@workspace/shared`.
 5. **State in Postgres.** Queue is in-process; `rotation_state` updated ONLY after post `sent` (spec AC #11 — failure mid-pipeline must not consume rotation).
 6. **Secrets**: only read in `config.ts` (env) and `groups.ts` (DB override). Never to log/DB/report/commit.

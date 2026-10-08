@@ -286,7 +286,7 @@ export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli', b
   const [post] = await sql`insert into posts
     (group_id, platform, format, pillar_id, topic, caption, body, status, source, llm_usage)
     values (${groupId}, ${slot.platform}, ${slot.format}, ${effPillar.id}, ${topic},
-      ${captionOf(final, parts.footer, parts.cta)}, ${bodyOf(final)}, 'draft', ${source}, ${JSON.stringify(postUsage(usage))}::jsonb)
+      ${captionOf(final, parts.footer, parts.cta)}, ${bodyOf(final)}, 'draft', ${source}, ${sql.json(postUsage(usage) as never)})
     returning id`;
   if (!post) throw new Error('insert post failed');
   if (idea && !brief) await markIdeaUsed(idea.id); // consumed only once the draft exists

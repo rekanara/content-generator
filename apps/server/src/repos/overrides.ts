@@ -47,7 +47,7 @@ export async function createOverrideWithPlan(groupId: string, d: {
 }): Promise<Override> {
   return sql.begin(async (tx) => {
     const [r] = await tx<OverrideRow[]>`insert into overrides (group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer)
-      values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${JSON.stringify(d.images)}::jsonb, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
+      values (${groupId}, ${d.name}, ${d.type}, ${d.template_id}, ${d.description}, ${d.for_date}, ${tx.json(d.images)}, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
       returning id, group_id, name, type, template_id, description, for_date, images, caption_cta, caption_footer, status, created_at`;
     if (!r) throw new Error('insert override failed');
     await tx`insert into plans (group_id, for_date, type, override_id, note)
@@ -57,7 +57,7 @@ export async function createOverrideWithPlan(groupId: string, d: {
 }
 
 export async function updateOverrideImages(id: string, images: string[]): Promise<void> {
-  await sql`update overrides set images = ${JSON.stringify(images)}::jsonb where id = ${id}`;
+  await sql`update overrides set images = ${sql.json(images)} where id = ${id}`;
 }
 
 // Description edit (polish-accept flow). Scheduled only — a sent override's

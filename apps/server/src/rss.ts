@@ -55,7 +55,7 @@ async function cachedFetch(url: string, p: Parser): Promise<Item[]> {
     return (Array.isArray(cached) ? cached : []) as Item[];
   }
   const items = await fetchOne(p, url); // throws → caller handles per-feed
-  await sql`insert into feeds_cache (url, fetched_at, items) values (${url}, now(), ${JSON.stringify(items)}::jsonb)
+  await sql`insert into feeds_cache (url, fetched_at, items) values (${url}, now(), ${sql.json(items as never)})
     on conflict (url) do update set fetched_at = now(), items = excluded.items`;
   return items;
 }
