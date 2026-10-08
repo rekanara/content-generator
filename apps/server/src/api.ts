@@ -30,7 +30,7 @@ import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
-import { listNewsTopics, createNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
+import { listNewsTopics, createNewsTopic, deleteNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
@@ -533,6 +533,14 @@ g.post('/:slug/news/topics', async (c) => {
     if ((e as { code?: string }).code === '23505') return c.json({ error: 'news topic already exists in this group' }, 400);
     throw e;
   }
+});
+
+g.delete('/:slug/news/topics/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await deleteNewsTopic(gr(c).id, id);
+  if (!ok) return c.json({ error: 'news topic not found' }, 404);
+  return c.json({ ok: true });
 });
 
 g.get('/:slug/news/topics/:id', async (c) => {

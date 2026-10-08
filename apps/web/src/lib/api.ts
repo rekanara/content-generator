@@ -172,6 +172,7 @@ export const api = {
   newsTopics: (slug: string) => req<NewsTopic[]>(`${g(slug)}/news/topics`),
   addNewsTopic: (slug: string, p: { name: string; description?: string }) => req<NewsTopic>(`${g(slug)}/news/topics`, { method: 'POST', body: JSON.stringify(p) }),
   newsTopic: (slug: string, id: string) => req<NewsTopicDetail>(`${g(slug)}/news/topics/${id}`),
+  delNewsTopic: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/news/topics/${id}`, { method: 'DELETE' }),
   addNewsSource: (slug: string, topicId: string, p: { name: string; url: string }) => req<NewsTopicDetail['sources'][number]>(`${g(slug)}/news/topics/${topicId}/sources`, { method: 'POST', body: JSON.stringify(p) }),
   delNewsSource: (slug: string, topicId: string, sourceId: string) => req<{ ok: true }>(`${g(slug)}/news/topics/${topicId}/sources/${sourceId}`, { method: 'DELETE' }),
   saveNewsRules: (slug: string, topicId: string, p: { freshness_hours: number; min_sources: number; allowed_domains: string[]; blocked_domains: string[]; keywords: string[] }) => req<NewsRule>(`${g(slug)}/news/topics/${topicId}/rules`, { method: 'PUT', body: JSON.stringify(p) }),

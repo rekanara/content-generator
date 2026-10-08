@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { LinkIcon } from "lucide-react"
+import { LinkIcon, Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Card, CardContent } from "@workspace/ui/components/card"
 import { Input } from "@workspace/ui/components/input"
@@ -23,6 +23,19 @@ export function NewsView({ slug }: { slug: string }) {
       reload()
     } catch (err) {
       setMsg(err instanceof ApiError ? err.message : "failed to add topic")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (id: string, name: string) => {
+    if (!window.confirm(`Delete "${name}"? This permanently deletes its sources, rules, and fetched news items. Generated posts stay.`)) return
+    setBusy(true); setMsg(null)
+    try {
+      await api.delNewsTopic(slug, id)
+      reload()
+    } catch (err) {
+      setMsg(err instanceof ApiError ? err.message : "failed to delete topic")
     } finally {
       setBusy(false)
     }
@@ -63,6 +76,10 @@ export function NewsView({ slug }: { slug: string }) {
                 <p className="truncate text-xs text-muted-foreground">{t.description || "no description"}</p>
               </div>
               <span className="text-xs text-muted-foreground">{t.source_count} sources</span>
+              <Button variant="ghost" size="icon" aria-label={`delete ${t.name}`} disabled={busy}
+                onClick={(e) => { e.stopPropagation(); void remove(t.id, t.name) }}>
+                <Trash2 className="size-4" />
+              </Button>
             </CardContent>
           </Card>
         ))}

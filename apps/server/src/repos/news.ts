@@ -54,6 +54,11 @@ export async function createNewsTopic(groupId: string, d: { name: string; descri
   };
 }
 
+export async function deleteNewsTopic(groupId: string, id: string): Promise<boolean> {
+  const rows = await sql`delete from news_topics where id = ${id} and group_id = ${groupId} returning id`;
+  return rows.length > 0;
+}
+
 export async function getNewsTopic(groupId: string, id: string): Promise<NewsTopicDetail | null> {
   const [topic] = await sql`select id, name, description, active, template_id, caption_cta, caption_footer, created_at
     from news_topics where id = ${id} and group_id = ${groupId}`;
