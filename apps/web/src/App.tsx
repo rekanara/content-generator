@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { ThemeProvider } from "@/components/theme-provider.tsx"
 import { AppSidebar } from "@/components/app-sidebar.tsx"
 import { DashboardView } from "@/views/dashboard.tsx"
+import { StudioView } from "@/views/studio.tsx"
 import { PillarsView } from "@/views/pillars.tsx"
 import { PostsView } from "@/views/posts.tsx"
 import { StylesView } from "@/views/styles.tsx"
@@ -120,6 +121,7 @@ export function App() {
               {route.name === "groupView" && (
                 <>
                   {route.view === "dashboard" && <DashboardView slug={route.slug} />}
+                  {route.view === "studio" && <StudioView slug={route.slug} />}
                   {route.view === "pillars" && <PillarsView slug={route.slug} />}
                   {route.view === "posts" && <PostsView slug={route.slug} />}
                   {route.view === "news" && <NewsView slug={route.slug} />}
@@ -151,7 +153,7 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "newsItemDetail": return "News item"
     case "groupView": {
       const label: Record<string, string> = {
-        dashboard: "Dashboard", pillars: "Pillars & Schedule", posts: "Posts", news: "News",
+        dashboard: "Dashboard", studio: "Studio", pillars: "Pillars & Schedule", posts: "Posts", news: "News",
         styles: "Style Samples", templates: "Templates", overrides: "Override Content", promotions: "Promotions", settings: "Settings",
       }
       return label[route.view] ?? route.view

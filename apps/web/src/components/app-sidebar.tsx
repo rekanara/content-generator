@@ -16,6 +16,7 @@ import {
   SparklesIcon,
   MegaphoneIcon,
   CoinsIcon,
+  ActivityIcon,
 } from "lucide-react"
 
 import {
@@ -39,6 +40,7 @@ import type { AuthMe } from "@workspace/shared"
 // group-scoped views (order = sidebar order)
 const VIEWS: { id: string; label: string; icon: React.ReactNode }[] = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboardIcon /> },
+  { id: "studio", label: "Studio", icon: <ActivityIcon /> },
   { id: "posts", label: "Posts", icon: <NewspaperIcon /> },
   { id: "news", label: "News", icon: <NewspaperIcon /> },
   { id: "pillars", label: "Pillars", icon: <LayersIcon /> },
