@@ -29,6 +29,16 @@ function styleBlock(samples: StyleSample[]): string {
     .slice(0, 6000);
 }
 
+// Hashtags must describe THIS post — shared by every generator (writer, critic,
+// override polish, promo). Reviewed fault: a news post about a KPK–regional-govt MoU
+// got #govtech #auditlog #developer because the persona forced a developer angle.
+export const HASHTAG_RULES = `HASHTAG RULES:
+- 3-5 hashtags. Every tag must name something actually IN this post: its main subject, a named entity (person, institution, product, place), or the event itself.
+- Test each tag: would someone searching it expect to find THIS post? If not, drop it.
+- No audience/niche filler tags that the post is not about (e.g. #developer, #tech, #tips, #viral, #fyp, #motivation) — only use them if the post is literally about that.
+- Do not stretch the topic into a different field to invent a tag (a corruption-agency news post is not #auditlog).
+- Prefer the terms people actually search in the post's language (Indonesian post → Indonesian/common local terms).`;
+
 function briefBlock(b?: ContentBrief): string {
   if (!b) return '';
   return `CONTENT BRIEF (source of truth):
@@ -95,8 +105,15 @@ function rules(): string {
   return `STRICT RULES (violation = rejected):
 - Banned clichés: "in today's digital era", "in today's fast-paced world", "we can't deny", "game changer", "skyrocket". Also the local equivalents in the output language.
 - First-line hook must be specific (a number, a concrete moment, or a sharp question) — generic hooks rejected.
+- One narrative thread only. Each slide/scene/paragraph must answer or deepen the previous one; no listicle jumps.
+- Continuity test: read only the headlines in order — they must tell the whole story on their own. Each slide ends on the question the next slide answers.
+- ONE NEW piece of information per slide. A slide that rephrases the previous slide is rejected — merge it or cut it. Fewer, denser slides beat padded ones.
+- Answer the question the hook raises INSIDE the content itself, early — not at the end, not via a link.
+- Final CTA = a concrete action the reader can take from THIS content (a setting to check, a command to run, a habit to change), not "go read the official docs".
+- Sound like a human talking to a human, with concrete examples — not abstract press-release terms.
+- Use concrete examples and human consequences before abstract advice.
 - Max 2 emoji per caption; LinkedIn ideally none.
-- Casual but sharp — like a developer talking, not corporate, not stiff formal.
+- Casual but sharp — a real person talking, not corporate, not stiff formal.
 - Match the language of the pillar description and style samples.
 - No fluff: every sentence carries information.`;
 }
@@ -150,11 +167,11 @@ export function writerPrompt(
   const plat = platform === 'instagram' ? 'Instagram (fast scrolling)' : 'LinkedIn (professional audience, calmer)';
 
   const fmt = {
-    carousel: `Carousel ${platform === 'instagram' ? 'IG 5-8 slides' : 'LinkedIn 6-10 pages'}. Slide 1 = hook. Last slide = light CTA.
-JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces>"]}, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
-headline: scroll-stopper, short and punchy. body: one idea per slide, short sentences.`,
+    carousel: `Carousel ${platform === 'instagram' ? 'IG 5-8 slides' : 'LinkedIn 6-10 pages'}. Slide 1 = hook (a familiar, specific moment for this audience). Middle slides = connected story arc (problem → tension → insight → practical turn). Last slide = light CTA.
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
+headline: scroll-stopper, short and punchy. body: one idea per slide, short sentences. Every slide must connect to the previous slide.`,
     reels: `Reels 15-30 seconds, 4-6 scenes, total narration MAX 55 words (speech pace ±2 words/second — more than that the duration explodes). Each narration MAX 12 words. Scene 1 = 5-second hook. Last scene = CTA.
-JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>"}]}
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>"}]}
 narration: natural spoken language, not written prose. overlay_text: short phrase, not a full sentence.`,
     pdf: `LinkedIn carousel as PDF, 6-10 pages. Page 1 = hook. Last page = CTA/discussion prompt.
 JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}`,
@@ -175,7 +192,7 @@ JSON: {"body": string}`,
 Angle: ${angle}
 Pillar: ${pillarName}
 ${briefBlock(contentBrief)}
-${isBrief ? `\nUSER-PROVIDED CONTENT — restructure this into ${format} slides. Keep the story, facts, specific details, and hashtags INTACT. Do NOT rewrite from scratch or invent new claims. Spread the content across slides, one idea per slide. Use the hashtags from the user's text.\n---\n${brief}\n---\n` : ''}
+${isBrief ? `\nUSER-PROVIDED CONTENT — restructure this into ${format} slides. Keep the story, facts, specific details, and hashtags INTACT. Do NOT rewrite from scratch or invent new claims. Spread the content across slides as a connected sequence, not independent chunks. If the user's text has hashtags, use them; otherwise follow HASHTAG RULES.\n---\n${brief}\n---\n` : ''}
 ${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
 Format:
 ${fmt}
@@ -183,6 +200,8 @@ ${fmt}
 ${languageName ? `Output language: ${languageName}. Translate and localize naturally; keep names, product terms, numbers, and source facts intact.\n` : ''}${kindRules(contentBrief?.kind)}
 
 ${rules()}
+
+${HASHTAG_RULES}
 
 Style samples (imitate the feel and rhythm, do NOT imitate the topics):
 ${styleBlock(samples)}`,
@@ -210,15 +229,18 @@ export function criticPrompt(
   return [
     {
       role: 'system',
-      content: `You are a ruthless editor. Revise the draft until it is publish-worthy. Fix: weak hooks, clichés, excessive emoji, fluff sentences, messy structure. Keep the topic and format structure. ${R}`,
+      content: `You are a ruthless editor. Revise the draft until it is publish-worthy. Fix: weak hooks, clichés, excessive emoji, fluff sentences, messy structure, stiff tone, missing human context, and disconnected slides. Keep the topic and format structure. ${R}`,
     },
     {
       role: 'user',
       content: `Platform: ${platform}, format: ${format}. ${kindRules(kind)}
 
-${rules()}${
+${rules()}
+
+${HASHTAG_RULES}
+Fix the caption tags too: replace any tag that fails the rules above with one that names this post's subject.${
         format === 'reels' ? '\nREQUIRED: total narration MAX 55 words, per scene max 12 words (TTS duration 15-30 seconds).' : ''
-      }
+      }${format === 'carousel' || format === 'pdf' ? '\nREQUIRED: slide sequence must read like one connected mini-story, not independent tips.' : ''}
 
 Draft:
 ${back(format)}
@@ -313,9 +335,13 @@ export function overridePolishPrompt(
         '- Keep the meaning, facts, names, numbers, and language (Indonesian stays Indonesian) INTACT.',
         '- First line must be a scroll-stopping hook (specific, concrete — no generic clickbait).',
         '- Fix awkward wording, kill filler words and clichés, tighten every sentence.',
+        '- Keep ONE thread: every sentence follows from the previous one; no jumping between unrelated points.',
+        '- Ground it in a real human moment (who, when, what went wrong/right) before any advice.',
         '- Match length to the platform role: this text lands as a caption/body next to images or standalone.',
         `- Type is "${d.type}" — image types read like captions; text_only reads like a LinkedIn post (hook → insight → closing line).`,
         '- Casual but sharp, like a developer sharing experience. Max 2 emoji.',
+        '- Hashtags: keep the human\'s own tags when they fit; if the draft has none, add none. Any tag you keep or fix must follow the rules below.',
+        HASHTAG_RULES,
         'Reply ONLY with valid JSON.',
       ].join('\n'),
     },
@@ -385,6 +411,8 @@ export function promoContentPrompt(
         '- No <style> blocks, no <script>.',
         '- Text in Indonesian. Big fonts only (readable on a phone). No lorem ipsum.',
         '- 5-9 slides. ONE idea per slide — a slide that says two things says neither.',
+        '- CONTINUITY: every slide must follow from the previous one (same story, same reader, same problem).',
+        '  Reading slides 1→N must feel like one argument, never a pile of separate cards.',
         '',
         'CREATIVITY RULES (a boring deck is a rejected deck):',
         '- COMPOSITION MUST VARY slide to slide: never two consecutive slides with the same layout.',

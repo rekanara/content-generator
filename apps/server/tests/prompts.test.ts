@@ -73,6 +73,15 @@ test('criticPrompt: kind-aware rules', () => {
   assert.match(criticPrompt('instagram', 'carousel', {}, 'brief')[1]!.content, /BRIEF RULES/);
 });
 
+import { HASHTAG_RULES, overridePolishPrompt } from '../src/prompts.ts';
+
+test('hashtag rules reach writer, critic and override polish', () => {
+  assert.match(writerPrompt('instagram', 'carousel', 't', 'a', 'P', [])[1]!.content, /HASHTAG RULES/);
+  assert.match(criticPrompt('instagram', 'carousel', {}, 'news')[1]!.content, /HASHTAG RULES/);
+  assert.match(overridePolishPrompt({ name: 'n', type: 'mix', description: 'd' }, [])[0]!.content, /HASHTAG RULES/);
+  assert.match(HASHTAG_RULES, /#developer/); // filler-tag ban names the reviewed offender
+});
+
 test('news brief audience overrides the developer persona', () => {
   const b: ContentBrief = { ...news, audience: 'people following "Berita Indonesia"' };
   const [sys, user] = writerPrompt('instagram', 'carousel', 't', 'a', 'News', [], undefined, undefined, undefined, b);
