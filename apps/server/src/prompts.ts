@@ -6,6 +6,18 @@ type Msg = { role: 'system' | 'user'; content: string };
 
 export type StyleSample = { title: string; body: string; platform: string | null };
 export type PillarFull = { id: string; name: string; description: string; is_news: boolean };
+export type ContentKind = 'news' | 'pillar' | 'brief';
+export type ContentBrief = {
+  kind: ContentKind;
+  /** who the post is for — news: derived from the news TOPIC, not forced to developers */
+  audience?: string;
+  premise: string;
+  audience_moment: string;
+  narrative_arc: string;
+  source_facts: string[];
+  must_include: string[];
+  must_not_do: string[];
+};
 
 const R = 'Reply ONLY with valid JSON, no text outside the JSON.';
 
@@ -15,6 +27,68 @@ function styleBlock(samples: StyleSample[]): string {
     .map((s, i) => `Sample ${i + 1}:\n${s.title}\n${s.body}`)
     .join('\n\n')
     .slice(0, 6000);
+}
+
+function briefBlock(b?: ContentBrief): string {
+  if (!b) return '';
+  return `CONTENT BRIEF (source of truth):
+Kind: ${b.kind}
+${b.audience ? `Audience: ${b.audience}\n` : ''}Premise: ${b.premise}
+Audience moment: ${b.audience_moment}
+Narrative arc: ${b.narrative_arc}
+Source facts:
+${b.source_facts.map((x) => `- ${x}`).join('\n') || '- none'}
+Must include:
+${b.must_include.map((x) => `- ${x}`).join('\n') || '- none'}
+Must NOT do:
+${b.must_not_do.map((x) => `- ${x}`).join('\n') || '- none'}`;
+}
+
+// Research BEFORE writing: pull concrete facts out of the article so the writer
+// never has to fill gaps with "read the source for details" filler.
+export function newsResearchPrompt(n: { title: string; url: string; summary: string }, articleText: string, audience = 'developers'): Msg[] {
+  return [
+    {
+      role: 'system',
+      content: `You are a researcher for a content account whose audience is: ${audience}. Extract facts from a news article BEFORE anyone writes about it. ${R}`,
+    },
+    {
+      role: 'user',
+      content: `Title: ${n.title}
+URL: ${n.url}
+RSS summary: ${n.summary || '(none)'}
+
+Article text:
+${articleText || '(article could not be fetched — use only the title and RSS summary)'}
+
+Extract:
+- facts: 4-8 concrete, verifiable facts FROM THE TEXT ABOVE — specific features, numbers, versions, how it works, limits, availability, who gets it, dates. One fact per item, specific enough that it could not describe any other news. No opinions, no fluff. If the text only supports fewer facts, return fewer — NEVER invent.
+- reader_scenario: one concrete, believable everyday moment where someone in the audience above runs into this news. Must be specific to THIS news — if it could be pasted onto another topic unchanged, rewrite it. Do NOT force a technical/developer angle the news does not have.
+- open_questions: things the article does NOT confirm (0-3 items).
+
+Output JSON: {"facts": ["..."], "reader_scenario": "...", "open_questions": ["..."]}`,
+    },
+  ];
+}
+
+function kindRules(kind?: ContentKind): string {
+  if (kind === 'news') return `NEWS RULES (researched news told human-to-human, not a press release):
+- Write for the brief's Audience. Do NOT bend the story toward developers/tech unless the news itself is about tech — a political or legal story stays political/legal.
+- The "Source facts" in the brief are your research. Build the piece ON them: every middle slide carries at least one of those facts, in plain everyday words.
+- Hook = the reader scenario from the brief: specific and provable, never dramatic-generic, never an invented number ("the 12th today"). If the hook could be pasted onto another topic unchanged, it is generic — rewrite it.
+- The slide right after the hook MUST deliver the news the hook promised. Never defer it to slide 5, never defer it to an external link.
+- Suggested flow (adapt to the facts): hook scenario → what happened → how it works / what changed (concrete facts) → who is affected → what it means in practice (concrete example) → what you can do → what is still unclear (only if the brief lists open questions).
+- Explain with concrete examples drawn from the facts, not abstract terms ("safe space", "official boundary").
+- NEVER invent numbers, prices, dates, quotes, versions, or claims beyond the source facts.
+- "Read the source / details at [source]" phrasing: at most ONCE in the whole piece, and only after you already gave the one-sentence answer yourself. The source link is attached automatically — do not spend a slide on it.`;
+  if (kind === 'brief') return `BRIEF RULES:
+- The user's material is the source of truth; preserve facts, sequence, and intent.
+- Restructure for clarity; never replace it with generic advice.`;
+  return `PILLAR POST RULES:
+- Open on a real daily developer moment: deadline pressure, debugging, code review, chat noise, meetings, pager alerts, messy legacy code, or learning friction.
+- Make it feel lived, not like an encyclopedia entry.
+- Sequence: human moment → tension → insight → practical move → reflection/CTA.
+- One concrete workplace scene is the spine of the whole piece; no disconnected tips.`;
 }
 
 function rules(): string {
@@ -70,11 +144,10 @@ export function writerPrompt(
   samples: StyleSample[],
   feedback?: string,
   brief?: string,
+  language?: string,
+  contentBrief?: ContentBrief,
 ): Msg[] {
-  const plat =
-    platform === 'instagram'
-      ? 'Instagram (developer audience, fast scrolling)'
-      : 'LinkedIn (tech professional audience, calmer)';
+  const plat = platform === 'instagram' ? 'Instagram (fast scrolling)' : 'LinkedIn (professional audience, calmer)';
 
   const fmt = {
     carousel: `Carousel ${platform === 'instagram' ? 'IG 5-8 slides' : 'LinkedIn 6-10 pages'}. Slide 1 = hook. Last slide = light CTA.
@@ -89,21 +162,25 @@ JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max
 JSON: {"body": string}`,
   }[format]!;
 
+  const languageName = language ? ({ id: 'Indonesian', en: 'English', ms: 'Malay', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', es: 'Spanish' } as Record<string, string>)[language] : undefined;
   const isBrief = brief && brief.trim().length > 0;
   return [
     {
       role: 'system',
-      content: `You are a ghostwriter producing developer content for ${plat}. Write a ${format} about the given topic. ${R}`,
+      content: `You are a ghostwriter producing ${contentBrief?.audience ? `content for ${contentBrief.audience}` : 'developer content'} on ${plat}. Write a ${format} about the given topic. ${R}`,
     },
     {
       role: 'user',
       content: `Topic: ${topic}
 Angle: ${angle}
 Pillar: ${pillarName}
+${briefBlock(contentBrief)}
 ${isBrief ? `\nUSER-PROVIDED CONTENT — restructure this into ${format} slides. Keep the story, facts, specific details, and hashtags INTACT. Do NOT rewrite from scratch or invent new claims. Spread the content across slides, one idea per slide. Use the hashtags from the user's text.\n---\n${brief}\n---\n` : ''}
 ${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
 Format:
 ${fmt}
+
+${languageName ? `Output language: ${languageName}. Translate and localize naturally; keep names, product terms, numbers, and source facts intact.\n` : ''}${kindRules(contentBrief?.kind)}
 
 ${rules()}
 
@@ -117,6 +194,7 @@ export function criticPrompt(
   platform: Platform,
   format: Format,
   draft: unknown,
+  kind?: ContentKind,
 ): Msg[] {
   const back = (f: Format): string => {
     if (f === 'reels') {
@@ -136,7 +214,9 @@ export function criticPrompt(
     },
     {
       role: 'user',
-      content: `Platform: ${platform}, format: ${format}. ${rules()}${
+      content: `Platform: ${platform}, format: ${format}. ${kindRules(kind)}
+
+${rules()}${
         format === 'reels' ? '\nREQUIRED: total narration MAX 55 words, per scene max 12 words (TTS duration 15-30 seconds).' : ''
       }
 

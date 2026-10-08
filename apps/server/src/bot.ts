@@ -16,6 +16,7 @@ import { addIdea, countUnusedIdeas } from './repos/ideas.ts';
 import { addEvent } from './repos/events.ts';
 import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
 import { runPlanner, formatPlannerReport } from './usecases/planner.ts';
+import { listNewsTopicsWithValidItems, listValidNewsItemsForTopic, getNewsItemGenerateContext } from './repos/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { jakartaToday } from './cronmath.ts';
 import { config } from './config.ts';
@@ -97,6 +98,8 @@ export type Callback =
   | { t: 'star'; postId: string }
   | { t: 'skip_cover'; postId: string }
   | { t: 'genpick'; slug: string; platform?: string; format?: string }
+  | { t: 'newstopic'; topicId: string }
+  | { t: 'newsitem'; itemId: string }
   | { t: 'buatpick'; slug: string; platform?: string; format?: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
   | { t: 'ovdone' };
@@ -109,13 +112,18 @@ export function parseCallback(data: string): Callback | null {
     return { t: m[1]!.toLowerCase() as 'approve' | 'reject' | 'regen' | 'star' | 'skip_cover', postId: m[2]!.toLowerCase() };
   }
   // /gen format picker — genpick:<slug>:natural | genpick:<slug>:ig:carousel | ...
-  const gm = data.match(/^genpick:([a-z0-9_-]+):(natural|ig:carousel|ig:reels|li:pdf|li:text)$/i);
+  const gm = data.match(/^genpick:([a-z0-9_-]+):(natural|news|ig:carousel|ig:reels|li:pdf|li:text)$/i);
   if (gm) {
     const slug = gm[1]!.toLowerCase();
     if (gm[2] === 'natural') return { t: 'genpick', slug, platform: undefined, format: undefined };
+    if (gm[2] === 'news') return { t: 'genpick', slug, platform: 'news', format: undefined };
     const [p, f] = gm[2]!.split(':');
     return { t: 'genpick', slug, platform: p === 'ig' ? 'instagram' : 'linkedin', format: f as never };
   }
+  const nt = data.match(/^nt:([0-9a-f-]{36})$/i);
+  if (nt && UUID_RE.test(nt[1]!)) return { t: 'newstopic', topicId: nt[1]!.toLowerCase() };
+  const ni = data.match(/^ni:([0-9a-f-]{36})$/i);
+  if (ni && UUID_RE.test(ni[1]!)) return { t: 'newsitem', itemId: ni[1]!.toLowerCase() };
   // /buat format picker — same pattern as genpick but starts a content-capture session
   const bm = data.match(/^buatpick:([a-z0-9_-]+):(natural|ig:carousel|ig:reels|li:pdf|li:text)$/i);
   if (bm) {
@@ -204,7 +212,7 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       const groups = await listGroups();
       const slugs = groups.map((x) => x.slug).join(', ');
       return [
-        '/gen — pilih format konten (tombol: IG carousel/reels, LI pdf/text, atau natural)',
+        '/gen — pilih format konten (termasuk News → topik → item valid)',
         '/gen <group> <platform> <format> — langsung pakai format spesifik (power-user)',
         '/buat [group] — kirim teks konten kamu sendiri, AI menstruktur jadi slide',
         '/ide [group] <ide> — simpan topik ke backlog (dipakai FIFO, skip ideation)',
@@ -322,6 +330,9 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
       await sendMessageWithButtonsRaw(cfg.telegram.chatId, `Pilih format untuk ${slug}:`, [
         [
           { text: '🌀 Natural rotation', callback_data: `genpick:${slug}:natural` },
+        ],
+        [
+          { text: '📰 News', callback_data: `genpick:${slug}:news` },
         ],
         [
           { text: '📱 IG Carousel', callback_data: `genpick:${slug}:ig:carousel` },
@@ -481,6 +492,12 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
   if (cb.t === 'genpick') {
     const cfg = await getGroupCfg(cb.slug).catch(() => null);
     if (!cfg) { await replyGlobal(chatId, `group "${cb.slug}" not found`); return; }
+    if (cb.platform === 'news') {
+      const topics = await listNewsTopicsWithValidItems(cfg.id);
+      if (topics.length === 0) { await replyGlobal(chatId, `Belum ada valid news yang belum digenerate untuk ${cb.slug}. Fetch news dulu di dashboard.`); return; }
+      await sendMessageWithButtonsRaw(chatId, `Pilih topik news (${cb.slug}):`, topics.map((t) => ([{ text: `${t.name} (${t.n})`.slice(0, 60), callback_data: `nt:${t.id}` }])));
+      return;
+    }
     const label = cb.platform ? `${cb.platform} ${cb.format}` : 'natural rotation';
     enqueue({
       kind: 'generate', slug: cb.slug,
@@ -491,6 +508,36 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${label}`, callback_data: `noop:${cb.slug}` }]])
       .catch((e) => console.warn(`[bot] genpick stamp failed: ${(e as Error).message}`));
     await replyGlobal(chatId, `Queued (${cb.slug}) — ${label}. Hasilnya menyusul.`);
+    return;
+  }
+
+  if (cb.t === 'newstopic') {
+    const items = await listValidNewsItemsForTopic(cb.topicId);
+    if (items.length === 0) { await replyGlobal(chatId, 'Tidak ada valid news tersisa di topik ini.'); return; }
+    await sendMessageWithButtonsRaw(chatId, 'Pilih news yang mau digenerate:', items.map((i) => ([{
+      text: `${i.title.slice(0, 48)}${i.score === null ? '' : ` · ${i.score}`}`,
+      callback_data: `ni:${i.id}`,
+    }])));
+    return;
+  }
+
+  if (cb.t === 'newsitem') {
+    const ctx = await getNewsItemGenerateContext(cb.itemId);
+    if (!ctx) { await replyGlobal(chatId, 'News ini sudah tidak valid / sudah pernah digenerate.'); return; }
+    enqueue({
+      kind: 'generate',
+      slug: ctx.slug,
+      forced: { platform: 'instagram', format: 'carousel' },
+      notifyChat: true,
+      source: 'telegram',
+      newsTopicId: ctx.topicId,
+      newsItemId: cb.itemId,
+      newsLanguage: 'id',
+      templateId: ctx.templateId ?? undefined,
+    });
+    const msgId = currentCallbackMessageId(chatId);
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${ctx.title.slice(0, 45)}`, callback_data: `noop:${cb.itemId}` }]]).catch(() => {});
+    await replyGlobal(chatId, `Queued news (${ctx.slug}) — ${ctx.title.slice(0, 80)}. Hasilnya menyusul.`);
     return;
   }
 

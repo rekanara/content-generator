@@ -158,6 +158,15 @@ test('parseCallback: genpick li:pdf', () => {
   assert.deepEqual(parseCallback('genpick:default:li:pdf'), { t: 'genpick', slug: 'default', platform: 'linkedin', format: 'pdf' });
 });
 
+test('parseCallback: genpick news', () => {
+  assert.deepEqual(parseCallback('genpick:default:news'), { t: 'genpick', slug: 'default', platform: 'news', format: undefined });
+});
+
+test('parseCallback: news topic/item pickers', () => {
+  assert.deepEqual(parseCallback(`nt:${UUID}`), { t: 'newstopic', topicId: UUID });
+  assert.deepEqual(parseCallback(`ni:${UUID}`), { t: 'newsitem', itemId: UUID });
+});
+
 test('parseCmd: /buat with group slug', () => {
   assert.deepEqual(parseCmd('/buat brand2', SLUGS), { t: 'buat', slug: 'brand2' });
 });

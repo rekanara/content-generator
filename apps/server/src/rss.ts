@@ -2,6 +2,7 @@
 // Fail-safe: any error → null → pipeline falls back to non-news pillar.
 import Parser from 'rss-parser';
 import { sql } from './db/pool.ts';
+import { parseFeed } from './article.ts';
 
 export const FEEDS: string[] = [
   'https://hnrss.org/frontpage',
@@ -38,7 +39,7 @@ export function formatContext(items: Item[]): string | null {
 }
 
 async function fetchOne(p: Parser, url: string): Promise<Item[]> {
-  const feed = await p.parseURL(url);
+  const feed = await parseFeed(p, url);
   return (feed.items ?? []).map((it) => ({
     title: String(it.title ?? ''),
     link: String(it.link ?? ''),

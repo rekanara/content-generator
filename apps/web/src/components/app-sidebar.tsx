@@ -40,6 +40,7 @@ import type { AuthMe } from "@workspace/shared"
 const VIEWS: { id: string; label: string; icon: React.ReactNode }[] = [
   { id: "dashboard", label: "Dashboard", icon: <LayoutDashboardIcon /> },
   { id: "posts", label: "Posts", icon: <NewspaperIcon /> },
+  { id: "news", label: "News", icon: <NewspaperIcon /> },
   { id: "pillars", label: "Pillars", icon: <LayersIcon /> },
   { id: "styles", label: "Styles", icon: <PaletteIcon /> },
   { id: "templates", label: "Templates", icon: <FileStackIcon /> },
@@ -62,13 +63,15 @@ export function AppSidebar({
 } & React.ComponentProps<typeof Sidebar>) {
   const { theme, setTheme } = useTheme()
   // group context — active inside a group (list views + detail pages)
-  const groupSlug = route.name === "groupView" || route.name === "templateDetail" || route.name === "postDetail"
+  const groupSlug = route.name === "groupView" || route.name === "templateDetail" || route.name === "postDetail" || route.name === "newsTopicDetail" || route.name === "newsItemDetail" || route.name === "promoDetail"
     ? route.slug : null
   // active view id for highlight (detail pages highlight their parent tab)
   const activeView = route.name === "groupView"
     ? route.view
     : route.name === "templateDetail" ? "templates"
-      : route.name === "postDetail" ? "posts" : null
+      : route.name === "postDetail" ? "posts"
+        : route.name === "newsTopicDetail" || route.name === "newsItemDetail" ? "news"
+          : route.name === "promoDetail" ? "promotions" : null
 
   const go = (path: string) => (e: React.MouseEvent) => {
     e.preventDefault()

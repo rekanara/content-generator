@@ -11,6 +11,9 @@ import { PostDetailView } from "@/views/post-detail.tsx"
 import { OverridesView } from "@/views/overrides.tsx"
 import { PromotionsView } from "@/views/promotions.tsx"
 import { PromotionDetailView } from "@/views/promotion-detail.tsx"
+import { NewsView } from "@/views/news.tsx"
+import { NewsTopicDetailView } from "@/views/news-topic-detail.tsx"
+import { NewsItemDetailView } from "@/views/news-item-detail.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
@@ -112,11 +115,14 @@ export function App() {
               {route.name === "templateDetail" && <TemplateDetailView slug={route.slug} id={route.id} />}
               {route.name === "postDetail" && <PostDetailView slug={route.slug} id={route.id} />}
               {route.name === "promoDetail" && <PromotionDetailView slug={route.slug} id={route.id} />}
+              {route.name === "newsTopicDetail" && <NewsTopicDetailView slug={route.slug} id={route.id} />}
+              {route.name === "newsItemDetail" && <NewsItemDetailView slug={route.slug} topicId={route.topicId} itemId={route.itemId} />}
               {route.name === "groupView" && (
                 <>
                   {route.view === "dashboard" && <DashboardView slug={route.slug} />}
                   {route.view === "pillars" && <PillarsView slug={route.slug} />}
                   {route.view === "posts" && <PostsView slug={route.slug} />}
+                  {route.view === "news" && <NewsView slug={route.slug} />}
                   {route.view === "styles" && <StylesView slug={route.slug} />}
                   {route.view === "templates" && <TemplatesView slug={route.slug} />}
                   {route.view === "overrides" && <OverridesView slug={route.slug} />}
@@ -141,9 +147,11 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "resetPassword": return "Reset password"
     case "templateDetail": return "Template detail"
     case "postDetail": return "Post detail"
+    case "newsTopicDetail": return "News topic"
+    case "newsItemDetail": return "News item"
     case "groupView": {
       const label: Record<string, string> = {
-        dashboard: "Dashboard", pillars: "Pillars & Schedule", posts: "Posts",
+        dashboard: "Dashboard", pillars: "Pillars & Schedule", posts: "Posts", news: "News",
         styles: "Style Samples", templates: "Templates", overrides: "Override Content", promotions: "Promotions", settings: "Settings",
       }
       return label[route.view] ?? route.view

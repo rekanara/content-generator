@@ -12,7 +12,7 @@ export const Format = z.enum(['carousel', 'reels', 'pdf', 'text']);
 export type Format = z.infer<typeof Format>;
 
 // Template format (DB check constraint) — different domain from Format.
-export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel', 'ig-carousel-promo', 'li-carousel-promo']);
+export const TemplateFormat = z.enum(['ig-carousel', 'li-carousel', 'reel', 'ig-carousel-promo', 'li-carousel-promo', 'ig-news-card']);
 export type TemplateFormat = z.infer<typeof TemplateFormat>;
 
 // Template role: 'regular' = pipeline rendering (default), the others mark a template
@@ -376,6 +376,11 @@ export const TEMPLATE_TOKENS: Record<TemplateFormat, { body: string[]; first?: s
     body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
+  'ig-news-card': {
+    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+  },
   reel: {
     body: ['{{overlay}}', '{{index}}', '{{total}}'],
   },
@@ -442,6 +447,91 @@ export const UsageReport = z.object({
   total: z.object({ cost: z.number(), promptTokens: z.number(), completionTokens: z.number() }),
 });
 export type UsageReport = z.infer<typeof UsageReport>;
+
+// ---------- news ----------
+export const NewsTopic = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  description: z.string(),
+  active: z.boolean(),
+  template_id: z.string().uuid().nullable(),
+  source_count: z.number(),
+  created_at: z.string(),
+});
+export type NewsTopic = z.infer<typeof NewsTopic>;
+
+export const NewsTopicInput = z.object({
+  name: z.string().trim().min(1),
+  description: z.string().default(''),
+});
+export type NewsTopicInput = z.infer<typeof NewsTopicInput>;
+
+export const NewsSource = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  url: z.string(),
+  active: z.boolean(),
+  created_at: z.string(),
+});
+export type NewsSource = z.infer<typeof NewsSource>;
+
+export const NewsSourceInput = z.object({
+  name: z.string().trim().min(1),
+  url: z.string().trim().url(),
+});
+export type NewsSourceInput = z.infer<typeof NewsSourceInput>;
+
+export const NewsRule = z.object({
+  freshness_hours: z.number(),
+  min_sources: z.number(),
+  allowed_domains: z.array(z.string()),
+  blocked_domains: z.array(z.string()),
+  keywords: z.array(z.string()),
+  updated_at: z.string(),
+});
+export type NewsRule = z.infer<typeof NewsRule>;
+
+export const NewsRuleInput = z.object({
+  freshness_hours: z.number().int().positive(),
+  min_sources: z.number().int().positive(),
+  allowed_domains: z.array(z.string().trim().min(1)).default([]),
+  blocked_domains: z.array(z.string().trim().min(1)).default([]),
+  keywords: z.array(z.string().trim().min(1)).default([]),
+});
+export type NewsRuleInput = z.infer<typeof NewsRuleInput>;
+
+export const NewsTemplateInput = z.object({
+  template_id: z.string().uuid().nullable(),
+});
+export type NewsTemplateInput = z.infer<typeof NewsTemplateInput>;
+
+export const NewsGenerateInput = z.object({
+  item_id: z.string().uuid().optional(),
+  language: z.enum(['original', 'id', 'en', 'ms', 'ja', 'ko', 'zh', 'es']).default('original'),
+});
+export type NewsGenerateInput = z.infer<typeof NewsGenerateInput>;
+
+export const NewsItem = z.object({
+  id: z.string().uuid(),
+  title: z.string(),
+  url: z.string(),
+  domain: z.string(),
+  summary: z.string(),
+  published_at: z.string().nullable(),
+  status: z.enum(['pending', 'valid', 'rejected', 'used']),
+  score: z.number().nullable(),
+  reason: z.string().nullable(),
+  post_id: z.string().uuid().nullable(),
+  created_at: z.string(),
+});
+export type NewsItem = z.infer<typeof NewsItem>;
+
+export const NewsTopicDetail = NewsTopic.extend({
+  sources: z.array(NewsSource),
+  rules: NewsRule,
+  items: z.array(NewsItem),
+});
+export type NewsTopicDetail = z.infer<typeof NewsTopicDetail>;
 
 // ---------- promotions ----------
 export const PromoSlide = z.object({

@@ -1,7 +1,7 @@
 // Small data-fetch hooks — no react-query, stdlib fetch + useEffect.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import type { Promotion, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan, Idea } from '@workspace/shared';
+import type { Promotion, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan, Idea, NewsTopic, NewsTopicDetail } from '@workspace/shared';
 
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -37,3 +37,5 @@ export const useCron = (slug: string) => useApi<CronSettings>(() => api.cron(slu
 export const usePromotions = (slug: string) => useApi<Promotion[]>(() => api.promotions(slug), [slug]);
 export const usePromotion = (slug: string, id: string | null) => useApi<Promotion>(() => id ? api.promotion(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
 export const useIdeas = (slug: string) => useApi<Idea[]>(() => api.ideas(slug), [slug]);
+export const useNewsTopics = (slug: string) => useApi<NewsTopic[]>(() => api.newsTopics(slug), [slug]);
+export const useNewsTopic = (slug: string, id: string | null) => useApi<NewsTopicDetail>(() => id ? api.newsTopic(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
