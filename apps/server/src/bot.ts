@@ -440,7 +440,7 @@ export async function startBot(): Promise<void> {
             enqueue({
               kind: 'generate', slug: buatSession.slug,
               forced: buatSession.platform ? { platform: buatSession.platform, format: buatSession.format } : undefined,
-              notifyChat: true, source: 'buat', brief,
+              notifyChat: true, source: 'telegram', brief,
             });
             await replyGlobal(chatId, `Oke — konten kamu (${brief.length} karakter) di-queue sebagai ${buatSession.slug}${buatSession.platform ? ` ${buatSession.platform}${buatSession.format ? `/${buatSession.format}` : ''}` : ''}. AI akan menstruktur jadi slide, hasilnya menyusul.`);
             continue;
