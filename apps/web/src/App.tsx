@@ -147,14 +147,19 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "groups": return "Groups"
     case "users": return "Users"
     case "resetPassword": return "Reset password"
-    case "templateDetail": return "Template detail"
-    case "postDetail": return "Post detail"
-    case "newsTopicDetail": return "News topic"
-    case "newsItemDetail": return "News item"
+    case "templateDetail": return "Configure › Template"
+    case "postDetail": return "Overview › Post"
+    case "promoDetail": return "Manual content › Promotion"
+    case "newsTopicDetail": return "News › Topic"
+    case "newsItemDetail": return "News › Item"
     case "groupView": {
+      // "Section › Page" — mirrors the sidebar sections so the user always knows which content source a page belongs to
       const label: Record<string, string> = {
-        dashboard: "Dashboard", studio: "Studio", pillars: "Pillars & Schedule", posts: "Posts", news: "News",
-        styles: "Style Samples", templates: "Templates", overrides: "Override Content", promotions: "Promotions", settings: "Settings",
+        dashboard: "Overview › Dashboard", studio: "Overview › Studio", posts: "Overview › Posts",
+        pillars: "Regular posts › Pillars & schedule", styles: "Configure › Style samples",
+        news: "News › Topics",
+        overrides: "Manual content › Overrides", promotions: "Manual content › Promotions",
+        templates: "Configure › Templates", settings: "Configure › Settings",
       }
       return label[route.view] ?? route.view
     }

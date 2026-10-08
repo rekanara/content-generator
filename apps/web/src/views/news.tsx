@@ -34,8 +34,8 @@ export function NewsView({ slug }: { slug: string }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-lg font-semibold">News</h1>
-        <p className="text-sm text-muted-foreground">Topic groups for source and validation rules.</p>
+        <h1 className="text-lg font-semibold">News topics</h1>
+        <p className="text-sm text-muted-foreground">Each topic has its own feeds, filter rules, template and caption. Independent from Pillars (those are for regular posts).</p>
       </div>
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
 
