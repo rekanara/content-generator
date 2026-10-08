@@ -15,6 +15,7 @@ import { rejectPost, toggleStar } from './repos/posts.ts';
 import { addIdea, countUnusedIdeas } from './repos/ideas.ts';
 import { addEvent } from './repos/events.ts';
 import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.ts';
+import { spentToday } from './repos/llm-runs.ts';
 import { runPlanner, formatPlannerReport } from './usecases/planner.ts';
 import { listNewsTopicsWithValidItems, listValidNewsItemsForTopic, getNewsItemGenerateContext } from './repos/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
@@ -186,8 +187,7 @@ async function handleStatus(slug?: string): Promise<string> {
     where group_id = ${cfg.id} and status = 'awaiting_approval'`;
   const [ideasN] = await sql`select count(*)::int as n from ideas
     where group_id = ${cfg.id} and used_at is null`;
-  const [cost] = await sql`select coalesce(sum((llm_usage->>'totalCost')::numeric), 0)::float as today
-    from posts where group_id = ${cfg.id} and created_at >= date_trunc('day', now() at time zone 'Asia/Jakarta')`;
+  const spent = await spentToday(cfg.id);
   const next = nextSlot(state, pillars, true);
   const lines = [
     `Group: ${s}`,
@@ -196,7 +196,7 @@ async function handleStatus(slug?: string): Promise<string> {
     `Queue: ${q.running ? 'running' : 'idle'}${q.pending > 0 ? `, ${q.pending} pending` : ''}`,
     `Awaiting approval: ${awaiting?.n ?? 0}${(awaiting?.n ?? 0) > 0 ? ' — buka FE atau tap tombolnya' : ''}`,
     `Ideas queued: ${ideasN?.n ?? 0}`,
-    `Cost today: $${(cost?.today ?? 0).toFixed(4)}`,
+    `Cost today: $${spent.toFixed(4)}${cfg.dailyBudget === null ? '' : ` / $${cfg.dailyBudget.toFixed(2)} budget`}`,
   ];
   if (last) {
     lines.push(

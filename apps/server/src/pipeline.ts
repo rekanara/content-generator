@@ -1,5 +1,6 @@
 // Orchestrates one run: slot → ideation → writer → critic → (render/send called from outside).
 // All queries group-scoped; LLM uses GroupCfg (group ?? env).
+import { recordLlmRun } from './repos/llm-runs.ts';
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { claimIdea, markIdeaUsed } from './repos/ideas.ts';
@@ -141,9 +142,21 @@ function makeContentBrief(kind: ContentBrief['kind'], topic: string, angle: stri
 // full text becomes the source material. First line = topic (the hook), rest =
 // angle (the story). Writer restructures, does NOT rewrite from scratch.
 export async function generateDraft(cfg: GroupCfg, slot: Slot, source = 'cli', brief?: string, news?: { topicId?: string; itemId?: string; language?: string }): Promise<RunResult> {
+  const usage: UsageAcc = {};
+  try {
+    return await generateDraftInner(cfg, slot, source, usage, brief, news);
+  } catch (e) {
+    // tokens burned before the post row exists still count toward the daily budget
+    for (const s of Object.values(usage)) {
+      await recordLlmRun(cfg.id, 'failed_run', s.model, s.prompt, s.completion).catch(() => {});
+    }
+    throw e;
+  }
+}
+
+async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usage: UsageAcc, brief?: string, news?: { topicId?: string; itemId?: string; language?: string }): Promise<RunResult> {
   const groupId = cfg.id;
   const pillar = await getPillar(slot.pillar_id);
-  const usage: UsageAcc = {};
 
   let effPillar = pillar;
   let newsItem: Awaited<ReturnType<typeof claimValidNewsItem>> = null;

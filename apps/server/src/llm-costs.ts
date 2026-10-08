@@ -63,6 +63,11 @@ export function stepUsage(model: string, prompt: number, completion: number): St
 
 const round4 = (n: number): number => Math.round(n * 10000) / 10000;
 
+// Daily budget gate. null = unlimited (no budget set).
+export function budgetExceeded(spent: number, budget: number | null): boolean {
+  return budget !== null && spent >= budget;
+}
+
 // Assemble the llm_usage jsonb for a post: steps + cover image cost + total.
 export type PostUsage = {
   steps: Record<string, StepUsage>;

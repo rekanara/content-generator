@@ -1,6 +1,20 @@
 // OpenAI-compatible chat completion client. JSON mode + 1 retry per call.
 // Per-group config (GroupCfg) — baseUrl/apiKey/model from group ?? env.
 import type { GroupCfg } from './groups.ts';
+import { spentToday } from './repos/llm-runs.ts';
+import { budgetExceeded } from './llm-costs.ts';
+
+export class BudgetExceededError extends Error {}
+
+// Every LLM/image call passes here — one gate, no call site can bypass the budget.
+// ponytail: a call that starts under budget may finish over it (cost known after); fine for a daily cap.
+async function assertBudget(cfg: GroupCfg): Promise<void> {
+  if (cfg.dailyBudget === null) return;
+  const spent = await spentToday(cfg.id);
+  if (budgetExceeded(spent, cfg.dailyBudget)) {
+    throw new BudgetExceededError(`daily LLM budget reached (${cfg.slug}): $${spent.toFixed(4)} of $${cfg.dailyBudget} — resets 00:00 WIB, or raise it in Settings`);
+  }
+}
 
 export type Usage = { prompt: number; completion: number };
 export type LlmResult<T> = { data: T; usage: Usage };
@@ -81,6 +95,7 @@ export async function chatJson<T>(
   guard: (x: unknown) => x is T,
   maxTokens = 4000, // reasoning models burn tokens on thinking; 2000 is not enough
 ): Promise<LlmResult<T>> {
+  await assertBudget(cfg);
   let lastErr = new Error('no attempt');
   for (let attempt = 0; attempt < 2; attempt++) {
     let content: string, usage: Usage;
@@ -130,6 +145,7 @@ export const writerModel = (cfg: GroupCfg): string => cfg.llm.model;
 // so callers decide whether retrying is worth it (rerender re-attempts naturally).
 // ponytail: size/config knobs when a model needs non-default geometry.
 export async function generateImage(cfg: GroupCfg, prompt: string): Promise<Buffer> {
+  await assertBudget(cfg);
   const res = await fetch(`${cfg.llm.baseUrl}/images/generations`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.llm.apiKey}` },

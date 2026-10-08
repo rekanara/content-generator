@@ -38,6 +38,7 @@ import { listPromotions, getPromotion, createPromotion, updatePromotion, deleteP
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
 import { autofillNewsTopic, startIngest, getIngestProgress } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
+import { recordLlmRun } from './repos/llm-runs.ts';
 import {
   SESSION_COOKIE, LoginError, login, createSession, getSessionUser,
   touchSession, destroySession, revokeUserSessions, listUsers, createUser, resetPassword, deleteUser, getUser, type AuthUser,
@@ -680,6 +681,7 @@ g.post('/:slug/overrides/polish', async (c) => {
     overridePolishPrompt(parsed.data, samples as { title: string; body: string; platform: string | null }[]),
     isPolishOut, 4000,
   );
+  await recordLlmRun(group.id, 'polish', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   return c.json({ polished: out.data.polished.trim() });
 });
 

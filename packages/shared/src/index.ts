@@ -47,6 +47,7 @@ const GROUP_CONFIG_FIELDS = {
   telegram_chat_id: z.string().nullable(),
   caption_footer: z.string().nullable(),
   caption_cta: z.string().nullable(),
+  daily_budget: z.number().nullable(), // USD/day, null = unlimited
   llm_api_key_set: z.boolean(),
   tts_api_key_set: z.boolean(),
   telegram_bot_token_set: z.boolean(),
@@ -109,6 +110,7 @@ export const GroupPatch = z.object({
   telegram_chat_id: z.string().nullable().optional(),
   caption_footer: z.string().nullable().optional(),
   caption_cta: z.string().nullable().optional(),
+  daily_budget: z.number().min(0.01).max(10000).nullable().optional(), // null = unlimited
   approval_required: z.boolean().optional(),
   auto_plan: z.boolean().optional(),
 });

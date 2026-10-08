@@ -1,5 +1,6 @@
 // Promotion usecases: AI content generation, brief drafting, image-slot reporting.
 import { chatJson, writerModel } from '../llm.ts';
+import { recordLlmRun } from '../repos/llm-runs.ts';
 import { isPromoContentOut, isPromoBriefOut, type PromoContentOut, type PromoBriefOut } from '../schema.ts';
 import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts.ts';
 import { getPromotion, setContent, setContentWithTemplate, imageSlots, markPromotionSent } from '../repos/promotions.ts';
@@ -25,6 +26,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContent(promoId, slides);
   console.log(`[promo] #${promoId} content generated — ${slides.length} slides`);
@@ -34,6 +36,7 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
 // AI drafts promo DATA from a rough brief (dashboard flow).
 export async function draftPromotionFromBrief(cfg: GroupCfg, brief: string): Promise<PromoBriefOut> {
   const out = await chatJson<PromoBriefOut>(cfg, writerModel(cfg), promoBriefPrompt(brief), isPromoBriefOut, 3000);
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   return out.data;
 }
 
@@ -62,6 +65,7 @@ export async function regeneratePromotionContent(
   const out = await chatJson<PromoContentOut>(
     cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
   );
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
   await setContentWithTemplate(promoId, slides, chosenId);
   const templateChanged = (chosenId ?? null) !== (promo.template_id ?? null);

@@ -189,7 +189,11 @@ async function runGenerate(
     // the plan owns the date — say so instead of silently ignoring the /gen args
     await sendMessage(cfg, `Hari ini ada plan (${plan!.note || plan!.id.slice(0, 8)}) — argumen platform/format diabaikan, spec plan yang dipakai: ${slot.platform}/${slot.format}.`).catch(() => {});
   }
-  const r = await generateDraft(cfg, slot, source, brief, news);
+  // failure before a post row exists (budget gate, LLM down) must not be silent either
+  const r = await generateDraft(cfg, slot, source, brief, news).catch(async (e) => {
+    await notifyRunFailed(cfg, e);
+    throw e;
+  });
   postRef(r.postId);
   await addEvent(r.postId, cfg.id, 'generated');
   try {

@@ -1,7 +1,7 @@
 // Cost catalog + usage snapshot math (pure).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { costOfTokens, stepUsage, postUsage, modelPrice, imagePrice } from '../src/llm-costs.ts';
+import { costOfTokens, stepUsage, postUsage, modelPrice, imagePrice, budgetExceeded } from '../src/llm-costs.ts';
 
 test('costOfTokens: known model — prompt + completion math', () => {
   // dattio/glm-5.3-mod: 0.6 / 2.2 per 1M
@@ -40,4 +40,10 @@ test('postUsage: total = steps + cover; cover only model+cost', () => {
 test('imagePrice: catalog + fallback', () => {
   assert.equal(imagePrice('openrouter/google/gemini-2.5-flash-image').perImage, 0.039);
   assert.ok(imagePrice('unknown-img').perImage > 0);
+});
+
+test('budgetExceeded: null = unlimited, cap inclusive', () => {
+  assert.equal(budgetExceeded(999, null), false);
+  assert.equal(budgetExceeded(0.99, 1), false);
+  assert.equal(budgetExceeded(1, 1), true);
 });

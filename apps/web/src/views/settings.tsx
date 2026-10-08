@@ -47,7 +47,7 @@ export function SettingsView({ slug }: { slug: string }) {
     setBusy(true); setMsg(null)
     try {
       // only send filled fields; empty string → null (clears override, falls back to env)
-      const body = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === "" ? null : v]))
+      const body = Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v === "" ? null : k === "daily_budget" ? Number(v) : v]))
       if (Object.keys(body).length > 0) await api.patchGroup(slug, body)
       setPatch({})
       reload()
@@ -143,6 +143,18 @@ export function SettingsView({ slug }: { slug: string }) {
             onChange={(e) => set("caption_footer", e.target.value)} />
           <p className="text-xs text-muted-foreground">
             Appended after the CTA of every generated caption (title / subtitle / CTA / footer / tags). Empty = not shown.
+          </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="space-y-1.5 p-4">
+          <Label htmlFor="daily-budget">Daily LLM budget (USD)</Label>
+          <Input id="daily-budget" type="number" min="0.01" step="0.01" placeholder="unlimited"
+            value={patch["daily_budget"] ?? (group.daily_budget === null ? "" : String(group.daily_budget))}
+            onChange={(e) => set("daily_budget", e.target.value)} />
+          <p className="text-xs text-muted-foreground">
+            Once today's spend (WIB) reaches this, every AI call for this account stops until 00:00 WIB — runs fail with a Telegram alert. Empty = unlimited.
           </p>
         </CardContent>
       </Card>

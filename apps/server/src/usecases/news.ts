@@ -1,5 +1,6 @@
 import Parser from 'rss-parser';
-import { chatJson, writerModel } from '../llm.ts';
+import { chatJson, writerModel, BudgetExceededError } from '../llm.ts';
+import { recordLlmRun } from '../repos/llm-runs.ts';
 import { parseFeed } from '../article.ts';
 import type { GroupCfg } from '../groups.ts';
 import { isNewsAutofillOut, isNewsScoreOut } from '../schema.ts';
@@ -18,6 +19,7 @@ export async function autofillNewsTopic(cfg: GroupCfg, topic: { name: string; de
     { role: 'system', content: 'You suggest RSS/news configuration for a developer-content news topic. Reply ONLY JSON. Use reputable sources only. URLs must be RSS/feed URLs when likely known, otherwise official news/blog feed URLs. No made-up niche domains.' },
     { role: 'user', content: `Topic: ${topic.name}\nDescription: ${topic.description}\nSuggest 5-12 allowed_domains, 8-20 keywords, and 3-8 RSS/news sources. Output JSON: {"allowed_domains": ["domain.com"], "keywords": ["keyword"], "sources": [{"name": "Source", "url": "https://example.com/feed"}]}` },
   ], isNewsAutofillOut, 2500);
+  await recordLlmRun(cfg.id, 'news_autofill', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   return {
     allowed_domains: cleanList(out.data.allowed_domains).slice(0, 12),
     keywords: cleanList(out.data.keywords).slice(0, 20),
@@ -195,9 +197,11 @@ async function scoreItem(cfg: GroupCfg, item: RawNews, domain: string, fallback:
       { role: 'system', content: 'You screen news items for a content account. The topic definition decides what is relevant. Reply ONLY JSON.' },
       { role: 'user', content: `Topic: ${topic.name}\nTopic description: ${topic.description || '(none)'}\n\nDomain: ${domain}\nTitle: ${item.title}\nSummary: ${item.summary}\n\nScore 0-100: how well does this item fit THIS topic, combined with recency, source credibility, novelty, and content potential. Judge relevance ONLY against the topic description above — do not apply any other audience or niche. Below 60 = reject. Output JSON: {"score": 0, "reason": "short reason"}` },
     ], isNewsScoreOut, 800);
+    await recordLlmRun(cfg.id, 'news_score', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
     const score = Math.round(out.data.score);
     return { status: score >= 60 ? 'valid' : 'rejected', score, reason: `AI: ${out.data.reason}` };
   } catch (e) {
+    if (e instanceof BudgetExceededError) throw e; // stop the ingest; unscored items retry next fetch
     return { ...fallback, reason: `${fallback.reason}; AI scoring failed: ${(e as Error).message.slice(0, 120)}` };
   }
 }
