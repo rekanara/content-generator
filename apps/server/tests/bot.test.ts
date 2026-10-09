@@ -259,3 +259,10 @@ test('withChatSlug: fills missing slug only', () => {
   assert.deepEqual(withChatSlug({ t: 'gen', slug: 'b' }, 'a'), { t: 'gen', slug: 'b' });
   assert.deepEqual(withChatSlug({ t: 'help' }, 'a'), { t: 'help' });
 });
+
+test('parseCallback: news fetch buttons', () => {
+  const id = '01a11bf9-28e8-782c-babb-6fc7237dacbf';
+  assert.deepEqual(parseCallback(`nfl:${id}`), { t: 'newsfetchlatest', topicId: id });
+  assert.deepEqual(parseCallback(`nfu:${id}`), { t: 'newsfetchurl', topicId: id });
+  assert.equal(parseCallback('nfu:not-a-uuid'), null);
+});

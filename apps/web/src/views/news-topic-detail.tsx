@@ -30,6 +30,7 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   const [generating, setGenerating] = useState(false)
   const [generateItemId, setGenerateItemId] = useState<string | null | undefined>(undefined)
   const [language, setLanguage] = useState("id")
+  const [urlOpen, setUrlOpen] = useState(false)
 
   const autofill = async () => {
     setAutofilling(true); setMsg(null)
@@ -120,13 +121,18 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
             {newsTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.format}{t.is_active ? "" : " · inactive"}</option>)}
           </select>
           <Button variant="outline" size="sm" disabled={autofilling} onClick={autofill}>{autofilling ? "Autofilling…" : "AI autofill"}</Button>
-          <Button variant="outline" size="sm" disabled={ingesting} onClick={ingest}>{ingesting ? "Fetching…" : "Fetch news"}</Button>
+          <Button variant="outline" size="sm" disabled={ingesting} onClick={ingest}>{ingesting ? "Fetching…" : "Fetch latest"}</Button>
+          <Button variant="outline" size="sm" onClick={() => setUrlOpen(true)}>Fetch one URL</Button>
           <Button variant="default" size="sm" disabled={generating || validCount === 0} onClick={() => openGenerate()}>{generating ? "Generating…" : "Generate latest valid"}</Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/app/${slug}/news`)}>Back</Button>
         </div>
       </div>
       {ingesting && progress && <IngestPanel p={progress} />}
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
+      {urlOpen && (
+        <FetchUrlDialog slug={slug} topicId={id} onClose={() => setUrlOpen(false)}
+          onFetched={reload} onGenerate={(itemId) => { setUrlOpen(false); openGenerate(itemId) }} />
+      )}
       {generateItemId !== undefined && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4">
           <Card className="w-full max-w-md">
@@ -151,6 +157,73 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
       <RulesCard slug={slug} topicId={id} rules={topic.rules} onSaved={() => { setMsg("rules saved"); reload() }} />
       <SourcesCard slug={slug} topicId={id} sources={topic.sources} reload={reload} setMsg={setMsg} />
       <ItemsCard slug={slug} topicId={id} items={topic.items} reload={reload} setMsg={setMsg} onGenerate={openGenerate} />
+    </div>
+  )
+}
+
+type FetchUrlResult = Awaited<ReturnType<typeof api.fetchNewsUrl>>
+
+function FetchUrlDialog({ slug, topicId, onClose, onFetched, onGenerate }: {
+  slug: string; topicId: string; onClose: () => void; onFetched: () => void; onGenerate: (itemId: string) => void
+}) {
+  const [url, setUrl] = useState("")
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [res, setRes] = useState<FetchUrlResult | null>(null)
+
+  const run = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setBusy(true); setErr(null); setRes(null)
+    try {
+      setRes(await api.fetchNewsUrl(slug, topicId, url.trim()))
+      onFetched()
+    } catch (e2) {
+      setErr(e2 instanceof ApiError ? e2.message : "fetch failed")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const item = res?.item
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4">
+      <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto">
+        <CardHeader><CardTitle className="text-base">Fetch one article</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <form onSubmit={run} className="space-y-3">
+            <Field label="Article URL">
+              <Input required type="url" autoFocus placeholder="https://…" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} />
+            </Field>
+            <p className="text-xs text-muted-foreground">The article is read, matched against this topic's RSS sources, and analyzed by AI. The URL is kept as the post's source line.</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={onClose}>{res ? "Close" : "Cancel"}</Button>
+              <Button type="submit" disabled={busy || !url.trim()}>{busy ? "Analyzing…" : "Fetch & analyze"}</Button>
+            </div>
+          </form>
+          {busy && <p className="text-sm text-muted-foreground" aria-live="polite">Reading the article and analyzing it — up to a minute.</p>}
+          {err && <p className="text-sm text-destructive">{err}</p>}
+          {item && (
+            <div className="space-y-2 rounded-lg border p-3 text-sm">
+              <p className="font-medium">{item.title}</p>
+              <p className="break-all text-xs text-muted-foreground">
+                <a className="underline" href={item.url} target="_blank" rel="noreferrer">{item.domain}</a> · {item.published_at ?? "no date"}
+                {res.matchedSource ? ` · found in RSS: ${res.matchedSource}` : " · not in your RSS sources"}
+              </p>
+              <p className="text-xs"><span className={item.status === "valid" ? "text-emerald-500" : "text-amber-500"}>{item.status}</span> · score {item.score ?? "—"}</p>
+              {item.reason && <p className="text-xs text-muted-foreground">{item.reason}</p>}
+              {res.known && <p className="text-xs text-amber-500">Already in this topic ({item.status}) — kept as is.</p>}
+              {res.analysis && res.analysis.key_points.length > 0 && (
+                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+                  {res.analysis.key_points.map((k, i) => <li key={i}>{k}</li>)}
+                </ul>
+              )}
+              {item.status === "valid" && !item.post_id && (
+                <div className="flex justify-end"><Button size="sm" onClick={() => onGenerate(item.id)}>Generate</Button></div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   )
 }

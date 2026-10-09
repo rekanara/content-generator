@@ -18,6 +18,7 @@ import { createOverrideWithPlan, updateOverrideImages } from './repos/overrides.
 import { spentToday } from './repos/llm-runs.ts';
 import { runPlanner, formatPlannerReport } from './usecases/planner.ts';
 import { listNewsTopicsWithValidItems, listValidNewsItemsForTopic, getNewsItemGenerateContext } from './repos/news.ts';
+import { fetchNewsUrl, ingestNewsTopic } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { jakartaToday } from './cronmath.ts';
 import { config } from './config.ts';
@@ -100,6 +101,8 @@ export type Callback =
   | { t: 'skip_cover'; postId: string }
   | { t: 'genpick'; slug: string; platform?: string; format?: string }
   | { t: 'newstopic'; topicId: string }
+  | { t: 'newsfetchlatest'; topicId: string }
+  | { t: 'newsfetchurl'; topicId: string }
   | { t: 'newsitem'; itemId: string }
   | { t: 'buatpick'; slug: string; platform?: string; format?: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
@@ -123,6 +126,10 @@ export function parseCallback(data: string): Callback | null {
   }
   const nt = data.match(/^nt:([0-9a-f-]{36})$/i);
   if (nt && UUID_RE.test(nt[1]!)) return { t: 'newstopic', topicId: nt[1]!.toLowerCase() };
+  const nfl = data.match(/^nfl:([0-9a-f-]{36})$/i);
+  if (nfl && UUID_RE.test(nfl[1]!)) return { t: 'newsfetchlatest', topicId: nfl[1]!.toLowerCase() };
+  const nfu = data.match(/^nfu:([0-9a-f-]{36})$/i);
+  if (nfu && UUID_RE.test(nfu[1]!)) return { t: 'newsfetchurl', topicId: nfu[1]!.toLowerCase() };
   const ni = data.match(/^ni:([0-9a-f-]{36})$/i);
   if (ni && UUID_RE.test(ni[1]!)) return { t: 'newsitem', itemId: ni[1]!.toLowerCase() };
   // /buat format picker — same pattern as genpick but starts a content-capture session
@@ -276,9 +283,10 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
     }
     case 'cancel': {
       const hadOv = overrideSessions.size > 0;
-      const hadBuat = buatSessions.size > 0;
+      const hadBuat = buatSessions.size > 0 || newsUrlSessions.size > 0;
       overrideSessions.clear();
       buatSessions.clear();
+      newsUrlSessions.clear();
       return hadOv || hadBuat ? 'Session dibatalkan.' : 'Tidak ada sesi yang aktif.';
     }
     case 'plan': {
@@ -373,11 +381,20 @@ export async function handleCmd(cmd: Cmd): Promise<string> {
 // ——— /buat content-capture session (per chat, in-memory) ———
 type BuatSession = { slug: string; platform?: Platform; format?: Format; createdAt: number };
 const buatSessions = new Map<string, BuatSession>();
+type NewsUrlSession = { slug: string; topicId: string; createdAt: number };
+const newsUrlSessions = new Map<string, NewsUrlSession>();
 const BUAT_TTL_MS = 5 * 60_000;
 function getBuatSession(chatId: string): BuatSession | null {
   const s = buatSessions.get(chatId);
   if (!s) return null;
   if (Date.now() - s.createdAt > BUAT_TTL_MS) { buatSessions.delete(chatId); return null; }
+  return s;
+}
+
+function getNewsUrlSession(chatId: string): NewsUrlSession | null {
+  const s = newsUrlSessions.get(chatId);
+  if (!s) return null;
+  if (Date.now() - s.createdAt > BUAT_TTL_MS) { newsUrlSessions.delete(chatId); return null; }
   return s;
 }
 
@@ -452,6 +469,7 @@ export async function startBot(): Promise<void> {
           }
 
           const chatId = String(u.message?.chat?.id ?? config.telegram.chatId);
+          const newsUrlSession = getNewsUrlSession(chatId);
           const buatSession = getBuatSession(chatId);
           const session = getSession(chatId);
 
@@ -468,6 +486,29 @@ export async function startBot(): Promise<void> {
                 await handlePhoto(chatId, photo);
               }
             }
+            continue;
+          }
+
+          if (newsUrlSession && !text.trim().startsWith('/')) {
+            newsUrlSessions.delete(chatId);
+            const url = text.trim();
+            if (!/^https?:\/\//i.test(url)) { await replyGlobal(chatId, 'Kirim URL berita yang valid (http/https). Mulai lagi dari /gen → News → topic → Fetch one URL.'); continue; }
+            await replyGlobal(chatId, `Reading article… ${url.slice(0, 120)}`);
+            void fetchNewsUrl(await getGroupCfg(newsUrlSession.slug), newsUrlSession.topicId, url)
+              .then(async (r) => {
+                const lines = [
+                  `Fetched one story (${newsUrlSession.slug})`,
+                  `${r.item.status.toUpperCase()} · score ${r.item.score ?? '-'}`,
+                  r.item.title,
+                  `${r.item.domain} · ${r.matchedSource ? `RSS: ${r.matchedSource}` : 'not found in RSS sources'}`,
+                  r.item.reason ?? '',
+                ].filter(Boolean);
+                await replyGlobal(chatId, lines.join('\n'));
+                if (r.item.status === 'valid' && !r.item.post_id) {
+                  await sendMessageWithButtonsRaw(chatId, 'Generate this story?', [[{ text: 'Generate', callback_data: `ni:${r.item.id}` }]]);
+                }
+              })
+              .catch((e) => replyGlobal(chatId, `Fetch URL failed: ${(e as Error).message.slice(0, 250)}`));
             continue;
           }
 
@@ -525,7 +566,7 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     if (!cfg) { await replyGlobal(chatId, `group "${cb.slug}" not found`); return; }
     if (cb.platform === 'news') {
       const topics = await listNewsTopicsWithValidItems(cfg.id);
-      if (topics.length === 0) { await replyGlobal(chatId, `Belum ada valid news yang belum digenerate untuk ${cb.slug}. Fetch news dulu di dashboard.`); return; }
+      if (topics.length === 0) { await replyGlobal(chatId, `Belum ada news topic aktif untuk ${cb.slug}. Buat topic dulu di dashboard (News).`); return; }
       await sendMessageWithButtonsRaw(chatId, `Pilih topik news (${cb.slug}):`, topics.map((t) => ([{ text: `${t.name} (${t.n})`.slice(0, 60), callback_data: `nt:${t.id}` }])));
       return;
     }
@@ -544,11 +585,42 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
 
   if (cb.t === 'newstopic') {
     const items = await listValidNewsItemsForTopic(cb.topicId);
-    if (items.length === 0) { await replyGlobal(chatId, 'Tidak ada valid news tersisa di topik ini.'); return; }
-    await sendMessageWithButtonsRaw(chatId, 'Pilih news yang mau digenerate:', items.map((i) => ([{
-      text: `${i.title.slice(0, 48)}${i.score === null ? '' : ` · ${i.score}`}`,
-      callback_data: `ni:${i.id}`,
-    }])));
+    await sendMessageWithButtonsRaw(chatId, items.length ? 'Pilih news yang mau digenerate, atau fetch baru:' : 'Belum ada valid news di topik ini. Fetch dulu:', [
+      [
+        { text: '🔄 Fetch latest', callback_data: `nfl:${cb.topicId}` },
+        { text: '🔗 Fetch one URL', callback_data: `nfu:${cb.topicId}` },
+      ],
+      ...items.map((i) => ([{
+        text: `${i.title.slice(0, 48)}${i.score === null ? '' : ` · ${i.score}`}`,
+        callback_data: `ni:${i.id}`,
+      }])),
+    ]);
+    return;
+  }
+
+  if (cb.t === 'newsfetchlatest' || cb.t === 'newsfetchurl') {
+    const [t] = await sql<{ slug: string; name: string }[]>`select g.slug, t.name from news_topics t join groups g on g.id = t.group_id where t.id = ${cb.topicId}`;
+    if (!t) { await replyGlobal(chatId, 'News topic tidak ditemukan.'); return; }
+    const msgId = currentCallbackMessageId(chatId);
+    if (cb.t === 'newsfetchurl') {
+      newsUrlSessions.set(chatId, { slug: t.slug, topicId: cb.topicId, createdAt: Date.now() });
+      if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `🔗 ${t.name} — kirim URL`, callback_data: `noop:${cb.topicId}` }]]).catch(() => {});
+      await replyGlobal(chatId, `Kirim URL berita untuk topik "${t.name}". (5 menit, /cancel untuk batal)`);
+      return;
+    }
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `🔄 Fetching ${t.name}…`, callback_data: `noop:${cb.topicId}` }]]).catch(() => {});
+    await replyGlobal(chatId, `Fetching latest news for "${t.name}" — bisa beberapa menit.`);
+    const cfg = await getGroupCfg(t.slug);
+    void ingestNewsTopic(cfg.id, cb.topicId, cfg)
+      .then(async (r) => {
+        await replyGlobal(chatId, `Fetch done — ${r.fetched} fetched, ${r.valid} valid, ${r.rejected} rejected, ${r.skipped} already known${r.feedsFailed ? `, ${r.feedsFailed} feed(s) failed` : ''}.`);
+        const items = await listValidNewsItemsForTopic(cb.topicId);
+        if (items.length) await sendMessageWithButtonsRaw(chatId, 'Pilih news yang mau digenerate:', items.map((i) => ([{
+          text: `${i.title.slice(0, 48)}${i.score === null ? '' : ` · ${i.score}`}`,
+          callback_data: `ni:${i.id}`,
+        }])));
+      })
+      .catch((e) => replyGlobal(chatId, `Fetch failed: ${(e as Error).message.slice(0, 250)}`));
     return;
   }
 

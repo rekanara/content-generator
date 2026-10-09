@@ -36,7 +36,7 @@ import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, del
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate, setPromotionCaption } from './repos/promotions.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
-import { autofillNewsTopic, startIngest, getIngestProgress } from './usecases/news.ts';
+import { autofillNewsTopic, startIngest, getIngestProgress, fetchNewsUrl } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { recordLlmRun } from './repos/llm-runs.ts';
 import {
@@ -661,6 +661,21 @@ g.post('/:slug/news/topics/:id/ingest', async (c) => {
   if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
   const started = startIngest(gr(c).id, id, await getGroupCfg(gr(c).slug));
   return c.json({ ok: true, started, progress: getIngestProgress(id) }, 202);
+});
+
+// One human-picked article: crawl + RSS match + AI analysis → stored as one news item.
+g.post('/:slug/news/topics/:id/items/fetch-url', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = z.object({ url: z.string().trim().url().max(2000) }).safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success || !/^https?:\/\//i.test(parsed.data.url)) return c.json({ error: 'enter a valid http(s) article URL' }, 400);
+  if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
+  try {
+    return c.json(await fetchNewsUrl(await getGroupCfg(gr(c).slug), id, parsed.data.url));
+  } catch (e) {
+    const m = (e as Error).message;
+    return c.json({ error: m }, /LLM|budget/i.test(m) ? 502 : 400);
+  }
 });
 
 g.get('/:slug/news/topics/:id/ingest/status', async (c) => {

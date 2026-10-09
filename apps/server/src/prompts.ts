@@ -22,7 +22,7 @@ export type ContentBrief = {
 const R = 'Reply ONLY with valid JSON, no text outside the JSON.';
 
 function styleBlock(samples: StyleSample[]): string {
-  if (samples.length === 0) return 'No style samples yet — write naturally, like a developer sharing experience.';
+  if (samples.length === 0) return 'No style samples yet — write naturally for this account and audience.';
   return samples
     .map((s, i) => `Sample ${i + 1}:\n${s.title}\n${s.body}`)
     .join('\n\n')
@@ -81,6 +81,42 @@ Output JSON: {"facts": ["..."], "reader_scenario": "...", "open_questions": ["..
   ];
 }
 
+// Manual "fetch one URL": the human chose this story — judge fit against the topic and
+// find the angle, from the real article text (not just the headline).
+export function newsUrlAnalysisPrompt(
+  topic: { name: string; description: string },
+  n: { title: string; url: string; domain: string; summary: string },
+  articleText: string,
+): Msg[] {
+  return [
+    {
+      role: 'system',
+      content: `You are a news editor for a content account. The account's topic definition decides relevance — apply no other audience or niche. ${R}`,
+    },
+    {
+      role: 'user',
+      content: `Topic: ${topic.name}
+Topic description: ${topic.description || '(none)'}
+
+Article (${n.domain})
+Title: ${n.title}
+URL: ${n.url}
+Summary: ${n.summary || '(none)'}
+
+Article text:
+${articleText || '(article text could not be extracted — judge from title and summary only, and say so in reason)'}
+
+Analyze this ONE article:
+- score 0-100: fit to THIS topic + newsworthiness + how much concrete material it has for a post. Below 50 = not usable.
+- reason: 1-2 sentences, specific to this article.
+- angle: the single most interesting angle for a post about it, for the topic's audience (one sentence).
+- key_points: 3-6 concrete facts FROM THE TEXT (numbers, names, what changed). Never invent; fewer is fine.
+
+Output JSON: {"score": 0, "reason": "...", "angle": "...", "key_points": ["..."]}`,
+    },
+  ];
+}
+
 function kindRules(kind?: ContentKind): string {
   if (kind === 'news') return `NEWS RULES (researched news told human-to-human, not a press release):
 - Write for the brief's Audience. Do NOT bend the story toward developers/tech unless the news itself is about tech — a political or legal story stays political/legal.
@@ -95,10 +131,10 @@ function kindRules(kind?: ContentKind): string {
 - The user's material is the source of truth; preserve facts, sequence, and intent.
 - Restructure for clarity; never replace it with generic advice.`;
   return `PILLAR POST RULES:
-- Open on a real daily developer moment: deadline pressure, debugging, code review, chat noise, meetings, pager alerts, messy legacy code, or learning friction.
+- Open on a real, specific moment for this account's audience. Use the pillar description and account brief; do NOT assume a developer/IT workplace unless stated.
 - Make it feel lived, not like an encyclopedia entry.
 - Sequence: human moment → tension → insight → practical move → reflection/CTA.
-- One concrete workplace scene is the spine of the whole piece; no disconnected tips.`;
+- One concrete real-world scene is the spine of the whole piece; no disconnected tips.`;
 }
 
 function rules(): string {
@@ -123,6 +159,7 @@ export function ideationPrompt(
   history: string[],
   newsContext: string | null,
   recentTopics: string[] = [],
+  accountBrief = '',
 ): Msg[] {
   const hist = history.length
     ? `Topics ALREADY used (do NOT resemble these):\n${history.map((h) => `- ${h}`).join('\n')}`
@@ -133,16 +170,17 @@ export function ideationPrompt(
     ? `Topics this ACCOUNT published in the last days, ANY pillar (do NOT resemble these either — avoid the same tools/subject even with a different angle):\n${recentTopics.map((t) => `- ${t}`).join('\n')}`
     : '';
   const news = newsContext
-    ? `Fresh news material (pick one as the basis, write the angle as "what it means for developers"):\n${newsContext}`
+    ? `Fresh news material (pick one as the basis, write the angle for this account's audience):\n${newsContext}`
     : '';
   return [
     {
       role: 'system',
-      content: `You are a content strategist for developers. Pick one specific topic and angle that has not been used yet. ${R}`,
+      content: `You are a content strategist for a social content account. Pick one specific topic and angle that has not been used yet. Do not assume the audience is developers or IT unless the account brief/pillar says so. ${R}`,
     },
     {
       role: 'user',
-      content: `Content pillar: ${p.name}
+      content: `Account brief: ${accountBrief || '(none)'}
+Content pillar: ${p.name}
 Pillar description: ${p.description}
 ${hist}
 ${recent}
@@ -184,7 +222,7 @@ JSON: {"body": string}`,
   return [
     {
       role: 'system',
-      content: `You are a ghostwriter producing ${contentBrief?.audience ? `content for ${contentBrief.audience}` : 'developer content'} on ${plat}. Write a ${format} about the given topic. ${R}`,
+      content: `You are a ghostwriter producing ${contentBrief?.audience ? `content for ${contentBrief.audience}` : 'social content for this account'} on ${plat}. Write a ${format} about the given topic. Do not introduce developer/IT/workplace details unless the brief or source facts explicitly contain them. ${R}`,
     },
     {
       role: 'user',
@@ -256,10 +294,10 @@ Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid pu
 // plateau (inject as an extra ideation field).
 export function imagePrompt(headline: string): string {
   return [
-    'Minimal flat vector illustration for a developer-audience social media cover.',
+    'Minimal flat vector illustration for a social media cover.',
     `Subject: "${headline}".`,
     'Style: clean geometric shapes, dark background (#0f1117), one accent gradient (green to sky blue),',
-    'subtle tech motifs (terminal windows, code brackets, git graphs), generous negative space.',
+    'subtle editorial motifs related to the headline, generous negative space.',
     'Absolutely no text, no letters, no words in the image. Composition centered, works cropped to 4:5.',
   ].join(' ');
 }

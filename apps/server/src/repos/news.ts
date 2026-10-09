@@ -192,7 +192,13 @@ export async function getNewsRules(groupId: string, topicId: string): Promise<Ne
   };
 }
 
-export async function upsertNewsItem(topicId: string, sourceId: string, d: { title: string; url: string; domain: string; summary: string; published_at: Date | null; status: 'pending' | 'valid' | 'rejected'; score: number | null; reason: string }): Promise<NewsItem> {
+export async function getNewsItemByUrl(topicId: string, url: string): Promise<NewsItem | null> {
+  const [r] = await sql`select id, title, url, domain, summary, published_at, status, score, reason, post_id, created_at
+    from news_items where topic_id = ${topicId} and url = ${url}`;
+  return r ? itemOut(r) : null;
+}
+
+export async function upsertNewsItem(topicId: string, sourceId: string | null, d: { title: string; url: string; domain: string; summary: string; published_at: Date | null; status: 'pending' | 'valid' | 'rejected'; score: number | null; reason: string }): Promise<NewsItem> {
   const [r] = await sql`insert into news_items (topic_id, source_id, title, url, domain, summary, published_at, status, score, reason)
     values (${topicId}, ${sourceId}, ${d.title}, ${d.url}, ${d.domain}, ${d.summary}, ${d.published_at}, ${d.status}, ${d.score}, ${d.reason})
     on conflict (topic_id, url) do update set
@@ -250,10 +256,10 @@ export async function getNewsTopicTemplate(groupId: string, topicId: string): Pr
 export async function listNewsTopicsWithValidItems(groupId: string): Promise<{ id: string; name: string; n: number }[]> {
   const rows = await sql`select t.id, t.name, count(i.id)::int as n
     from news_topics t
-    join news_items i on i.topic_id = t.id and i.status = 'valid' and i.post_id is null
+    left join news_items i on i.topic_id = t.id and i.status = 'valid' and i.post_id is null
     where t.group_id = ${groupId} and t.active
     group by t.id, t.name
-    order by max(i.score) desc nulls last, max(i.published_at) desc nulls last, t.created_at desc
+    order by count(i.id) desc, max(i.score) desc nulls last, t.created_at desc
     limit 10`;
   return rows.map((r) => ({ id: r.id as string, name: r.name as string, n: r.n as number }));
 }

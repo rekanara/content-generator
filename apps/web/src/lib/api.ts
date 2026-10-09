@@ -1,5 +1,5 @@
 // Typed API client — fetch wrapper. Semua resource scope group: /g/:slug/...
-import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea, NewsTopic, NewsTopicDetail, NewsRule, PillarSuggestion, StyleSuggestion } from '@workspace/shared';
+import type { Promotion, PromotionInput, UsageReport, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, GroupInputBody, AuthMe, UserRow, UserInputBody, CalendarRun, Override, Plan, PlanInput, Idea, NewsTopic, NewsTopicDetail, NewsRule, NewsItem, PillarSuggestion, StyleSuggestion } from '@workspace/shared';
 
 export type IngestProgress = {
   state: 'running' | 'done' | 'failed';
@@ -172,6 +172,8 @@ export const api = {
   newsTopics: (slug: string) => req<NewsTopic[]>(`${g(slug)}/news/topics`),
   addNewsTopic: (slug: string, p: { name: string; description?: string }) => req<NewsTopic>(`${g(slug)}/news/topics`, { method: 'POST', body: JSON.stringify(p) }),
   newsTopic: (slug: string, id: string) => req<NewsTopicDetail>(`${g(slug)}/news/topics/${id}`),
+  fetchNewsUrl: (slug: string, topicId: string, url: string) =>
+    req<{ item: NewsItem; matchedSource: string | null; analysis: { angle: string; key_points: string[] } | null; known: boolean }>(`${g(slug)}/news/topics/${topicId}/items/fetch-url`, { method: 'POST', body: JSON.stringify({ url }) }),
   delNewsTopic: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/news/topics/${id}`, { method: 'DELETE' }),
   addNewsSource: (slug: string, topicId: string, p: { name: string; url: string }) => req<NewsTopicDetail['sources'][number]>(`${g(slug)}/news/topics/${topicId}/sources`, { method: 'POST', body: JSON.stringify(p) }),
   delNewsSource: (slug: string, topicId: string, sourceId: string) => req<{ ok: true }>(`${g(slug)}/news/topics/${topicId}/sources/${sourceId}`, { method: 'DELETE' }),

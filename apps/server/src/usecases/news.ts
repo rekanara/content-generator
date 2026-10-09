@@ -1,10 +1,12 @@
 import Parser from 'rss-parser';
 import { chatJson, writerModel, BudgetExceededError } from '../llm.ts';
 import { recordLlmRun } from '../repos/llm-runs.ts';
-import { parseFeed } from '../article.ts';
+import { parseFeed, fetchArticle } from '../article.ts';
+import { newsUrlAnalysisPrompt } from '../prompts.ts';
 import type { GroupCfg } from '../groups.ts';
-import { isNewsAutofillOut, isNewsScoreOut } from '../schema.ts';
-import { getNewsRules, getNewsTopicBrief, existingNewsItems, listActiveNewsSources, listActiveNewsTopicIds, upsertNewsItem } from '../repos/news.ts';
+import { isNewsAutofillOut, isNewsScoreOut, isNewsUrlAnalysisOut, sameStory } from '../schema.ts';
+import type { NewsItem } from '@workspace/shared';
+import { getNewsRules, getNewsTopicBrief, existingNewsItems, listActiveNewsSources, listActiveNewsTopicIds, upsertNewsItem, getNewsItemByUrl } from '../repos/news.ts';
 
 const parser = new Parser({ timeout: 8000 });
 
@@ -149,6 +151,55 @@ export async function ingestNewsTopic(groupId: string, topicId: string, cfg?: Gr
     }
   });
   return { fetched, saved, valid, rejected, skipped, feedsFailed: feeds.failed };
+}
+
+export type FetchUrlResult = { item: NewsItem; matchedSource: string | null; analysis: { angle: string; key_points: string[] } | null; known: boolean };
+
+// One human-picked story: crawl the URL, look for the same story in the topic's RSS feeds
+// (source_id when found), then a deeper AI analysis against the topic. The article URL +
+// domain are ALWAYS stored — that is the content's source line, RSS match or not.
+export async function fetchNewsUrl(cfg: GroupCfg, topicId: string, rawUrl: string): Promise<FetchUrlResult> {
+  const [sources, topic, known] = await Promise.all([
+    listActiveNewsSources(cfg.id, topicId), getNewsTopicBrief(cfg.id, topicId), existingNewsItems(topicId),
+  ]);
+  if (!sources || !topic) throw new Error('news topic not found');
+  const article = await fetchArticle(rawUrl);
+  if (!article) throw new Error('could not read that URL (not an HTML page, blocked, or private address)');
+  if (!article.title) throw new Error('page has no readable title — is this a news article URL?');
+  const url = normalizeUrl(article.canonical && sameHost(article.canonical, article.url) ? article.canonical : article.url) ?? article.url;
+
+  // already stored and finished (used/valid) → never overwrite its status
+  const prev = [...known.keys()].find((k) => sameStory(k, url));
+  if (prev && ['used', 'valid'].includes(known.get(prev)!.status)) {
+    const row = await getNewsItemByUrl(topicId, prev);
+    if (row) return { item: row, matchedSource: null, analysis: null, known: true };
+  }
+
+  // same story in any of the topic's feeds → source_id + feed date/summary fill gaps
+  let match: { sourceId: string; name: string; item: RawNews } | null = null;
+  const feeds = await Promise.allSettled(sources.map(async (s) => ({ s, items: await fetchFeed(s.url) })));
+  for (const f of feeds) {
+    if (f.status !== 'fulfilled') continue;
+    const it = f.value.items.find((i) => sameStory(i.url, url) || sameStory(i.url, article.url));
+    if (it) { match = { sourceId: f.value.s.id, name: f.value.s.name, item: it }; break; }
+  }
+
+  const domain = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
+  const summary = (article.summary || match?.item.summary || article.text.slice(0, 600)).slice(0, 600);
+  const publishedAt = article.publishedAt ?? match?.item.publishedAt ?? null;
+  const out = await chatJson(cfg, writerModel(cfg), newsUrlAnalysisPrompt(topic, { title: article.title, url, domain, summary }, article.text), isNewsUrlAnalysisOut, 2000, 120_000);
+  await recordLlmRun(cfg.id, 'news_score', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
+  const score = Math.round(out.data.score);
+  const item = await upsertNewsItem(topicId, match?.sourceId ?? null, {
+    title: article.title, url, domain, summary, published_at: publishedAt,
+    status: score >= 50 ? 'valid' : 'rejected', score,
+    reason: `AI URL: ${out.data.reason}${out.data.angle ? ` · angle: ${out.data.angle}` : ''}`.slice(0, 1000),
+  });
+  return { item, matchedSource: match?.name ?? null, analysis: { angle: out.data.angle, key_points: out.data.key_points }, known: false };
+}
+
+function sameHost(a: string, b: string): boolean {
+  try { return new URL(a).hostname.replace(/^www\./, '') === new URL(b).hostname.replace(/^www\./, ''); } catch { return false; }
 }
 
 export async function ingestNewsGroup(groupId: string, cfg?: GroupCfg): Promise<NewsIngestResult> {

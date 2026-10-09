@@ -55,9 +55,33 @@ async function safeUrl(raw: string, base?: URL): Promise<URL | null> {
   return isPrivateHost(address) ? null : u;
 }
 
-export async function fetchArticleText(url: string): Promise<string> {
+const decode = (s: string) => s
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;/g, "'").replace(/\s+/g, ' ').trim();
+
+function metaContent(html: string, key: string): string {
+  const re = new RegExp(`<meta[^>]+(?:property|name|itemprop)=["']${key}["'][^>]*>`, 'i');
+  const tag = html.match(re)?.[0];
+  return tag ? decode(tag.match(/content=["']([^"']*)["']/i)?.[1] ?? '') : '';
+}
+
+// Page metadata (pure): og/twitter/article tags first, <title>/<h1> as fallback.
+export function htmlMeta(html: string): { title: string; summary: string; publishedAt: Date | null; canonical: string } {
+  const title = metaContent(html, 'og:title') || metaContent(html, 'twitter:title')
+    || decode(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? '')
+    || decode((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1] ?? '').replace(/<[^>]+>/g, ' '));
+  const summary = metaContent(html, 'og:description') || metaContent(html, 'description') || metaContent(html, 'twitter:description');
+  const rawDate = metaContent(html, 'article:published_time') || metaContent(html, 'datePublished') || metaContent(html, 'pubdate')
+    || html.match(/"datePublished"\s*:\s*"([^"]+)"/)?.[1] || '';
+  const d = rawDate ? new Date(rawDate) : null;
+  const canonical = html.match(/<link[^>]+rel=["']canonical["'][^>]*>/i)?.[0]?.match(/href=["']([^"']+)["']/i)?.[1] ?? '';
+  return { title: title.slice(0, 300), summary: summary.slice(0, 600), publishedAt: d && !Number.isNaN(d.getTime()) ? d : null, canonical };
+}
+
+// SSRF-safe fetch of an article page (manual redirects, every hop host-checked).
+// Returns the final URL + raw HTML, or null on any failure.
+async function fetchHtml(url: string): Promise<{ url: string; html: string } | null> {
   try {
-    // manual redirects: every hop is host-checked BEFORE the request is made
     let u = await safeUrl(url);
     let res: Response | null = null;
     for (let hop = 0; u && hop < 4; hop++) {
@@ -71,11 +95,23 @@ export async function fetchArticleText(url: string): Promise<string> {
       u = await safeUrl(loc, u);
       res = null;
     }
-    if (!res || !res.ok || !(res.headers.get('content-type') ?? '').includes('html')) return '';
+    if (!u || !res || !res.ok || !(res.headers.get('content-type') ?? '').includes('html')) return null;
     const buf = await res.arrayBuffer();
-    if (buf.byteLength > MAX_BYTES) return '';
-    return htmlToText(new TextDecoder().decode(buf));
+    if (buf.byteLength > MAX_BYTES) return null;
+    return { url: u.toString(), html: new TextDecoder().decode(buf) };
   } catch {
-    return '';
+    return null;
   }
+}
+
+export async function fetchArticleText(url: string): Promise<string> {
+  const r = await fetchHtml(url);
+  return r ? htmlToText(r.html) : '';
+}
+
+// Full article for the "fetch one URL" flow: final URL, metadata, and body text.
+export async function fetchArticle(url: string): Promise<{ url: string; title: string; summary: string; publishedAt: Date | null; canonical: string; text: string } | null> {
+  const r = await fetchHtml(url);
+  if (!r) return null;
+  return { url: r.url, ...htmlMeta(r.html), text: htmlToText(r.html) };
 }

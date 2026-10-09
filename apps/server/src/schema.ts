@@ -35,6 +35,27 @@ export function isNewsResearchOut(x: unknown): x is NewsResearchOut {
     Array.isArray(x.open_questions) && x.open_questions.every(str);
 }
 
+// Manual "fetch one URL" analysis: deeper than the bulk score — the human picked this story.
+export type NewsUrlAnalysisOut = { score: number; reason: string; angle: string; key_points: string[] };
+export function isNewsUrlAnalysisOut(x: unknown): x is NewsUrlAnalysisOut {
+  return obj(x) && typeof x.score === 'number' && Number.isFinite(x.score) && x.score >= 0 && x.score <= 100 &&
+    str(x.reason) && x.reason.trim().length > 0 && str(x.angle) &&
+    Array.isArray(x.key_points) && x.key_points.length <= 8 && x.key_points.every(str);
+}
+
+// Exact story match across feeds: same host + same path (query/hash/trailing slash/www ignored).
+export function sameStory(a: string, b: string): boolean {
+  try {
+    const norm = (s: string) => {
+      const u = new URL(s);
+      return `${u.hostname.replace(/^www\.|^m\./, '').toLowerCase()}${u.pathname.replace(/\/+$/, '').toLowerCase()}`;
+    };
+    return norm(a) === norm(b);
+  } catch {
+    return false;
+  }
+}
+
 export function isNewsAutofillOut(x: unknown): x is NewsAutofillOut {
   return obj(x) &&
     Array.isArray(x.allowed_domains) && x.allowed_domains.every(str) &&

@@ -101,7 +101,7 @@ async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typ
   }
 }
 
-function makeContentBrief(kind: ContentBrief['kind'], topic: string, angle: string, pillarName: string, newsItem?: Awaited<ReturnType<typeof claimValidNewsItem>>, research?: NewsResearchOut | null, audience?: string): ContentBrief {
+function makeContentBrief(kind: ContentBrief['kind'], topic: string, angle: string, pillarName: string, newsItem?: Awaited<ReturnType<typeof claimValidNewsItem>>, research?: NewsResearchOut | null, audience?: string, accountBrief = '', pillarDescription = ''): ContentBrief {
   if (kind === 'news' && newsItem) return {
     kind,
     audience,
@@ -129,10 +129,10 @@ function makeContentBrief(kind: ContentBrief['kind'], topic: string, angle: stri
   return {
     kind: 'pillar',
     premise: topic,
-    audience_moment: `A developer dealing with ${pillarName.toLowerCase()} during real work: code review, debugging, incidents, deadlines, meetings, or learning friction.`,
+    audience_moment: accountBrief || pillarDescription || `A person following ${pillarName.toLowerCase()} runs into this topic in daily life or work.`,
     narrative_arc: 'human moment → tension → insight → practical move → reflection/CTA',
     source_facts: angle ? [angle] : [],
-    must_include: ['one concrete workplace scene', 'one practical move the reader can try'],
+    must_include: ['one concrete real-world scene from the account audience', 'one practical move the reader can try'],
     must_not_do: ['encyclopedia explanation', 'unconnected listicle tips', 'corporate tone'],
   };
 }
@@ -203,7 +203,7 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
     console.log(`[pipeline] brief provided (${brief.length} chars) — skipping ideation`);
   } else if (newsItem) {
     topic = newsItem.title.trim().slice(0, 120);
-    angle = `Source: ${newsItem.url}\nSummary: ${newsItem.summary || newsItem.reason || newsItem.title}\nAngle: explain what this trend means for developers. Mention source domain ${newsItem.domain}.`;
+    angle = `Source: ${newsItem.url}\nSummary: ${newsItem.summary || newsItem.reason || newsItem.title}\nAngle: explain why this matters to people following this topic. Mention source domain ${newsItem.domain}.`;
     runStage('writer', `news: ${topic.slice(0, 50)}`);
     console.log(`[pipeline] news item #${newsItem.id.slice(0, 8)} claimed: "${topic.slice(0, 60)}"`);
   } else {
@@ -219,7 +219,7 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
       const id = await chatJson(
         cfg,
         writerModel(cfg),
-        ideationPrompt(effPillar, history, newsCtx, recentTopics),
+        ideationPrompt(effPillar, history, newsCtx, recentTopics, cfg.brief),
         isIdeationOut,
         6000,
       );
@@ -235,8 +235,8 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
   // audience = the news topic's own definition (e.g. "Berita Indonesia: pemerintahan, korupsi…"),
   // so a politics item is written for that audience — not bent into a developer angle
   const audience = newsTopic ? `people following "${newsTopic.name}"${newsTopic.description ? ` — ${newsTopic.description}` : ''}` : undefined;
-  const research = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? 'developers') : null;
-  const contentBrief = makeContentBrief(newsItem ? 'news' : brief ? 'brief' : 'pillar', topic, angle, effPillar.name, newsItem, research, audience);
+  const research = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? (cfg.brief || 'people following this topic')) : null;
+  const contentBrief = makeContentBrief(newsItem ? 'news' : brief ? 'brief' : 'pillar', topic, angle, effPillar.name, newsItem, research, audience, cfg.brief, effPillar.description);
 
   // 2. writer
   const samples = await getStyleSamples(slot.platform, groupId);

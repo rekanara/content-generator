@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writerPrompt, criticPrompt, type ContentBrief } from '../src/prompts.ts';
+import { writerPrompt, criticPrompt, ideationPrompt, imagePrompt, type ContentBrief } from '../src/prompts.ts';
 import { withNewsSource, isNewsResearchOut } from '../src/schema.ts';
 import { htmlToText, isPrivateHost } from '../src/article.ts';
 
@@ -102,4 +102,16 @@ test('news brief audience overrides the developer persona', () => {
   assert.match(sys!.content, /content for people following "Berita Indonesia"/);
   assert.doesNotMatch(sys!.content, /developer content/);
   assert.match(user!.content, /Audience: people following/);
+});
+
+
+test('ideationPrompt and pillar writer do not hard-code developer audience', () => {
+  const p = { id: 'p1', name: 'Kebijakan Publik', description: 'Aturan pemerintah Indonesia untuk masyarakat umum', is_news: false };
+  const ideation = ideationPrompt(p, [], null, [], 'Akun berita kebijakan publik Indonesia');
+  assert.match(ideation[0]!.content, /Do not assume the audience is developers/);
+  assert.match(ideation[1]!.content, /Akun berita kebijakan publik Indonesia/);
+  const sys = writerPrompt('linkedin', 'pdf', 'cuti melahirkan', 'aturan baru', p.name, [])[0]!.content;
+  assert.doesNotMatch(sys, /developer content/);
+  assert.match(sys, /Do not introduce developer\/IT\/workplace details/);
+  assert.doesNotMatch(imagePrompt('Aturan cuti melahirkan'), /developer-audience|terminal|code brackets|git graphs/i);
 });

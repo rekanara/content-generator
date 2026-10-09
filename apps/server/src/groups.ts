@@ -23,6 +23,7 @@ export type GroupCfg = {
   captionFooter: string;
   captionCta: string;
   dailyBudget: number | null; // USD/day, null = unlimited
+  brief: string;
 };
 
 export function toGroupCfg(row: GroupRow): GroupCfg {
@@ -57,6 +58,7 @@ export function toGroupCfg(row: GroupRow): GroupCfg {
     captionFooter: row.caption_footer ?? '',
     captionCta: row.caption_cta ?? '',
     dailyBudget: row.daily_budget === null ? null : Number(row.daily_budget),
+    brief: row.brief ?? '',
   };
 }
 
