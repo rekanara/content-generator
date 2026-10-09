@@ -15,6 +15,7 @@ import { PromotionDetailView } from "@/views/promotion-detail.tsx"
 import { NewsView } from "@/views/news.tsx"
 import { NewsTopicDetailView } from "@/views/news-topic-detail.tsx"
 import { NewsItemDetailView } from "@/views/news-item-detail.tsx"
+import { TutorialsView } from "@/views/tutorials.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
 import { GroupsView } from "@/views/groups.tsx"
@@ -125,6 +126,7 @@ export function App() {
                   {route.view === "pillars" && <PillarsView slug={route.slug} />}
                   {route.view === "posts" && <PostsView slug={route.slug} />}
                   {route.view === "news" && <NewsView slug={route.slug} />}
+                  {route.view === "tutorials" && <TutorialsView slug={route.slug} />}
                   {route.view === "styles" && <StylesView slug={route.slug} />}
                   {route.view === "templates" && <TemplatesView slug={route.slug} />}
                   {route.view === "overrides" && <OverridesView slug={route.slug} />}
@@ -157,7 +159,7 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
       const label: Record<string, string> = {
         dashboard: "Overview › Dashboard", studio: "Overview › Studio", posts: "Overview › Posts",
         pillars: "Regular posts › Pillars & schedule", styles: "Configure › Style samples",
-        news: "News › Topics",
+        news: "News › Topics", tutorials: "Tutorials › Library",
         overrides: "Manual content › Overrides", promotions: "Manual content › Promotions",
         templates: "Configure › Templates", settings: "Configure › Settings",
       }

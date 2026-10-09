@@ -478,6 +478,7 @@ export const NewsTopic = z.object({
   active: z.boolean(),
   template_id: z.string().uuid().nullable(),
   template_reel_id: z.string().uuid().nullable(),
+  use_source_images: z.boolean(),
   caption_cta: z.string().nullable(),       // null = group setting
   caption_footer: z.string().nullable(),    // null = group setting
   source_count: z.number(),
@@ -528,6 +529,7 @@ export type NewsRuleInput = z.infer<typeof NewsRuleInput>;
 export const NewsTemplateInput = z.object({
   template_id: z.string().uuid().nullable(),
   template_reel_id: z.string().uuid().nullable(),
+  use_source_images: z.boolean().default(false),
 });
 export type NewsTemplateInput = z.infer<typeof NewsTemplateInput>;
 
@@ -559,6 +561,41 @@ export const NewsTopicDetail = NewsTopic.extend({
   items: z.array(NewsItem),
 });
 export type NewsTopicDetail = z.infer<typeof NewsTopicDetail>;
+
+// ---------- tutorials ----------
+export const TutorialLevel = z.enum(['beginner', 'intermediate']);
+export const TutorialFormat = z.enum(['carousel', 'reels']);
+
+export const Tutorial = z.object({
+  id: z.string().uuid(),
+  topic: z.string(),
+  level: TutorialLevel,
+  language: z.string(),
+  source_urls: z.array(z.string().url()),
+  status: z.enum(['draft', 'queued', 'generated', 'failed']),
+  post_id: z.string().uuid().nullable(),
+  template_id: z.string().uuid().nullable(),
+  template_reel_id: z.string().uuid().nullable(),
+  error: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type Tutorial = z.infer<typeof Tutorial>;
+
+export const TutorialInput = z.object({
+  topic: z.string().trim().min(3).max(200),
+  level: TutorialLevel.default('beginner'),
+  language: z.string().trim().min(2).max(20).default('id'),
+  source_urls: z.array(z.string().trim().url()).min(1).max(5),
+  template_id: z.string().uuid().nullable().default(null),
+  template_reel_id: z.string().uuid().nullable().default(null),
+});
+export type TutorialInput = z.infer<typeof TutorialInput>;
+
+export const TutorialGenerateInput = z.object({
+  format: TutorialFormat,
+});
+export type TutorialGenerateInput = z.infer<typeof TutorialGenerateInput>;
 
 // ---------- promotions ----------
 export const PromoSlide = z.object({

@@ -153,8 +153,39 @@ function Cta(ctx: Ctx) {
   );
 }
 
+function TutorialStep(ctx: Ctx) {
+  const { theme, local, fps, scene } = ctx;
+  const s = spring({ frame: local, fps, config: { damping: 12, stiffness: 130 } });
+  return (
+    <div style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top: 350, textAlign: 'left', transform: `translateY(${(1 - s) * 46}px)`, opacity: s }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 122, height: 122, borderRadius: 18, background: theme.palette.accent, color: theme.palette.bg, fontSize: 64, fontWeight: theme.font.weight, marginBottom: 34 }}>{scene.step ?? ''}</div>
+      <div style={{ fontSize: 92 * theme.font.scale, lineHeight: 1.02, fontWeight: theme.font.weight, color: theme.palette.text, letterSpacing: '-0.035em' }}>{up(theme, scene.overlay_text)}</div>
+      {scene.note && <div style={{ marginTop: 30, fontSize: 38, lineHeight: 1.25, color: theme.palette.muted }}>{scene.note}</div>}
+    </div>
+  );
+}
+
+function TutorialCode(ctx: Ctx) {
+  const { theme, local, fps, scene } = ctx;
+  const text = scene.code ?? '';
+  const chars = Math.floor(interpolate(local, [0, fps * 1.2], [0, text.length], clamp));
+  const shown = text.slice(0, chars);
+  const lines = shown.split('\n');
+  return (
+    <div style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top: 270, textAlign: 'left' }}>
+      <div style={{ marginBottom: 26, fontSize: 48, lineHeight: 1.12, fontWeight: theme.font.weight, color: theme.palette.text }}>{scene.step ? `STEP ${scene.step}` : 'COMMAND'}</div>
+      <pre style={{ margin: 0, minHeight: 520, padding: 34, borderRadius: 18, background: '#05080c', border: `2px solid ${theme.palette.accent}66`, boxShadow: `-10px 10px 0 ${theme.palette.accent}33`, color: theme.palette.text, fontFamily: '"JetBrains Mono", "SFMono-Regular", Menlo, monospace', fontSize: 36, lineHeight: 1.42, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        {lines.map((ln, i) => <span key={i}>{ln.startsWith('$') ? <><span style={{ color: theme.palette.accent }}>$</span>{ln.slice(1)}</> : ln}{i < lines.length - 1 ? '\n' : ''}</span>)}<span style={{ color: theme.palette.accent }}>{local % 24 < 12 ? '▌' : ''}</span>
+      </pre>
+      {scene.note && <div style={{ marginTop: 22, padding: '18px 22px', borderLeft: `8px solid ${theme.palette.accent}`, background: `${theme.palette.accent}22`, fontSize: 32, lineHeight: 1.3, color: theme.palette.text }}>{scene.note}</div>}
+    </div>
+  );
+}
+
 function SceneBody(ctx: Ctx) {
   const v = ctx.scene.visual;
+  if (v === 'code') return TutorialCode(ctx);
+  if (v === 'step') return TutorialStep(ctx);
   if (v === 'stat') return Stat(ctx);
   if (v === 'quote') return Quote(ctx);
   if (v === 'cta') return Cta(ctx);

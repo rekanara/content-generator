@@ -87,3 +87,20 @@ test('buildSlides: JPEG cover gets the correct data-URI mime', () => {
   const htmls = buildSlides(T, DRAFT, jpeg);
   assert.ok(htmls[0]!.startsWith('<body>FIRST data:image/jpeg;base64,'));
 });
+
+test('buildSlides: tutorial code auto-injected when template has no code token; escaped; prompt colored', () => {
+  const d = { slides: [{ headline: 'H', body: 'B', step: 1, code: '$ npm i <pkg>', note: 'hati-hati' }, { headline: 'x', body: 'y' }] };
+  const [first, second] = buildSlides({ body: '<body>{{headline}}</body>' }, d);
+  assert.match(first!, /class="cg-code"/);
+  assert.match(first!, /npm i &lt;pkg&gt;/);
+  assert.match(first!, /color:#4ade80">\$ </);
+  assert.match(first!, /hati-hati/);
+  assert.ok(!second!.includes('cg-code'));
+});
+
+test('buildSlides: explicit {{step}} {{code_block}} tokens — no double panel', () => {
+  const d = { slides: [{ headline: 'H', body: 'B', step: 2, code: 'openclaw status' }] };
+  const [h] = buildSlides({ body: '<body>#{{step}} {{code_block}}</body>' }, d);
+  assert.match(h!, /^<body>#2 <div class="cg-code"/);
+  assert.equal(h!.match(/cg-code/g)!.length, 1);
+});

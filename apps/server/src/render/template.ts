@@ -131,9 +131,49 @@ export async function anyActiveCoverTemplate(platform: Platform, groupId: string
 //             its image is a broken promise; fail-safe renders it as a normal body slide)
 //   last    → html_last (when present; no image dependency)
 //   middle  → body html
+// Tutorial slide extras. Templates may place {{step}} {{code}} {{note}} themselves; a template
+// that does not mention {{code}} still shows the command via an injected monospace panel
+// (a tutorial slide without its command is broken content, not a style choice).
+type SlideExtra = { step?: number | null; code?: string | null; note?: string | null; photo_uri?: string | null; photo_credit?: string | null };
+
+export function codePanel(code: string, note: string): string {
+  const lines = code.split('\n').map((l) => {
+    const m = l.match(/^(\s*\$\s?)(.*)$/);
+    return m ? `<span style="color:#4ade80">${esc(m[1]!)}</span>${esc(m[2]!)}` : esc(l);
+  }).join('\n');
+  const noteHtml = note ? `<div style="margin-top:18px;padding:14px 18px;border-left:6px solid #f59e0b;background:rgba(245,158,11,.12);color:#fde68a;font:500 26px/1.35 -apple-system,'Helvetica Neue',sans-serif;white-space:pre-wrap">${esc(note)}</div>` : '';
+  return `<div class="cg-code" style="position:absolute;left:70px;right:70px;bottom:70px;z-index:5">`
+    + `<pre style="margin:0;padding:26px 30px;border-radius:14px;background:#0b0f14;border:2px solid #1f2937;color:#e5e7eb;font:500 28px/1.45 'JetBrains Mono','SFMono-Regular',Menlo,monospace;white-space:pre-wrap;word-break:break-word">${lines}</pre>${noteHtml}</div>`;
+}
+
+function photoPanel(uri: string, credit: string): string {
+  const cap = credit ? `<div style="position:absolute;right:16px;bottom:14px;padding:6px 9px;border-radius:6px;background:rgba(0,0,0,.55);color:#fff;font:600 18px/1 -apple-system,'Helvetica Neue',sans-serif">${esc(credit)}</div>` : '';
+  return `<div class="cg-photo" style="position:absolute;left:70px;right:70px;top:86px;height:430px;border-radius:22px;overflow:hidden;background:#111;z-index:1"><img src="${uri}" style="width:100%;height:100%;object-fit:cover;display:block">${cap}</div>`;
+}
+
+function fillSlide(html: string, vars: Record<string, string>, extra: SlideExtra, raw: Record<string, string> = {}): string {
+  const code = extra.code?.trim() ?? '';
+  const note = extra.note?.trim() ?? '';
+  const photo = extra.photo_uri?.trim() ?? '';
+  const credit = extra.photo_credit?.trim() ?? '';
+  const v = { ...vars, step: extra.step ? String(extra.step) : '', code, note, photo_credit: credit };
+  const out = fill(html, v, { ...raw, photo, photo_block: photo ? photoPanel(photo, credit) : '', code_block: code ? codePanel(code, note) : '' });
+  // cover page shows the source photo via {{image}} — still needs its credit
+  const creditOnly = !photo && credit && !/\{\{\s*photo_credit\s*\}\}/.test(html)
+    ? `<div class="cg-credit" style="position:absolute;right:24px;bottom:20px;z-index:6;padding:6px 9px;border-radius:6px;background:rgba(0,0,0,.55);color:#fff;font:600 18px/1 -apple-system,'Helvetica Neue',sans-serif">${esc(credit)}</div>`
+    : '';
+  const blocks = [
+    creditOnly,
+    // auto-injected photo sits on top — push the template's text below it so nothing overlaps
+    photo && !/\{\{\s*(photo|photo_block)\s*\}\}/.test(html) ? `<style>body{padding-top:560px!important;justify-content:flex-start!important}</style>${photoPanel(photo, credit)}` : '',
+    code && !/\{\{\s*(code|code_block)\s*\}\}/.test(html) ? codePanel(code, note) : '',
+  ].filter(Boolean).join('');
+  return blocks ? (/<\/body>/i.test(out) ? out.replace(/<\/body>/i, `${blocks}</body>`) : out + blocks) : out;
+}
+
 export function buildSlides(
   templates: { body: string; first?: string | null; last?: string | null },
-  c: CarouselOut,
+  c: { slides: ({ headline: string; body: string } & SlideExtra)[] },
   coverImage?: Buffer,
 ): SlideHtml[] {
   const total = c.slides.length;
@@ -142,11 +182,11 @@ export function buildSlides(
   return c.slides.map((s, i) => {
     const vars = { headline: s.headline, body: s.body, index: String(i + 1), total: String(total) };
     if (i === 0 && coverUri && templates.first) {
-      return fill(templates.first, vars, { image: coverUri });
+      return fillSlide(templates.first, vars, s, { image: coverUri });
     }
     if (i === last && total >= 2 && templates.last) {
-      return fill(templates.last, vars);
+      return fillSlide(templates.last, vars, s);
     }
-    return fill(templates.body, vars);
+    return fillSlide(templates.body, vars, s);
   });
 }

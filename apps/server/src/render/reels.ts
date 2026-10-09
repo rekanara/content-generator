@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
 import { sql } from '../db/pool.ts';
 import { sceneVisual, type ReelsOut } from '../schema.ts';
+import { tutorialSceneVisual, type TutorialReelsOut } from '../tutorial.ts';
 import { ttsToFile, type WordTiming } from '../tts.ts';
 import type { GroupCfg } from '../groups.ts';
 import { ffprobeDurationArgs, segmentArgs, concatArgs, audioConcatArgs, muxArgs } from './ffmpeg.ts';
@@ -85,9 +86,13 @@ async function renderWithRemotion(
   draft: ReelsOut, audios: Audio[], outDir: string, finalMp4: string, theme: ReturnType<typeof parseTheme>,
   bg: BackgroundFile | undefined, postId: string,
 ): Promise<void> {
+  const isTutorial = draft.scenes.some((sc) => 'step' in sc || 'code' in sc || 'note' in sc);
   const timeline = buildTimeline(draft.scenes.map((sc, i) => ({
     overlay_text: sc.overlay_text, narration: sc.narration, durationSec: audios[i]!.dur,
-    visual: sceneVisual(sc.visual), words: audios[i]!.words,
+    visual: isTutorial ? tutorialSceneVisual(sc as TutorialReelsOut['scenes'][number], i, draft.scenes.length) : sceneVisual(sc.visual), words: audios[i]!.words,
+    step: (sc as TutorialReelsOut['scenes'][number]).step,
+    code: (sc as TutorialReelsOut['scenes'][number]).code,
+    note: (sc as TutorialReelsOut['scenes'][number]).note,
   })));
   const silent = `${outDir}/video-silent.mp4`;
   await renderRemotionVideo(timeline, theme, silent, bg, postId);

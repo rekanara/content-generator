@@ -1,6 +1,7 @@
 // Prompt builder — pure functions, unit-testable. Output language follows the pillar.
 import type { Format, Platform } from './state.ts';
 import type { Slide, Scene, CarouselOut, ReelsOut } from './schema.ts';
+import type { TutorialFormat, TutorialDraft } from './tutorial.ts';
 
 type Msg = { role: 'system' | 'user'; content: string };
 
@@ -287,6 +288,59 @@ ${back(format)}
 Return JSON with the EXACT same structure (keys and slide/scene counts may change if it improves the result), final revised version ready to publish.
 Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid publish, below 7 = still weak) and "notes" (one short sentence, the weakest aspect of the ORIGINAL draft).`,
     },
+  ];
+}
+
+export function tutorialWriterPrompt(p: {
+  topic: string;
+  level: 'beginner' | 'intermediate';
+  language: string;
+  format: TutorialFormat;
+  sources: { url: string; title: string; text: string }[];
+  feedback?: string;
+}): Msg[] {
+  const sourceText = p.sources.map((s, i) => `SOURCE ${i + 1}: ${s.title}\nURL: ${s.url}\n${s.text.slice(0, 8000)}`).join('\n\n---\n\n').slice(0, 24_000);
+  const lang = ({ id: 'Indonesian', en: 'English', ms: 'Malay', ja: 'Japanese', ko: 'Korean', zh: 'Chinese', es: 'Spanish' } as Record<string, string>)[p.language] ?? p.language;
+  const shape = p.format === 'reels'
+    ? `Reels tutorial. 5-8 scenes. Keep total narration under 150 words; each scene narration under 24 words. Commands/config go in "code" ONLY, never read code aloud in narration.
+JSON: {"caption":{"title":"...","subtitle":"...","cta":"...","tags":["#..."]},"scenes":[{"overlay_text":"short screen text","narration":"spoken explanation","visual":"hook|step|code|cta|point","step":1,"code":"optional exact command/config","note":"optional warning or caveat"}]}`
+    : `Carousel tutorial. 6-12 slides. Slide 1 cover, slide 2 prerequisites, middle numbered steps, final verification/troubleshooting/CTA.
+JSON: {"caption":{"title":"...","subtitle":"...","cta":"...","tags":["#..."]},"slides":[{"headline":"short","body":"clear explanation","step":1,"code":"optional exact command/config","note":"optional warning or caveat"}]}`;
+  return [
+    { role: 'system', content: `You write accurate technical tutorials from official sources. Never invent commands, flags, URLs, versions, config keys, or requirements. ${R}` },
+    { role: 'user', content: `Topic: ${p.topic}
+Level: ${p.level}
+Output language: ${lang}
+
+SOURCE MATERIAL (official docs, source of truth):
+${sourceText}
+
+${p.feedback ? `PREVIOUS DRAFT FAILED CHECKS. Fix every item below:\n${p.feedback}\n\n` : ''}Format:
+${shape}
+
+Rules:
+- Every command, flag, package name, and config key in code must appear in the source material above.
+- Use placeholders for secrets: <YOUR_API_KEY>, <YOUR_TOKEN>, <PROJECT_ID>.
+- Number real setup steps with step: 1, 2, 3... in order. Non-step cover/prereq/CTA may omit step.
+- If code contains sudo, rm -rf, curl|sh, chmod 777, git reset --hard, or destructive DB commands, add note explaining the risk.
+- Keep code short enough for the screen. Split long commands into smaller steps.
+- Include a verification step (how to know it worked) and one common troubleshooting clue.
+- Caption subtitle must say this is based on official docs; code will append source URLs later.
+
+${HASHTAG_RULES}` },
+  ];
+}
+
+export function tutorialCriticPrompt(format: TutorialFormat, draft: TutorialDraft): Msg[] {
+  return [
+    { role: 'system', content: `You are a senior technical editor. Fix tutorial clarity while preserving JSON shape. Do not invent commands or flags. ${R}` },
+    { role: 'user', content: `Format: ${format}
+
+Draft:
+${JSON.stringify(draft)}
+
+Revise for: correct order, missing prerequisites, a verification step, troubleshooting, concise copy, commands only in code, and clear beginner/intermediate pacing.
+Return JSON with the same top-level structure. Add "score" (0-10 integer) and "notes" (one short sentence about the original weakness).` },
   ];
 }
 

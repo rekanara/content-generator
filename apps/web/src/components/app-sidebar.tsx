@@ -18,6 +18,7 @@ import {
   CoinsIcon,
   ActivityIcon,
   InboxIcon,
+  BookOpenIcon,
 } from "lucide-react"
 
 import {
@@ -53,6 +54,9 @@ const SECTIONS: { label: string; views: View[] }[] = [
   ] },
   { label: "News", views: [
     { id: "news", label: "News topics", icon: <NewspaperIcon />, hint: "Sources, rules, valid items" },
+  ] },
+  { label: "Tutorials", views: [
+    { id: "tutorials", label: "Tutorials", icon: <BookOpenIcon />, hint: "Docs-grounded how-tos" },
   ] },
   { label: "Manual content", views: [
     { id: "overrides", label: "Overrides", icon: <SparklesIcon />, hint: "Your own content for a date" },

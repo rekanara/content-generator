@@ -12,7 +12,7 @@ import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
 import { imagePrice } from '../llm-costs.ts';
 import { imagePrompt } from '../prompts.ts';
-import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, type TemplateSet } from './template.ts';
+import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, imageMime, type TemplateSet } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
@@ -66,6 +66,28 @@ async function getCover(cfg: GroupCfg, postId: string, topic: string, required: 
   }
 }
 
+// Source photos stored at research time (news topics with use_source_images): photo-NN.jpg
+// → body slides 2..n-1 in order. When the template has no cover page, the stored cover.png
+// goes on slide 1 as an inline photo instead (otherwise the lead photo would be lost).
+// photo_credit set = the photos came from the article → every photo carries the credit.
+async function withSourcePhotos(cfg: GroupCfg, postId: string, draft: CarouselOut, coverInline: boolean, credit: string | null): Promise<CarouselOut & { slides: (CarouselOut['slides'][number] & { photo_uri?: string; photo_credit?: string })[] }> {
+  if (!credit) return draft;
+  const uri = (b: Buffer) => `data:${imageMime(b)};base64,${b.toString('base64')}`;
+  const slides = draft.slides.map((s) => ({ ...s })) as (CarouselOut['slides'][number] & { photo_uri?: string; photo_credit?: string })[];
+  const base = `${cfg.slug}/posts/${postId}/`;
+  if (slides[0] && await artifactExists(`${base}cover.png`)) {
+    if (coverInline) slides[0].photo_uri = uri(await getArtifactBuffer(`${base}cover.png`));
+    slides[0].photo_credit = credit; // cover page: credit badge over the {{image}} photo
+  }
+  for (let i = 1; i < slides.length - 1; i++) {
+    const key = `${base}photo-${String(i + 1).padStart(2, '0')}.jpg`;
+    if (!(await artifactExists(key))) continue;
+    slides[i]!.photo_uri = uri(await getArtifactBuffer(key));
+    slides[i]!.photo_credit = credit;
+  }
+  return { ...draft, slides };
+}
+
 // Render + upload. Returns the uploaded object keys.
 export async function renderCarousel(
   postId: string,
@@ -85,7 +107,7 @@ export async function renderCarousel(
   //   3. pool pick        — fresh render: random among active templates for the
   //                         format, avoiding the group's last-used one (variety)
   // A dangling id (template deleted) falls through to the next step.
-  const [ownRow] = await sql<{ template_id: string | null; is_news: boolean | null }[]>`select p.template_id, pi.is_news
+  const [ownRow] = await sql<{ template_id: string | null; is_news: boolean | null; photo_credit: string | null }[]>`select p.template_id, pi.is_news, p.photo_credit
     from posts p left join pillars pi on pi.id = p.pillar_id
     where p.id = ${postId}`;
   const pinnedId = opts.templateId ?? ownRow?.template_id ?? null;
@@ -95,7 +117,7 @@ export async function renderCarousel(
     : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`), ownRow?.is_news === true);
   const set = picked.set;
   const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
-  const htmls = buildSlides(set, draft, cover?.buf);
+  const htmls = buildSlides(set, await withSourcePhotos(cfg, postId, draft, !set.first, ownRow?.photo_credit ?? null), cover?.buf);
 
   const browser = await puppeteer.launch();
   try {

@@ -1,7 +1,7 @@
 // Small data-fetch hooks — no react-query, stdlib fetch + useEffect.
 import { useCallback, useEffect, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
-import type { Promotion, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan, Idea, NewsTopic, NewsTopicDetail } from '@workspace/shared';
+import type { Promotion, Pillar, PostSummary, PostDetail, StyleSample, Template, TemplateDetail, Dashboard, CronSettings, Group, CalendarRun, Override, Plan, Idea, NewsTopic, NewsTopicDetail, Tutorial } from '@workspace/shared';
 
 export function useApi<T>(fetcher: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -31,6 +31,7 @@ export const useCalendar = (slug: string) => useApi<CalendarRun[]>(() => api.cal
 export const usePost = (slug: string, id: string | null) => useApi<PostDetail>(() => id ? api.post(slug, id) : Promise.reject(new Error('no id')), [slug, id]);
 export const useStyles = (slug: string) => useApi<StyleSample[]>(() => api.styles(slug), [slug]);
 export const useTemplates = (slug: string) => useApi<Template[]>(() => api.templates(slug), [slug]);
+export const useTutorials = (slug: string) => useApi<Tutorial[]>(() => api.tutorials(slug), [slug]);
 export const useOverrides = (slug: string) => useApi<Override[]>(() => api.overrides(slug), [slug]);
 export const usePlans = (slug: string) => useApi<Plan[]>(() => api.plans(slug), [slug]);
 export const useTemplate = (slug: string, id: string | null) => useApi<TemplateDetail>(() => id ? api.template(slug, id) : Promise.reject(new Error('no id')), [slug, id]);

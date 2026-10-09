@@ -21,7 +21,7 @@ export function isPrivateHost(host: string): boolean {
 }
 
 // Main-content HTML → plain text. Prefers <article>/<main>, drops chrome + scripts.
-export function htmlToText(html: string): string {
+export function htmlToText(html: string, max = MAX_TEXT): string {
   const pick = html.match(/<article[\s\S]*?<\/article>/i)?.[0] ?? html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? html;
   return pick
     .replace(/<(script|style|noscript|svg|nav|header|footer|aside|form|iframe)[\s\S]*?<\/\1>/gi, ' ')
@@ -32,7 +32,7 @@ export function htmlToText(html: string): string {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n+/g, '\n')
     .trim()
-    .slice(0, MAX_TEXT);
+    .slice(0, max);
 }
 
 // Fail-safe: any error → '' (research falls back to the RSS summary, never blocks the run).
@@ -78,9 +78,90 @@ export function htmlMeta(html: string): { title: string; summary: string; publis
   return { title: title.slice(0, 300), summary: summary.slice(0, 600), publishedAt: d && !Number.isNaN(d.getTime()) ? d : null, canonical };
 }
 
+// Article photos (pure): og/twitter image first (the editor's chosen lead photo), then <img>
+// inside the article body. Drops chrome (logos, icons, avatars, ads, tracking pixels), vector/
+// animated formats, and images declared smaller than 400px. Absolute, deduped, capped.
+const JUNK_IMG = /(logo|icon|avatar|sprite|favicon|badge|banner-ad|\/ads?\/|pixel|tracking|placeholder|blank|spacer|emoji|gravatar)/i;
+
+export function extractImageUrls(html: string, baseUrl: string, max = 5): string[] {
+  const out: string[] = [];
+  const push = (raw: string | undefined) => {
+    if (!raw) return;
+    let u: URL;
+    try { u = new URL(decode(raw), baseUrl); } catch { return; }
+    if (u.protocol !== 'https:' && u.protocol !== 'http:') return;
+    if (/\.(svg|gif|ico)(\?|$)/i.test(u.pathname) || JUNK_IMG.test(u.href)) return;
+    const s = u.toString();
+    if (!out.includes(s)) out.push(s);
+  };
+  push(metaContent(html, 'og:image') || undefined);
+  push(metaContent(html, 'og:image:url') || undefined);
+  push(metaContent(html, 'twitter:image') || undefined);
+  const body = html.match(/<article[\s\S]*?<\/article>/i)?.[0] ?? html.match(/<main[\s\S]*?<\/main>/i)?.[0] ?? '';
+  for (const tag of body.match(/<img\b[^>]*>/gi) ?? []) {
+    const attr = (n: string) => tag.match(new RegExp(`\\b${n}=["']([^"']+)["']`, 'i'))?.[1];
+    const w = Number(attr('width')), h = Number(attr('height'));
+    if ((w && w < 400) || (h && h < 300)) continue;
+    const srcset = attr('srcset') ?? attr('data-srcset');
+    const best = srcset?.split(',').map((p) => p.trim().split(/\s+/)).sort((a, b) => (parseInt(b[1] ?? '0') || 0) - (parseInt(a[1] ?? '0') || 0))[0]?.[0];
+    push(best ?? attr('data-src') ?? attr('data-lazy-src') ?? attr('src'));
+  }
+  return out.slice(0, max);
+}
+
+// Pixel size from image bytes (pure): PNG IHDR, JPEG SOFn, WebP VP8/VP8L/VP8X. null = unknown.
+export function imageSize(b: Buffer): { w: number; h: number } | null {
+  if (b.length >= 24 && b.readUInt32BE(0) === 0x89504e47) return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  if (b.length >= 4 && b[0] === 0xff && b[1] === 0xd8) {
+    let i = 2;
+    while (i + 9 < b.length) {
+      if (b[i] !== 0xff) { i++; continue; }
+      const m = b[i + 1]!;
+      if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) return { h: b.readUInt16BE(i + 5), w: b.readUInt16BE(i + 7) };
+      if (m === 0xd8 || m === 0x01 || (m >= 0xd0 && m <= 0xd7)) { i += 2; continue; }
+      i += 2 + b.readUInt16BE(i + 2);
+    }
+    return null;
+  }
+  if (b.length >= 30 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') {
+    const kind = b.toString('ascii', 12, 16);
+    if (kind === 'VP8 ') return { w: b.readUInt16LE(26) & 0x3fff, h: b.readUInt16LE(28) & 0x3fff };
+    if (kind === 'VP8L') { const v = b.readUInt32LE(21); return { w: (v & 0x3fff) + 1, h: ((v >> 14) & 0x3fff) + 1 }; }
+    if (kind === 'VP8X') return { w: (b.readUIntLE(24, 3)) + 1, h: (b.readUIntLE(27, 3)) + 1 };
+  }
+  return null;
+}
+
+const MAX_IMG = 8_000_000;
+const MIN_IMG_W = 600;
+
+// SSRF-safe image download (same hop checks as pages). Rejects non-images, oversized files,
+// and anything narrower than 600px (would look blurry on a 1080px slide).
+export async function downloadImage(url: string): Promise<Buffer | null> {
+  try {
+    let u = await safeUrl(url);
+    let res: Response | null = null;
+    for (let hop = 0; u && hop < 4; hop++) {
+      res = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'Mozilla/5.0 (content-generator research bot)', accept: 'image/jpeg,image/png,image/webp' } });
+      const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+      if (!loc) break;
+      u = await safeUrl(loc, u);
+      res = null;
+    }
+    if (!u || !res || !res.ok || !/^image\/(jpeg|png|webp)/.test(res.headers.get('content-type') ?? '')) return null;
+    if (Number(res.headers.get('content-length') ?? 0) > MAX_IMG) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > MAX_IMG) return null;
+    const size = imageSize(buf);
+    return size && size.w >= MIN_IMG_W ? buf : null;
+  } catch {
+    return null;
+  }
+}
+
 // SSRF-safe fetch of an article page (manual redirects, every hop host-checked).
 // Returns the final URL + raw HTML, or null on any failure.
-async function fetchHtml(url: string): Promise<{ url: string; html: string } | null> {
+async function fetchHtml(url: string, allowText = false): Promise<{ url: string; html: string; type: string } | null> {
   try {
     let u = await safeUrl(url);
     let res: Response | null = null;
@@ -88,25 +169,44 @@ async function fetchHtml(url: string): Promise<{ url: string; html: string } | n
       res = await fetch(u, {
         redirect: 'manual',
         signal: AbortSignal.timeout(15_000),
-        headers: { 'user-agent': 'Mozilla/5.0 (content-generator research bot)', accept: 'text/html' },
+        headers: { 'user-agent': 'Mozilla/5.0 (content-generator research bot)', accept: allowText ? 'text/html, text/markdown, text/plain' : 'text/html' },
       });
       const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (!loc) break;
       u = await safeUrl(loc, u);
       res = null;
     }
-    if (!u || !res || !res.ok || !(res.headers.get('content-type') ?? '').includes('html')) return null;
+    const type = res?.headers.get('content-type') ?? '';
+    const ok = type.includes('html') || (allowText && /text\/(plain|markdown|x-markdown)/.test(type));
+    if (!u || !res || !res.ok || !ok) return null;
     const buf = await res.arrayBuffer();
     if (buf.byteLength > MAX_BYTES) return null;
-    return { url: u.toString(), html: new TextDecoder().decode(buf) };
+    return { url: u.toString(), html: new TextDecoder().decode(buf), type };
   } catch {
     return null;
   }
 }
 
+// Tutorial source: official docs page (html) or raw README/markdown (text). Larger text
+// budget than news — install commands often sit deep in the page, and provenance checks
+// every command against this text.
+const DOC_TEXT = 60_000;
+export async function fetchDocSource(url: string): Promise<{ url: string; title: string; text: string } | null> {
+  const r = await fetchHtml(url, true);
+  if (!r) return null;
+  if (r.type.includes('html')) return { url: r.url, title: htmlMeta(r.html).title || r.url, text: htmlToText(r.html, DOC_TEXT) };
+  return { url: r.url, title: new URL(r.url).pathname.split('/').filter(Boolean).pop() || r.url, text: r.html.slice(0, DOC_TEXT) };
+}
+
 export async function fetchArticleText(url: string): Promise<string> {
   const r = await fetchHtml(url);
   return r ? htmlToText(r.html) : '';
+}
+
+// News research: article text + candidate photo URLs from ONE fetch.
+export async function fetchArticleWithImages(url: string): Promise<{ text: string; images: string[] }> {
+  const r = await fetchHtml(url);
+  return r ? { text: htmlToText(r.html), images: extractImageUrls(r.html, r.url) } : { text: '', images: [] };
 }
 
 // Full article for the "fetch one URL" flow: final URL, metadata, and body text.

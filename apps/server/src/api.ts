@@ -6,7 +6,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
 import { sql } from './db/pool.ts';
-import { enqueue, queueStatus } from './queue.ts';
+import { enqueue, queueStatus, requestTutorialRun } from './queue.ts';
 import { readRun } from './progress.ts';
 import { chatJson, writerModel } from './llm.ts';
 import { overridePolishPrompt, pillarSuggestPrompt, styleSuggestPrompt } from './prompts.ts';
@@ -20,7 +20,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, PillarSuggestInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput, TutorialInput, TutorialGenerateInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -36,6 +36,7 @@ import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTem
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate, setPromotionCaption } from './repos/promotions.ts';
+import { listTutorials, createTutorial, deleteTutorial, getTutorial } from './repos/tutorials.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
 import { autofillNewsTopic, startIngest, getIngestProgress, fetchNewsUrl } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
@@ -442,7 +443,13 @@ g.post('/:slug/posts/:id/regenerate', async (c) => {
     if (!ok) return c.json({ error: 'post left awaiting concurrently' }, 409);
     await addEvent(id, gr(c).id, 'rejected', 'regenerate via FE').catch(() => {});
   }
-  enqueue({ kind: 'generate', slug: gr(c).slug, notifyChat: true, source: 'regen' });
+  const [row] = await sql<{ tutorial_id: string | null; format: string }[]>`select tutorial_id, format from posts where id = ${id} and group_id = ${gr(c).id}`;
+  if (row?.tutorial_id) {
+    const ok = await requestTutorialRun(gr(c).slug, gr(c).id, row.tutorial_id, row.format === 'reels' ? 'reels' : 'carousel');
+    if (!ok) return c.json({ error: 'tutorial is already queued or missing' }, 409);
+  } else {
+    enqueue({ kind: 'generate', slug: gr(c).slug, notifyChat: true, source: 'regen' });
+  }
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
@@ -529,6 +536,46 @@ g.delete('/:slug/ideas/:id', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   await deleteIdea(gr(c).id, id);
   return c.json({ ok: true });
+});
+
+// ---------- tutorials ----------
+g.get('/:slug/tutorials', async (c) => c.json(await listTutorials(gr(c).id)));
+
+g.post('/:slug/tutorials', async (c) => {
+  const parsed = TutorialInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if (parsed.data.template_id) {
+    const t = await getTemplate(gr(c).id, parsed.data.template_id);
+    if (!t) return c.json({ error: 'template not found' }, 404);
+    if (t.type !== 'regular' || !['ig-carousel', 'ig-news-card'].includes(t.format)) return c.json({ error: 'tutorial carousel template must be regular ig-carousel or ig-news-card' }, 400);
+  }
+  if (parsed.data.template_reel_id) {
+    const t = await getTemplate(gr(c).id, parsed.data.template_reel_id);
+    if (!t) return c.json({ error: 'reel template not found' }, 404);
+    if (t.type !== 'regular' || t.format !== 'reel') return c.json({ error: 'tutorial reel template must be a regular reel template' }, 400);
+  }
+  return c.json(await createTutorial(gr(c).id, parsed.data), 201);
+});
+
+g.delete('/:slug/tutorials/:id', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const ok = await deleteTutorial(gr(c).id, id);
+  if (!ok) return c.json({ error: 'tutorial not found or queued' }, 404);
+  return c.json({ ok: true });
+});
+
+g.post('/:slug/tutorials/:id/generate', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = TutorialGenerateInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const t = await getTutorial(gr(c).id, id);
+  if (!t) return c.json({ error: 'tutorial not found' }, 404);
+  if (parsed.data.format === 'reels' && !t.template_reel_id) return c.json({ error: 'pick a reel template first' }, 400);
+  const ok = await requestTutorialRun(gr(c).slug, gr(c).id, id, parsed.data.format);
+  if (!ok) return c.json({ error: 'tutorial is already queued' }, 409);
+  return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
 // ---------- news ----------
@@ -630,7 +677,7 @@ g.put('/:slug/news/topics/:id/template', async (c) => {
     if (!t) return c.json({ error: 'reel template not found' }, 404);
     if (t.type !== 'regular' || t.format !== 'reel') return c.json({ error: 'reel template must be a regular reel template' }, 400);
   }
-  const ok = await setNewsTopicTemplate(gr(c).id, id, parsed.data.template_id, parsed.data.template_reel_id);
+  const ok = await setNewsTopicTemplate(gr(c).id, id, parsed.data.template_id, parsed.data.template_reel_id, parsed.data.use_source_images);
   if (!ok) return c.json({ error: 'news topic not found' }, 404);
   return c.json({ ok: true });
 });

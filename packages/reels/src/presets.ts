@@ -14,6 +14,18 @@ export const PRESETS: Record<string, { name: string; theme: ReelsTheme }> = {
       brand: { handle: '', position: 'bottom' },
     },
   },
+  'terminal-tutorial': {
+    name: 'Terminal Tutorial',
+    theme: {
+      layout: 'minimal',
+      palette: { bg: '#05080c', bg2: '#0b1220', text: '#e5e7eb', muted: '#94a3b8', accent: '#22c55e' },
+      font: { family: 'JetBrains Mono', weight: 800, scale: 0.92 },
+      captions: { style: 'word-highlight', position: 'bottom', case: 'preserve' },
+      transition: { durationFrames: 6 },
+      progressBar: true,
+      brand: { handle: '', position: 'bottom' },
+    },
+  },
   'brutalist-dev': {
     name: 'Brutalist Dev',
     theme: {
@@ -76,4 +88,4 @@ export const PRESETS: Record<string, { name: string; theme: ReelsTheme }> = {
   },
 };
 
-export const PRESET_ORDER = ['editorial-news', 'brutalist-dev', 'policy-brief', 'minimal-calm', 'kinetic-energy', 'soft-editorial'] as const;
+export const PRESET_ORDER = ['terminal-tutorial', 'editorial-news', 'brutalist-dev', 'policy-brief', 'minimal-calm', 'kinetic-energy', 'soft-editorial'] as const;

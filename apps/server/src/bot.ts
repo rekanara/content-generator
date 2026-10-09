@@ -4,7 +4,7 @@
 // Approval-gate callbacks arrive as callback_query updates (inline keyboard buttons):
 //   approve:<postId> / reject:<postId>
 import { getUpdates, replyGlobal, answerCallback, registerCommands, downloadTelegramFile, editMessageButtons } from './telegram.ts';
-import { enqueue, queueStatus, bootCleanup } from './queue.ts';
+import { enqueue, queueStatus, bootCleanup, requestTutorialRun } from './queue.ts';
 import { sql } from './db/pool.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { uploadPostArtifact } from './storage.ts';
@@ -728,7 +728,7 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     return;
   }
 
-  const [post] = await sql`select p.id, p.group_id, p.status, p.starred, g.slug
+  const [post] = await sql`select p.id, p.group_id, p.status, p.starred, p.tutorial_id, p.format, g.slug
     from posts p join groups g on g.id = p.group_id where p.id = ${cb.postId}`;
   if (!post) {
     await replyGlobal(chatId, `Post ${cb.postId} not found`);
@@ -767,7 +767,9 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     }
     await addEvent(post.id, post.group_id, 'rejected', 'regenerate via telegram').catch(() => {});
     await stamp('Regenerating…');
-    enqueue({ kind: 'generate', slug: post.slug, notifyChat: true, source: 'telegram' });
+    // a tutorial regenerates as the SAME tutorial + format (never a random pillar post)
+    if (post.tutorial_id) await requestTutorialRun(post.slug, post.group_id, post.tutorial_id, post.format === 'reels' ? 'reels' : 'carousel');
+    else enqueue({ kind: 'generate', slug: post.slug, notifyChat: true, source: 'telegram' });
     await replyGlobal(chatId, `Rejected + regenerating (${post.slug}) — hasilnya menyusul.`);
   } else if (cb.t === 'star') {
     // allowed on any delivered-ish state — starring is metadata, not a status op

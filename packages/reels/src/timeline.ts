@@ -1,5 +1,5 @@
 // Pure timeline math: scenes (+ audio durations, optional spoken word timings) → frames.
-export type SceneVisual = 'hook' | 'point' | 'stat' | 'quote' | 'cta';
+export type SceneVisual = 'hook' | 'point' | 'stat' | 'quote' | 'cta' | 'step' | 'code';
 export type SpokenWord = { text: string; start: number; end: number };
 export type TimelineSceneInput = {
   overlay_text: string;
@@ -7,6 +7,9 @@ export type TimelineSceneInput = {
   durationSec: number;
   visual?: SceneVisual;
   words?: SpokenWord[]; // seconds from scene start (TTS WordBoundary); absent → spread evenly
+  step?: number;  // tutorial: step number badge
+  code?: string;  // tutorial: shown on screen, never narrated
+  note?: string;  // tutorial: warning line under the code panel
 };
 export type TimelineWord = { text: string; startFrame: number; endFrame: number };
 export type TimelineScene = Omit<TimelineSceneInput, 'words'> & {

@@ -109,8 +109,8 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   if (!topic) return null
   const newsTemplates = (templates ?? []).filter((t) => t.type === "regular" && ["ig-news-card", "ig-carousel"].includes(t.format))
   const reelTemplates = (templates ?? []).filter((t) => t.type === "regular" && t.format === "reel")
-  const saveTemplates = (t: { template_id: string | null; template_reel_id: string | null }) =>
-    api.saveNewsTemplate(slug, id, t).then(() => { setMsg("template saved"); reload() }).catch((err) => setMsg(err instanceof ApiError ? err.message : "template save failed"))
+  const saveTemplates = (t: { template_id: string | null; template_reel_id: string | null; use_source_images?: boolean }) =>
+    api.saveNewsTemplate(slug, id, { use_source_images: topic.use_source_images, ...t }).then(() => { setMsg("template saved"); reload() }).catch((err) => setMsg(err instanceof ApiError ? err.message : "template save failed"))
   const validCount = topic.items.filter((i) => i.status === "valid").length
 
   return (
@@ -129,6 +129,10 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
             <option value="">No reel template</option>
             {reelTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · reel{t.is_active ? "" : " · inactive"}</option>)}
           </select>
+          <label className="flex h-8 items-center gap-2 rounded-md border px-2 text-sm" title="Use the article's photos as cover/body images (credit added, post waits for approval)">
+            <input type="checkbox" checked={topic.use_source_images} onChange={(e) => saveTemplates({ template_id: topic.template_id, template_reel_id: topic.template_reel_id, use_source_images: e.target.checked })} />
+            Source photos
+          </label>
           <Button variant="outline" size="sm" disabled={autofilling} onClick={autofill}>{autofilling ? "Autofilling…" : "AI autofill"}</Button>
           <Button variant="outline" size="sm" disabled={ingesting} onClick={ingest}>{ingesting ? "Fetching…" : "Fetch latest"}</Button>
           <Button variant="outline" size="sm" onClick={() => setUrlOpen(true)}>Fetch one URL</Button>

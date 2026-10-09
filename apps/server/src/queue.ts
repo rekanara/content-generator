@@ -18,6 +18,8 @@ import { getPromotion } from './repos/promotions.ts';
 import { deliverPromotion } from './usecases/promotions.ts';
 import { getTemplate } from './repos/templates.ts';
 import { getPlanByDate } from './repos/plans.ts';
+import { getTutorial, markTutorialQueued, markTutorialGenerated, markTutorialFailed, failOrphanTutorials } from './repos/tutorials.ts';
+import { generateTutorialDraft } from './usecases/tutorials.ts';
 import { resolvePlannedSlot } from './pipeline.ts';
 import { jakartaToday } from './cronmath.ts';
 import { resolveCaptionParts, appendCaptionParts } from './schema.ts';
@@ -25,6 +27,7 @@ import type { Override } from '@workspace/shared';
 
 type Job =
   | { kind: 'generate'; slug: string; forced?: { platform: Platform; format?: Format }; notifyChat: boolean; source?: string; brief?: string; newsTopicId?: string; newsItemId?: string; newsLanguage?: string; templateId?: string }
+  | { kind: 'tutorialGenerate'; slug: string; tutorialId: string; format: 'carousel' | 'reels' }
   | { kind: 'resend'; slug: string; postId: string }
   | { kind: 'approve'; slug: string; postId: string }
   | { kind: 'rerender'; slug: string; postId: string }
@@ -65,6 +68,7 @@ async function drain(): Promise<void> {
       try {
         cfg = await getGroupCfg(job.slug);
         if (job.kind === 'generate') await runGenerate(cfg, job.forced, job.notifyChat, job.source, job.brief, job.newsTopicId || job.newsItemId ? { topicId: job.newsTopicId, itemId: job.newsItemId, language: job.newsLanguage } : undefined, job.templateId);
+        else if (job.kind === 'tutorialGenerate') await runTutorialGenerate(cfg, job.tutorialId, job.format);
         else if (job.kind === 'approve') await runApprove(cfg, job.postId);
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
@@ -221,6 +225,52 @@ async function runGenerate(
   }
 }
 
+// Single funnel for tutorial runs (FE generate + Regenerate buttons). Returns false when the
+// tutorial is missing or already has a run in flight.
+export async function requestTutorialRun(slug: string, groupId: string, tutorialId: string, format: 'carousel' | 'reels'): Promise<boolean> {
+  const claimed = await markTutorialQueued(groupId, tutorialId);
+  if (!claimed) return false;
+  enqueue({ kind: 'tutorialGenerate', slug, tutorialId, format });
+  return true;
+}
+
+async function runTutorialGenerate(
+  cfg: Awaited<ReturnType<typeof getGroupCfg>>,
+  tutorialId: string,
+  format: 'carousel' | 'reels',
+): Promise<void> {
+  const t = await getTutorial(cfg.id, tutorialId);
+  if (!t) throw new Error(`tutorial ${tutorialId} not found`);
+  try {
+    const r = await generateTutorialDraft(cfg, t, format, 'web');
+    postRef(r.postId);
+    await markTutorialGenerated(t.id, r.postId);
+    await addEvent(r.postId, cfg.id, 'generated');
+    const slot = { platform: 'instagram' as const, format, pillar_id: '' };
+    const templateId = (format === 'reels' ? t.template_reel_id : t.template_id) ?? undefined;
+    if (templateId) await sql`update posts set template_id = ${templateId} where id = ${r.postId}`;
+    try {
+      if (await needsManualCover(cfg, r.postId, slot)) {
+        await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft));
+        return;
+      }
+      await prepareForApproval(cfg, r.postId, slot, { coverRequired: true, templateId });
+    } catch (e) {
+      if (e instanceof CoverGenerationError) {
+        await parkAwaitingCover(cfg, r.postId, r.topic, slot, firstHeadline(r.draft), e.cause);
+        return;
+      }
+      await markFailed(r.postId, e);
+      await addEvent(r.postId, cfg.id, 'failed', (e as Error).message).catch(() => {});
+      throw e;
+    }
+  } catch (e) {
+    await markTutorialFailed(tutorialId, e).catch(() => {});
+    await notifyRunFailed(cfg, e);
+    throw e;
+  }
+}
+
 // Attach the cover-image cost snapshot to a post's llm_usage (merge; keep existing steps).
 // Image generation happens at render time — this is the single bookkeeping point.
 async function attachCoverCost(postId: string, coverCost: number, coverModel: string | null): Promise<void> {
@@ -299,7 +349,7 @@ async function needsManualCover(
   return !(await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`));
 }
 
-function firstHeadline(draft: CarouselOut | ReelsOut | TextOut): string {
+function firstHeadline(draft: { scenes: { overlay_text: string }[] } | { slides: { headline: string }[] } | TextOut): string {
   if ('scenes' in draft) return draft.scenes[0]?.overlay_text ?? '';
   return 'slides' in draft ? (draft.slides[0]?.headline ?? '') : '';
 }
@@ -309,7 +359,7 @@ function firstHeadline(draft: CarouselOut | ReelsOut | TextOut): string {
 // → gate/deliver. skipCover=true comes from the "Lewati" button — it MUST terminate the
 // cover flow (no second generation attempt → no park loop).
 async function runCoverContinue(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string, skipCover: boolean): Promise<void> {
-  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; body: string }[]>`select platform, format, pillar_id, status, topic, body
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string | null; status: string; topic: string; body: string; tutorial_id: string | null }[]>`select platform, format, pillar_id, status, topic, body, tutorial_id
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
   if (post.status !== 'awaiting_cover') {
@@ -318,10 +368,11 @@ async function runCoverContinue(cfg: Awaited<ReturnType<typeof getGroupCfg>>, po
   const upd = await sql`update posts set status = 'draft'
     where id = ${postId} and group_id = ${cfg.id} and status = 'awaiting_cover' returning id`;
   if (upd.length === 0) throw new Error(`post ${postId} left awaiting_cover concurrently`);
-  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id ?? '' };
   try {
     const resumeOpts = skipCover ? { skipCover: true } : { coverRequired: true };
-    if (cfg.approval_required) await prepareForApproval(cfg, postId, slot, resumeOpts);
+    // tutorials are always human-approved (accuracy risk), regardless of the group gate
+    if (cfg.approval_required || post.tutorial_id) await prepareForApproval(cfg, postId, slot, resumeOpts);
     else await deliver(cfg, postId, slot, true, resumeOpts);
   } catch (e) {
     // model was (re)configured between ask and resume → generation can fail here too
@@ -414,15 +465,15 @@ async function sendApprovalRequest(
 // Approve an awaiting_approval post: send now + advance rotation. On send failure the post
 // STAYS awaiting_approval (tap approve again) — no markFailed, no rotation consumption.
 async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
-  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string }[]>`select platform, format, pillar_id, status
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string | null; status: string; tutorial_id: string | null }[]>`select platform, format, pillar_id, status, tutorial_id
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
   if (post.status !== 'awaiting_approval') {
     throw new Error(`post ${postId} status ${post.status} — cannot approve`);
   }
-  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
+  const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id ?? '' };
   await addEvent(postId, cfg.id, 'approved');
-  await deliver(cfg, postId, slot, true); // artifacts exist — no cover path
+  await deliver(cfg, postId, slot, true, {}, !post.tutorial_id); // artifacts exist — no cover path; tutorials never consume rotation
 }
 
 // Re-render an EXISTING post's body with the CURRENT template (content unchanged —
@@ -432,7 +483,7 @@ async function runApprove(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: 
 //   sent              → resend the new artifacts directly (rotation already consumed — untouched)
 // failed/rejected/draft/queued → refused (/gen is the right tool for those).
 async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId: string): Promise<void> {
-  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; caption: string | null; body: string }[]>`select platform, format, pillar_id, status, topic, caption, body
+  const [post] = await sql<{ platform: Platform; format: Format; pillar_id: string; status: string; topic: string; caption: string | null; body: string; tutorial_id: string | null }[]>`select platform, format, pillar_id, status, topic, caption, body, tutorial_id
     from posts where id = ${postId} and group_id = ${cfg.id}`;
   if (!post) throw new Error(`post ${postId} not found`);
   const wasStatus = post.status;
@@ -470,7 +521,7 @@ async function runRerender(cfg: Awaited<ReturnType<typeof getGroupCfg>>, postId:
     await runResend(cfg, postId);
     return;
   }
-  if (wasStatus === 'rendered' && !cfg.approval_required) {
+  if (wasStatus === 'rendered' && !cfg.approval_required && !post.tutorial_id) {
     // never sent, gate off → normal first delivery (send + rotation advance)
     const slot: Slot = { platform: post.platform, format: post.format, pillar_id: post.pillar_id };
     await deliver(cfg, postId, slot, true);
@@ -498,6 +549,7 @@ async function deliver(
   slot: Slot,
   notifyChat: boolean,
   coverOpts: { coverRequired?: boolean; skipCover?: boolean; templateId?: string } = {},
+  advanceRotation = true,
 ): Promise<void> {
   const [post] = await sql`select platform, format, topic, caption, artifact_prefix, body, status
     from posts where id = ${postId} and group_id = ${cfg.id}`;
@@ -533,11 +585,12 @@ async function deliver(
     // text format: send body directly, no artifacts
     if (notifyChat) await withRetry(() => sendMessage(cfg, `${post.caption}\n\n${(JSON.parse(post.body) as TextOut).body}`));
   }
-  await markSent(cfg.id, postId, slot);
+  if (advanceRotation) await markSent(cfg.id, postId, slot);
+  else await sql`update posts set status = 'sent' where id = ${postId} and group_id = ${cfg.id}`;
   await addEvent(postId, cfg.id, 'sent');
   // ponytail: telegram send happens BEFORE the DB commit — send-ok + commit-fail = duplicate
   // send on re-tap. Outbox/idempotency keys if it ever bites in practice.
-  console.log(`[queue] post #${postId} delivered + rotation advanced (${cfg.slug})`);
+  console.log(`[queue] post #${postId} delivered${advanceRotation ? ' + rotation advanced' : ' (rotation untouched)'} (${cfg.slug})`);
 }
 
 // Telegram sends can flake (network/429) — retry 2x with 5s backoff before failing a delivered post.
@@ -593,6 +646,8 @@ async function notifyRunFailed(cfg: Awaited<ReturnType<typeof getGroupCfg>>, e: 
 // Boot cleanup: orphan queued/draft/rendered at daemon start → failed (previous crash).
 // awaiting_approval is a DELIBERATE pause — survives restarts, never boot-failed.
 export async function bootCleanup(): Promise<void> {
+  const orphanTutorials = await failOrphanTutorials().catch(() => 0);
+  if (orphanTutorials) console.log(`[boot] ${orphanTutorials} queued tutorial(s) → failed`);
   const r = await sql`update posts set status = 'failed', error = 'orphaned at boot'
     where status in ('queued','draft','rendered') returning id, group_id`;
   for (const row of r) {

@@ -12,7 +12,7 @@ export type Route =
   | { name: 'newsItemDetail'; slug: string; topicId: string; itemId: string } // /app/:slug/news/:topicId/items/:itemId
   | { name: 'groupView'; slug: string; view: string };    // /app/:slug/:view
 
-const GROUP_VIEWS = ['dashboard', 'studio', 'pillars', 'posts', 'news', 'styles', 'templates', 'overrides', 'promotions', 'settings'];
+const GROUP_VIEWS = ['dashboard', 'studio', 'pillars', 'posts', 'news', 'tutorials', 'styles', 'templates', 'overrides', 'promotions', 'settings'];
 
 export function parseRoute(pathname: string): Route {
   if (pathname === '/login' || pathname === '/app/login') return { name: 'login' };

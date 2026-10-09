@@ -12,7 +12,8 @@ import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, withNewsSource, resolveCaptionParts, isNewsResearchOut, type CaptionOut, type NewsResearchOut } from './schema.ts';
 import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
 import { ideationPrompt, writerPrompt, criticPrompt, newsResearchPrompt, type ContentBrief } from './prompts.ts';
-import { fetchArticleText } from './article.ts';
+import { fetchArticleWithImages, downloadImage } from './article.ts';
+import { uploadPostArtifactBuffer } from './storage.ts';
 import type { StyleSample, PillarFull } from './prompts.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
 import type { GroupCfg } from './groups.ts';
@@ -86,18 +87,28 @@ export async function resolvePlannedSlot(
 
 // Research step (news only): fetch the article → LLM extracts concrete facts.
 // Fail-safe: article fetch or research failure → falls back to title + RSS summary.
-async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typeof claimValidNewsItem>>>, usage: UsageAcc, audience: string): Promise<NewsResearchOut | null> {
+async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typeof claimValidNewsItem>>>, usage: UsageAcc, audience: string, wantPhotos: boolean): Promise<{ research: NewsResearchOut | null; photos: Buffer[] }> {
   runStage('ideation', `research: ${n.domain}`);
-  const text = await fetchArticleText(n.url);
+  const { text, images } = await fetchArticleWithImages(n.url);
   console.log(`[research] article ${text ? `${text.length} chars` : 'unavailable — RSS summary only'} (${n.domain})`);
+  // photos: sequential, first 5 candidates; any failure just drops that photo (fail-safe)
+  const photos: Buffer[] = [];
+  if (wantPhotos) {
+    for (const u of images) {
+      const b = await downloadImage(u);
+      if (b) photos.push(b);
+      if (photos.length >= 5) break;
+    }
+    console.log(`[research] source photos ${photos.length}/${images.length} usable`);
+  }
   try {
     const r = await chatJson(cfg, writerModel(cfg), newsResearchPrompt(n, text, audience), isNewsResearchOut, 4000);
     addUsage(usage, 'research', writerModel(cfg), r.usage);
     console.log(`[research] ${r.data.facts.length} facts, ${r.data.open_questions.length} open questions`);
-    return r.data;
+    return { research: r.data, photos };
   } catch (e) {
     console.warn(`[research] failed: ${(e as Error).message.slice(0, 160)}`);
-    return null;
+    return { research: null, photos };
   }
 }
 
@@ -235,7 +246,9 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
   // audience = the news topic's own definition (e.g. "Berita Indonesia: pemerintahan, korupsi…"),
   // so a politics item is written for that audience — not bent into a developer angle
   const audience = newsTopic ? `people following "${newsTopic.name}"${newsTopic.description ? ` — ${newsTopic.description}` : ''}` : undefined;
-  const research = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? (cfg.brief || 'people following this topic')) : null;
+  const researched = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? (cfg.brief || 'people following this topic'), !!newsTopic?.use_source_images) : null;
+  const research = researched?.research ?? null;
+  const photos = researched?.photos ?? [];
   const contentBrief = makeContentBrief(newsItem ? 'news' : brief ? 'brief' : 'pillar', topic, angle, effPillar.name, newsItem, research, audience, cfg.brief, effPillar.description);
 
   // 2. writer
@@ -302,11 +315,37 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
       ${captionOf(final, parts.footer, parts.cta)}, ${bodyOf(final)}, 'draft', ${source}, ${sql.json(postUsage(usage) as never)})
     returning id`;
   if (!post) throw new Error('insert post failed');
+  if (photos.length && newsItem) await storeSourcePhotos(cfg, post.id as string, photos, newsItem.domain, final);
   if (idea && !brief) await markIdeaUsed(idea.id); // consumed only once the draft exists
   if (newsItem && !brief) await markNewsItemUsed(newsItem.id, post.id as string);
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
 
   return { postId: post.id, slot, topic, draft: final };
+}
+
+// Source photos → MinIO: lead photo = cover.png (cover page / reels background, same slot the
+// manual-upload + AI-cover flows use, so the awaiting_cover ask is skipped), the rest =
+// photo-NN.jpg for body slides 2..n-1. Credit stored once on the post (render stamps it).
+// Best-effort: a storage hiccup must not lose the draft — it just renders without photos.
+export function photoPlan(count: number, slideCount: number): number[] {
+  return Array.from({ length: Math.max(0, Math.min(count - 1, slideCount - 2)) }, (_, i) => i + 2);
+}
+
+async function storeSourcePhotos(cfg: GroupCfg, postId: string, photos: Buffer[], domain: string, d: Draft): Promise<void> {
+  try {
+    await uploadPostArtifactBuffer(cfg.slug, postId, photos[0]!, 'cover.png');
+    const slides = 'slides' in d ? d.slides.length : 0;
+    const plan = photoPlan(photos.length, slides);
+    for (let i = 0; i < plan.length; i++) {
+      await uploadPostArtifactBuffer(cfg.slug, postId, photos[i + 1]!, `photo-${String(plan[i]).padStart(2, '0')}.jpg`);
+    }
+    // credit on the image (render) AND in the caption (reels background has no badge)
+    const credit = `Foto: ${domain}`;
+    await sql`update posts set photo_credit = ${credit}, caption = caption || ${`\n\n${credit}`} where id = ${postId}`;
+    console.log(`[pipeline] post #${postId}: ${1 + plan.length} source photo(s) stored (credit ${domain})`);
+  } catch (e) {
+    console.warn(`[pipeline] source photos not stored: ${(e as Error).message}`);
+  }
 }
 
 // Structured caption + group footer → final string, stored in posts.caption at

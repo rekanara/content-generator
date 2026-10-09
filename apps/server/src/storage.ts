@@ -29,6 +29,13 @@ export async function uploadPostArtifact(slug: string, postId: string, localPath
   return key;
 }
 
+export async function uploadPostArtifactBuffer(slug: string, postId: string, buf: Buffer, filename: string): Promise<string> {
+  await ensureBucket();
+  const key = `${slug}/posts/${postId}/${filename}`;
+  await client.putObject(config.minio.bucket, key, buf, buf.length);
+  return key;
+}
+
 // Upload local file → <slug>/promotions/<promoId>/<filename> (promo images live under
 // promotions/, NOT posts/ — a wrong-prefix upload once made every promo image invisible).
 export async function uploadPromotionImage(slug: string, promoId: string, localPath: string, filename: string): Promise<string> {
