@@ -341,7 +341,7 @@ async function needsManualCover(
 ): Promise<boolean> {
   if (slot.format === 'reels') {
     const base = `${cfg.slug}/posts/${postId}/`;
-    return !(await artifactExists(`${base}cover.mp4`)) && !(await artifactExists(`${base}cover.png`));
+    return !(await artifactExists(`${base}cover.mp4`)) && !(await artifactExists(`${base}cover.png`)) && !(await artifactExists(`${base}photo-01.jpg`));
   }
   if (slot.format !== 'carousel' && slot.format !== 'pdf') return false;
   if (!isManualCoverMode(cfg.image.model)) return false;

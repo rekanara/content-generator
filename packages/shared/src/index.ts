@@ -385,22 +385,22 @@ export const PlanInput = z.object({
 export type PlanInput = z.infer<typeof PlanInput>;
 
 // Template tokens per format — for UI hints + FE validation.
-// {{image}} (generated cover, data-URI) only on the html_first part of carousel formats.
+// {{image}} = cover on html_first; IG body = optional news source photo (empty when absent).
 // Reels are scene-based: html only, no first/last parts.
 export const TEMPLATE_TOKENS: Record<TemplateFormat, { body: string[]; first?: string[]; last?: string[] }> = {
   'ig-carousel': {
-    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
-    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    first: ['{{image}}', '{{photo_credit}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{image}}', '{{photo_credit}}', '{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
   'li-carousel': {
-    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
+    first: ['{{image}}', '{{photo_credit}}', '{{headline}}', '{{index}}', '{{total}}'],
     body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
   'ig-news-card': {
-    first: ['{{image}}', '{{headline}}', '{{index}}', '{{total}}'],
-    body: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
+    first: ['{{image}}', '{{photo_credit}}', '{{headline}}', '{{index}}', '{{total}}'],
+    body: ['{{image}}', '{{photo_credit}}', '{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
     last: ['{{headline}}', '{{body}}', '{{index}}', '{{total}}'],
   },
   reel: {

@@ -71,7 +71,7 @@ async function getReelTheme(groupId: string, pinnedId: string | null): Promise<{
 
 // Uploaded reel background (Telegram cover step): video wins over image. Downloaded next to the render.
 async function getBackground(cfg: GroupCfg, postId: string, outDir: string): Promise<BackgroundFile | undefined> {
-  for (const [file, type] of [['cover.mp4', 'video'], ['cover.png', 'image']] as const) {
+  for (const [file, type] of [['cover.mp4', 'video'], ['cover.png', 'image'], ['photo-01.jpg', 'image']] as const) {
     const key = `${cfg.slug}/posts/${postId}/${file}`;
     if (!(await artifactExists(key))) continue;
     const path = `${outDir}/bg-${file}`;

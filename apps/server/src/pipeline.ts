@@ -315,7 +315,7 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
       ${captionOf(final, parts.footer, parts.cta)}, ${bodyOf(final)}, 'draft', ${source}, ${sql.json(postUsage(usage) as never)})
     returning id`;
   if (!post) throw new Error('insert post failed');
-  if (photos.length && newsItem) await storeSourcePhotos(cfg, post.id as string, photos, newsItem.domain, final);
+  if (photos.length && newsItem) await storeSourcePhotos(cfg, post.id as string, photos, newsItem.domain);
   if (idea && !brief) await markIdeaUsed(idea.id); // consumed only once the draft exists
   if (newsItem && !brief) await markNewsItemUsed(newsItem.id, post.id as string);
   console.log(`[pipeline] post #${post.id} draft saved (group ${cfg.slug})`);
@@ -323,26 +323,15 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
   return { postId: post.id, slot, topic, draft: final };
 }
 
-// Source photos → MinIO: lead photo = cover.png (cover page / reels background, same slot the
-// manual-upload + AI-cover flows use, so the awaiting_cover ask is skipped), the rest =
-// photo-NN.jpg for body slides 2..n-1. Credit stored once on the post (render stamps it).
-// Best-effort: a storage hiccup must not lose the draft — it just renders without photos.
-export function photoPlan(count: number, slideCount: number): number[] {
-  return Array.from({ length: Math.max(0, Math.min(count - 1, slideCount - 2)) }, (_, i) => i + 2);
-}
-
-async function storeSourcePhotos(cfg: GroupCfg, postId: string, photos: Buffer[], domain: string, d: Draft): Promise<void> {
+async function storeSourcePhotos(cfg: GroupCfg, postId: string, photos: Buffer[], domain: string): Promise<void> {
   try {
-    await uploadPostArtifactBuffer(cfg.slug, postId, photos[0]!, 'cover.png');
-    const slides = 'slides' in d ? d.slides.length : 0;
-    const plan = photoPlan(photos.length, slides);
-    for (let i = 0; i < plan.length; i++) {
-      await uploadPostArtifactBuffer(cfg.slug, postId, photos[i + 1]!, `photo-${String(plan[i]).padStart(2, '0')}.jpg`);
+    for (let i = 0; i < photos.length; i++) {
+      await uploadPostArtifactBuffer(cfg.slug, postId, photos[i]!, `photo-${String(i + 1).padStart(2, '0')}.jpg`);
     }
     // credit on the image (render) AND in the caption (reels background has no badge)
     const credit = `Foto: ${domain}`;
     await sql`update posts set photo_credit = ${credit}, caption = caption || ${`\n\n${credit}`} where id = ${postId}`;
-    console.log(`[pipeline] post #${postId}: ${1 + plan.length} source photo(s) stored (credit ${domain})`);
+    console.log(`[pipeline] post #${postId}: ${photos.length} source photo(s) stored (credit ${domain})`);
   } catch (e) {
     console.warn(`[pipeline] source photos not stored: ${(e as Error).message}`);
   }

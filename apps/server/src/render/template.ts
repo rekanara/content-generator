@@ -157,18 +157,24 @@ function fillSlide(html: string, vars: Record<string, string>, extra: SlideExtra
   const photo = extra.photo_uri?.trim() ?? '';
   const credit = extra.photo_credit?.trim() ?? '';
   const v = { ...vars, step: extra.step ? String(extra.step) : '', code, note, photo_credit: credit };
-  const out = fill(html, v, { ...raw, photo, photo_block: photo ? photoPanel(photo, credit) : '', code_block: code ? codePanel(code, note) : '' });
-  // cover page shows the source photo via {{image}} — still needs its credit
-  const creditOnly = !photo && credit && !/\{\{\s*photo_credit\s*\}\}/.test(html)
+  const out = fill(html, v, { image: photo, ...raw, photo, photo_block: photo ? photoPanel(photo, credit) : '', code_block: code ? codePanel(code, note) : '' });
+  const showsPhoto = !photo || /\{\{\s*(image|photo)\s*\}\}/.test(html);
+  const creditOnly = showsPhoto && credit && !/\{\{\s*(photo_credit|photo_block)\s*\}\}/.test(html)
     ? `<div class="cg-credit" style="position:absolute;right:24px;bottom:20px;z-index:6;padding:6px 9px;border-radius:6px;background:rgba(0,0,0,.55);color:#fff;font:600 18px/1 -apple-system,'Helvetica Neue',sans-serif">${esc(credit)}</div>`
     : '';
   const blocks = [
     creditOnly,
-    // auto-injected photo sits on top — push the template's text below it so nothing overlaps
-    photo && !/\{\{\s*(photo|photo_block)\s*\}\}/.test(html) ? `<style>body{padding-top:560px!important;justify-content:flex-start!important}</style>${photoPanel(photo, credit)}` : '',
     code && !/\{\{\s*(code|code_block)\s*\}\}/.test(html) ? codePanel(code, note) : '',
   ].filter(Boolean).join('');
   return blocks ? (/<\/body>/i.test(out) ? out.replace(/<\/body>/i, `${blocks}</body>`) : out + blocks) : out;
+}
+
+// [slideIndex, photoNumber] pairs for source photos (photo-NN.jpg). CTA (last) slide excluded.
+export function sourcePhotoPlan(slideCount: number, coverPageUsed: boolean, sourceIsCover: boolean): [number, number][] {
+  const out: [number, number][] = [];
+  let n = sourceIsCover ? 2 : 1;
+  for (let i = coverPageUsed ? 1 : 0; i < slideCount - 1; i++) out.push([i, n++]);
+  return out;
 }
 
 export function buildSlides(

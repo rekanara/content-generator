@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractImageUrls, imageSize } from '../src/article.ts';
-import { buildSlides } from '../src/render/template.ts';
+import { buildSlides, sourcePhotoPlan } from '../src/render/template.ts';
+
+test('sourcePhotoPlan: cover rules', () => {
+  assert.deepEqual(sourcePhotoPlan(4, true, true), [[1, 2], [2, 3]]);
+  assert.deepEqual(sourcePhotoPlan(4, true, false), [[1, 1], [2, 2]]);
+  assert.deepEqual(sourcePhotoPlan(4, false, false), [[0, 1], [1, 2], [2, 3]]);
+});
 
 const BASE = 'https://news.example.com/a/b';
 
@@ -37,26 +43,19 @@ test('imageSize: PNG + JPEG headers, garbage → null', () => {
   assert.equal(imageSize(Buffer.from('nope')), null);
 });
 
-test('photoPlan: photos after the lead go to body slides 2..n-1 only', async () => {
-  const { photoPlan } = await import('../src/pipeline.ts');
-  assert.deepEqual(photoPlan(5, 6), [2, 3, 4, 5]);
-  assert.deepEqual(photoPlan(3, 8), [2, 3]);
-  assert.deepEqual(photoPlan(1, 8), []);
-  assert.deepEqual(photoPlan(5, 2), []);
-});
-
-test('buildSlides: photo auto-injected with credit; cover page gets credit badge only', () => {
+test('buildSlides: body photo only via template token; no token → untouched layout', () => {
   const d = { slides: [
     { headline: 'A', body: 'a', photo_credit: 'Foto: kompas.com' },
     { headline: 'B', body: 'b', photo_uri: 'data:image/jpeg;base64,AAA', photo_credit: 'Foto: kompas.com' },
     { headline: 'C', body: 'c' },
   ] };
-  const [cover, mid, last] = buildSlides({ body: '<body>{{headline}}</body>', first: '<body>{{image}}</body>' }, d, Buffer.from('x'));
+  const [cover, mid, last] = buildSlides({ body: '<body><img src="{{image}}">{{headline}}</body>', first: '<body>{{image}}</body>' }, d, Buffer.from('x'));
   assert.match(cover!, /cg-credit[^>]*>Foto: kompas\.com/);
-  assert.ok(!cover!.includes('cg-photo'));
-  assert.match(mid!, /class="cg-photo"[\s\S]*src="data:image\/jpeg;base64,AAA"[\s\S]*Foto: kompas\.com/);
-  assert.match(mid!, /padding-top:560px/);
-  assert.ok(!last!.includes('cg-photo') && !last!.includes('cg-credit'));
+  assert.match(mid!, /src="data:image\/jpeg;base64,AAA"[\s\S]*cg-credit[^>]*>Foto: kompas\.com/);
+  assert.ok(!mid!.includes('cg-photo') && !mid!.includes('padding-top'));
+  assert.ok(!last!.includes('cg-credit'));
+  const [plain] = buildSlides({ body: '<body>{{headline}}</body>' }, { slides: [d.slides[1]!] });
+  assert.equal(plain, '<body>B</body>');
 });
 
 test('buildSlides: explicit {{photo}} token — no auto panel, no padding override', () => {

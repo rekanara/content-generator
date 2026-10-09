@@ -12,7 +12,7 @@ import type { GroupCfg } from '../groups.ts';
 import { generateImage } from '../llm.ts';
 import { imagePrice } from '../llm-costs.ts';
 import { imagePrompt } from '../prompts.ts';
-import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, imageMime, type TemplateSet } from './template.ts';
+import { getTemplateSetById, pickTemplateSet, buildSlides, isManualCoverMode, imageMime, sourcePhotoPlan, type TemplateSet } from './template.ts';
 import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const IG_W = 1080, IG_H = 1350;
@@ -66,21 +66,19 @@ async function getCover(cfg: GroupCfg, postId: string, topic: string, required: 
   }
 }
 
-// Source photos stored at research time (news topics with use_source_images): photo-NN.jpg
-// → body slides 2..n-1 in order. When the template has no cover page, the stored cover.png
-// goes on slide 1 as an inline photo instead (otherwise the lead photo would be lost).
-// photo_credit set = the photos came from the article → every photo carries the credit.
-async function withSourcePhotos(cfg: GroupCfg, postId: string, draft: CarouselOut, coverInline: boolean, credit: string | null): Promise<CarouselOut & { slides: (CarouselOut['slides'][number] & { photo_uri?: string; photo_credit?: string })[] }> {
+// Source photos (photo-NN.jpg, news topics with use_source_images):
+//   cover template + no Telegram upload → photo-01 = cover, photo-02.. = body
+//   cover template + Telegram upload    → upload = cover, photo-01.. = body
+//   no cover template                   → photo-01.. = body from slide 1
+// CTA (last) slide never gets a photo.
+async function withSourcePhotos(cfg: GroupCfg, postId: string, draft: CarouselOut, coverPageUsed: boolean, sourceIsCover: boolean, credit: string | null): Promise<CarouselOut & { slides: (CarouselOut['slides'][number] & { photo_uri?: string; photo_credit?: string })[] }> {
   if (!credit) return draft;
   const uri = (b: Buffer) => `data:${imageMime(b)};base64,${b.toString('base64')}`;
   const slides = draft.slides.map((s) => ({ ...s })) as (CarouselOut['slides'][number] & { photo_uri?: string; photo_credit?: string })[];
   const base = `${cfg.slug}/posts/${postId}/`;
-  if (slides[0] && await artifactExists(`${base}cover.png`)) {
-    if (coverInline) slides[0].photo_uri = uri(await getArtifactBuffer(`${base}cover.png`));
-    slides[0].photo_credit = credit; // cover page: credit badge over the {{image}} photo
-  }
-  for (let i = 1; i < slides.length - 1; i++) {
-    const key = `${base}photo-${String(i + 1).padStart(2, '0')}.jpg`;
+  if (slides[0] && sourceIsCover) slides[0].photo_credit = credit;
+  for (const [i, n] of sourcePhotoPlan(slides.length, coverPageUsed, sourceIsCover)) {
+    const key = `${base}photo-${String(n).padStart(2, '0')}.jpg`;
     if (!(await artifactExists(key))) continue;
     slides[i]!.photo_uri = uri(await getArtifactBuffer(key));
     slides[i]!.photo_credit = credit;
@@ -114,10 +112,16 @@ export async function renderCarousel(
   const pinnedSet = pinnedId ? await getTemplateSetById(cfg.id, pinnedId) : null;
   const picked: { id: string | null; set: TemplateSet } = pinnedSet
     ? { id: pinnedId, set: pinnedSet }
-    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`), ownRow?.is_news === true);
+    : await pickTemplateSet(platform, cfg.id, await artifactExists(`${cfg.slug}/posts/${postId}/cover.png`) || (!!ownRow?.photo_credit && await artifactExists(`${cfg.slug}/posts/${postId}/photo-01.jpg`)), ownRow?.is_news === true);
   const set = picked.set;
-  const cover = set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
-  const htmls = buildSlides(set, await withSourcePhotos(cfg, postId, draft, !set.first, ownRow?.photo_credit ?? null), cover?.buf);
+  const base = `${cfg.slug}/posts/${postId}/`;
+  const sourceLead = ownRow?.photo_credit && set.first && !(await artifactExists(`${base}cover.png`)) && await artifactExists(`${base}photo-01.jpg`)
+    ? await getArtifactBuffer(`${base}photo-01.jpg`)
+    : null;
+  const cover = sourceLead
+    ? { buf: sourceLead, cost: 0 }
+    : set.first ? await getCover(cfg, postId, draft.slides[0]?.headline ?? '', !!opts.coverRequired, !!opts.skipCover) : null;
+  const htmls = buildSlides(set, await withSourcePhotos(cfg, postId, draft, !!(set.first && cover), !!sourceLead, ownRow?.photo_credit ?? null), cover?.buf);
 
   const browser = await puppeteer.launch();
   try {
