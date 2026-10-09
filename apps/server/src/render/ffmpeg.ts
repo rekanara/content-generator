@@ -31,3 +31,13 @@ export function segmentArgs(png: string, mp3: string, durationSec: number, out: 
 export function concatArgs(listFile: string, out: string): string[] {
   return ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', '-movflags', '+faststart', out];
 }
+
+/** Concat scene MP3s into one narration track (re-encode → clean timestamps across files). */
+export function audioConcatArgs(listFile: string, out: string): string[] {
+  return ['-y', '-f', 'concat', '-safe', '0', '-i', listFile, '-c:a', 'aac', '-b:a', '128k', out];
+}
+
+/** Silent Remotion video + narration → final MP4. Video stream copied; ends with the shorter stream. */
+export function muxArgs(video: string, audio: string, out: string): string[] {
+  return ['-y', '-i', video, '-i', audio, '-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-shortest', '-movflags', '+faststart', out];
+}

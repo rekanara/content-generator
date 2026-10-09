@@ -209,8 +209,9 @@ export function writerPrompt(
 JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
 headline: scroll-stopper, short and punchy. body: one idea per slide, short sentences. Every slide must connect to the previous slide.`,
     reels: `Reels 15-30 seconds, 4-6 scenes, total narration MAX 55 words (speech pace ±2 words/second — more than that the duration explodes). Each narration MAX 12 words. Scene 1 = 5-second hook. Last scene = CTA.
-JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>"}]}
-narration: natural spoken language, not written prose. overlay_text: short phrase, not a full sentence.`,
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>", "visual": "hook|point|stat|quote|cta"}]}
+narration: natural spoken language, not written prose. overlay_text: short phrase, not a full sentence.
+visual (how the scene is animated): first scene "hook", last scene "cta"; "stat" ONLY when overlay_text STARTS with the number (e.g. "3 bulan cuti penuh") — the number counts up on screen; "quote" for a direct quote from a named person; otherwise "point".`,
     pdf: `LinkedIn carousel as PDF, 6-10 pages. Page 1 = hook. Last page = CTA/discussion prompt.
 JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}`,
     text: `LinkedIn text post. 150-250 words. First 2 lines must stop the thumb. Structure: hook → story/insight → reflection → closing question for discussion.

@@ -20,13 +20,16 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.1",
+    "@remotion/bundler": "^4.0.534",
+    "@remotion/renderer": "^4.0.534",
     "cron": "^4.0.0",
     "hono": "^4.6.0",
     "minio": "^8.0.0",
     "msedge-tts": "^2.0.7",
     "postgres": "^3.4.0",
     "puppeteer": "^24.0.0",
-    "rss-parser": "^3.13.0"
+    "rss-parser": "^3.13.0",
+    "@workspace/reels": "*"
   },
   "license": "MIT"
 }

@@ -175,6 +175,7 @@ export const PostDetail = PostSummary.extend({
   caption: z.string(),
   error: z.string().nullable(),
   body_text: z.string(), // body flattened to text (slides/scenes → text)
+  tts_script: z.string().nullable(), // reels: narration only, scene per paragraph (external TTS)
   artifacts: z.array(z.string()), // artifact file names per format (exist once rendered)
 });
 export type PostDetail = z.infer<typeof PostDetail>;
@@ -476,6 +477,7 @@ export const NewsTopic = z.object({
   description: z.string(),
   active: z.boolean(),
   template_id: z.string().uuid().nullable(),
+  template_reel_id: z.string().uuid().nullable(),
   caption_cta: z.string().nullable(),       // null = group setting
   caption_footer: z.string().nullable(),    // null = group setting
   source_count: z.number(),
@@ -525,12 +527,14 @@ export type NewsRuleInput = z.infer<typeof NewsRuleInput>;
 
 export const NewsTemplateInput = z.object({
   template_id: z.string().uuid().nullable(),
+  template_reel_id: z.string().uuid().nullable(),
 });
 export type NewsTemplateInput = z.infer<typeof NewsTemplateInput>;
 
 export const NewsGenerateInput = z.object({
   item_id: z.string().uuid().optional(),
   language: z.enum(['original', 'id', 'en', 'ms', 'ja', 'ko', 'zh', 'es']).default('original'),
+  format: z.enum(['carousel', 'reels']).default('carousel'),
 });
 export type NewsGenerateInput = z.infer<typeof NewsGenerateInput>;
 

@@ -1,4 +1,5 @@
-// Reels: scene TTS → ffprobe duration → PNG frame → MP4 segment → concat → final MP4.
+// Reels: scene TTS → ffprobe duration → [Remotion animated video + narration mux | legacy PNG frames → MP4 segments → concat].
+// Remotion is the default (REELS_RENDERER); any failure there falls back to legacy so the post still ships.
 // Local staging out/<id>/ → upload to MinIO posts/<id>/.
 import { mkdirSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -7,11 +8,15 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import puppeteer from 'puppeteer';
 import { sql } from '../db/pool.ts';
-import type { ReelsOut } from '../schema.ts';
-import { ttsToFile } from '../tts.ts';
+import { sceneVisual, type ReelsOut } from '../schema.ts';
+import { ttsToFile, type WordTiming } from '../tts.ts';
 import type { GroupCfg } from '../groups.ts';
-import { ffprobeDurationArgs, segmentArgs, concatArgs } from './ffmpeg.ts';
-import { uploadPostArtifact } from '../storage.ts';
+import { ffprobeDurationArgs, segmentArgs, concatArgs, audioConcatArgs, muxArgs } from './ffmpeg.ts';
+import { config } from '../config.ts';
+import { buildTimeline } from '@workspace/reels/timeline';
+import { parseTheme } from '@workspace/reels/theme';
+import { renderRemotionVideo, type BackgroundFile } from './remotion.ts';
+import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
 
 const exec = promisify(execFile);
 const REEL_W = 1080, REEL_H = 1920;
@@ -48,29 +53,56 @@ async function ffprobeDuration(file: string): Promise<number> {
   return d;
 }
 
-export type ReelsArtifacts = { video: string; prefix: string; durationSec: number };
+type Audio = { mp3: string; dur: number; words: WordTiming[] };
 
-export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
-  const total = draft.scenes.length;
-  const template = await getReelTemplate(cfg.id);
-  const outDir = `out/${postId}`;
-  rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(outDir, { recursive: true });
+// Theme JSON lives in the reel template row's html. Pinned id (news topic / post's own) wins,
+// even if inactive; dangling/absent → latest active reel template → defaults.
+async function getReelTheme(groupId: string, pinnedId: string | null): Promise<{ id: string | null; theme: ReturnType<typeof parseTheme> }> {
+  const pinned = pinnedId ? await sql`select id, html from templates
+    where id = ${pinnedId} and format = 'reel' and group_id = ${groupId}` : [];
+  const rows = pinned.length ? pinned : await sql`select id, html from templates
+    where format = 'reel' and is_active and group_id = ${groupId}
+    order by updated_at desc limit 1`;
+  const row = rows[0];
+  try { return { id: (row?.id as string) ?? null, theme: parseTheme(row ? JSON.parse(row.html as string) : null) }; }
+  catch { return { id: (row?.id as string) ?? null, theme: parseTheme(null) }; }
+}
 
-  // 1. TTS per scene + duration
-  const audios: { mp3: string; dur: number }[] = [];
-  for (let i = 0; i < total; i++) {
-    const mp3 = `${outDir}/audio-${String(i + 1).padStart(2, '0')}.mp3`;
-    await ttsToFile(cfg, draft.scenes[i]!.narration, mp3);
-    const dur = await ffprobeDuration(mp3);
-    audios.push({ mp3, dur });
-    console.log(`[reels] scene ${i + 1}/${total}: TTS ${dur.toFixed(1)}s`);
+// Uploaded reel background (Telegram cover step): video wins over image. Downloaded next to the render.
+async function getBackground(cfg: GroupCfg, postId: string, outDir: string): Promise<BackgroundFile | undefined> {
+  for (const [file, type] of [['cover.mp4', 'video'], ['cover.png', 'image']] as const) {
+    const key = `${cfg.slug}/posts/${postId}/${file}`;
+    if (!(await artifactExists(key))) continue;
+    const path = `${outDir}/bg-${file}`;
+    await writeFile(path, await getArtifactBuffer(key));
+    console.log(`[reels] background ${type} from ${key}`);
+    return { type, path };
   }
-  const totalDur = audios.reduce((a, b) => a + b.dur, 0);
-  if (totalDur < 10 || totalDur > 35) throw new Error(`total duration ${totalDur.toFixed(1)}s outside 15-30s (tolerance)`);
-  // spec: 15–30 seconds; hard fail when far off — so the writer prompt gets rechecked, not a broken video
+  return undefined;
+}
 
-  // 2. PNG frame per scene
+async function renderWithRemotion(
+  draft: ReelsOut, audios: Audio[], outDir: string, finalMp4: string, theme: ReturnType<typeof parseTheme>,
+  bg: BackgroundFile | undefined, postId: string,
+): Promise<void> {
+  const timeline = buildTimeline(draft.scenes.map((sc, i) => ({
+    overlay_text: sc.overlay_text, narration: sc.narration, durationSec: audios[i]!.dur,
+    visual: sceneVisual(sc.visual), words: audios[i]!.words,
+  })));
+  const silent = `${outDir}/video-silent.mp4`;
+  await renderRemotionVideo(timeline, theme, silent, bg, postId);
+  const listFile = `${outDir}/audio-concat.txt`;
+  await writeFile(listFile, audios.map((a) => `file '${resolve(a.mp3)}'`).join('\n'), 'utf8');
+  const narration = `${outDir}/narration.m4a`;
+  await exec('ffmpeg', audioConcatArgs(listFile, narration));
+  await exec('ffmpeg', muxArgs(silent, narration, finalMp4));
+}
+
+async function renderLegacy(
+  template: string, draft: ReelsOut, audios: Audio[], outDir: string, finalMp4: string,
+): Promise<void> {
+  const total = draft.scenes.length;
+  // PNG frame per scene
   const browser = await puppeteer.launch();
   const frames: string[] = [];
   try {
@@ -89,31 +121,65 @@ export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg
   } finally {
     await browser.close();
   }
-
-  // 3. MP4 segment per scene (PNG + audio, duration = audio)
+  // MP4 segment per scene (PNG + audio, duration = audio)
   const segments: string[] = [];
   for (let i = 0; i < total; i++) {
     const seg = `${outDir}/seg-${String(i + 1).padStart(2, '0')}.mp4`;
     await exec('ffmpeg', segmentArgs(frames[i]!, audios[i]!.mp3, audios[i]!.dur, seg));
     segments.push(seg);
   }
-
-  // 4. Concat → final
-  // concat demuxer resolves paths relative to the LIST FILE's directory, not cwd.
-  // Our segments are relative to project root → must be absolute.
+  // concat demuxer resolves paths relative to the LIST FILE's directory, not cwd → absolute.
   const listFile = `${outDir}/concat.txt`;
   await writeFile(listFile, segments.map((s) => `file '${resolve(s)}'`).join('\n'), 'utf8');
-  const finalMp4 = `${outDir}/reel.mp4`;
   await exec('ffmpeg', concatArgs(listFile, finalMp4));
+}
+
+export type ReelsArtifacts = { video: string; prefix: string; durationSec: number; templateId: string | null };
+
+export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg, templateId?: string): Promise<ReelsArtifacts> {
+  const total = draft.scenes.length;
+  const template = await getReelTemplate(cfg.id);
+  const outDir = `out/${postId}`;
+  rmSync(outDir, { recursive: true, force: true });
+  mkdirSync(outDir, { recursive: true });
+
+  // 1. TTS per scene + duration
+  const audios: Audio[] = [];
+  for (let i = 0; i < total; i++) {
+    const mp3 = `${outDir}/audio-${String(i + 1).padStart(2, '0')}.mp3`;
+    const words = await ttsToFile(cfg, draft.scenes[i]!.narration, mp3);
+    const dur = await ffprobeDuration(mp3);
+    audios.push({ mp3, dur, words });
+    console.log(`[reels] scene ${i + 1}/${total}: TTS ${dur.toFixed(1)}s, ${words.length} word timings`);
+  }
+  const totalDur = audios.reduce((a, b) => a + b.dur, 0);
+  if (totalDur < 10 || totalDur > 35) throw new Error(`total duration ${totalDur.toFixed(1)}s outside 15-30s (tolerance)`);
+  // spec: 15–30 seconds; hard fail when far off — so the writer prompt gets rechecked, not a broken video
+
+  // 2-4. video: Remotion (animated) first, legacy (static frames) as the safety net
+  const finalMp4 = `${outDir}/reel.mp4`;
+  const [own] = await sql<{ template_id: string | null }[]>`select template_id from posts where id = ${postId}`;
+  const picked = await getReelTheme(cfg.id, templateId ?? own?.template_id ?? null);
+  let done = false;
+  if (config.reels.renderer === 'remotion') {
+    try {
+      await renderWithRemotion(draft, audios, outDir, finalMp4, picked.theme, await getBackground(cfg, postId, outDir), postId);
+      done = true;
+    } catch (e) {
+      console.warn(`[reels] remotion failed — falling back to legacy renderer: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
+  if (!done) await renderLegacy(template, draft, audios, outDir, finalMp4);
 
   // 5. Upload
   const key = await uploadPostArtifact(cfg.slug, postId, finalMp4, 'reel.mp4');
   console.log(`[reels] post #${postId}: MP4 ${totalDur.toFixed(1)}s → ${key}`);
-  return { video: key, prefix: `${cfg.slug}/posts/${postId}/`, durationSec: totalDur };
+  return { video: key, prefix: `${cfg.slug}/posts/${postId}/`, durationSec: totalDur, templateId: picked.id };
 }
 
-export async function renderReelsAndSave(postId: string, draft: ReelsOut, cfg: GroupCfg): Promise<ReelsArtifacts> {
-  const r = await renderReels(postId, draft, cfg);
-  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix} where id = ${postId}`;
+export async function renderReelsAndSave(postId: string, draft: ReelsOut, cfg: GroupCfg, templateId?: string): Promise<ReelsArtifacts> {
+  const r = await renderReels(postId, draft, cfg, templateId);
+  await sql`update posts set status = 'rendered', artifact_prefix = ${r.prefix},
+    template_id = coalesce(${r.templateId}, template_id) where id = ${postId}`;
   return r;
 }

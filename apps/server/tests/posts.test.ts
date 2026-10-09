@@ -1,7 +1,7 @@
 // flattenBody unit test (pure — no DB).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { flattenBody } from '../src/repos/posts.ts';
+import { flattenBody, ttsScript } from '../src/repos/posts.ts';
 
 test('flattenBody: text post → body as-is', () => {
   assert.equal(flattenBody({ body: 'hello world' }), 'hello world');
@@ -26,4 +26,11 @@ test('flattenBody: reels → numbered scenes with overlay', () => {
 test('flattenBody: null → empty string, unknown shape → JSON', () => {
   assert.equal(flattenBody(null), '');
   assert.equal(flattenBody(JSON.parse('{"x":1}')), '{"x":1}');
+});
+
+test('ttsScript: narration only, scene per paragraph, blanks dropped', () => {
+  assert.equal(ttsScript({ scenes: [
+    { overlay_text: 'A', narration: ' Satu. ' }, { overlay_text: 'B', narration: '' }, { overlay_text: 'C', narration: 'Dua.' },
+  ] }), 'Satu.\n\nDua.');
+  assert.equal(ttsScript(null), '');
 });

@@ -12,6 +12,7 @@ import { chatJson, writerModel } from './llm.ts';
 import { overridePolishPrompt, pillarSuggestPrompt, styleSuggestPrompt } from './prompts.ts';
 import { isPolishOut, isPillarsOut, cleanPillarSuggestions, isStylesOut, cleanStyleSuggestions } from './schema.ts';
 import { refreshCron, cronStatus } from './cron.ts';
+import { ReelsTheme } from '@workspace/reels/theme';
 import { getDashboard } from './usecases/dashboard.ts';
 import { getCalendar } from './usecases/calendar.ts';
 import { getGroupUsage, getAllGroupsUsage } from './usecases/usage.ts';
@@ -30,7 +31,7 @@ import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
-import { listNewsTopics, createNewsTopic, deleteNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, claimValidNewsItem } from './repos/news.ts';
+import { listNewsTopics, createNewsTopic, deleteNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, getNewsTopicTemplates, claimValidNewsItem } from './repos/news.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
@@ -63,6 +64,15 @@ api.onError((err, c) => {
   console.error(`[api] ${err.message}`);
   return c.json({ error: e.message }, e.status);
 });
+
+// Reel templates store the Remotion theme as JSON in `html` — reject anything that would
+// silently render with defaults.
+function reelThemeError(html: string): string | null {
+  let j: unknown;
+  try { j = JSON.parse(html); } catch { return 'reel template must be theme JSON'; }
+  const r = ReelsTheme.safeParse(j);
+  return r.success ? null : `invalid reel theme: ${r.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ').slice(0, 300)}`;
+}
 
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
@@ -615,7 +625,12 @@ g.put('/:slug/news/topics/:id/template', async (c) => {
     if (!t) return c.json({ error: 'template not found' }, 404);
     if (t.type !== 'regular' || !['ig-news-card', 'ig-carousel'].includes(t.format)) return c.json({ error: 'template must be regular ig-news-card or ig-carousel' }, 400);
   }
-  const ok = await setNewsTopicTemplate(gr(c).id, id, parsed.data.template_id);
+  if (parsed.data.template_reel_id) {
+    const t = await getTemplate(gr(c).id, parsed.data.template_reel_id);
+    if (!t) return c.json({ error: 'reel template not found' }, 404);
+    if (t.type !== 'regular' || t.format !== 'reel') return c.json({ error: 'reel template must be a regular reel template' }, 400);
+  }
+  const ok = await setNewsTopicTemplate(gr(c).id, id, parsed.data.template_id, parsed.data.template_reel_id);
   if (!ok) return c.json({ error: 'news topic not found' }, 404);
   return c.json({ ok: true });
 });
@@ -635,14 +650,17 @@ g.post('/:slug/news/topics/:id/generate', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const parsed = NewsGenerateInput.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
-  const templateId = await getNewsTopicTemplate(gr(c).id, id);
-  if (templateId === undefined) return c.json({ error: 'news topic not found' }, 404);
+  const tpls = await getNewsTopicTemplates(gr(c).id, id);
+  if (tpls === undefined) return c.json({ error: 'news topic not found' }, 404);
+  const asReel = parsed.data.format === 'reels';
+  if (asReel && !tpls.templateReelId) return c.json({ error: 'this topic has no reel template — pick one first' }, 400);
+  const templateId = asReel ? tpls.templateReelId : tpls.templateId;
   const item = await claimValidNewsItem(gr(c).id, { topicId: id, itemId: parsed.data.item_id });
   if (!item) return c.json({ error: 'valid news item not found' }, 404);
   enqueue({
     kind: 'generate',
     slug: gr(c).slug,
-    forced: { platform: 'instagram', format: 'carousel' },
+    forced: { platform: 'instagram', format: asReel ? 'reels' : 'carousel' },
     notifyChat: true,
     source: 'web',
     newsTopicId: id,
@@ -703,6 +721,10 @@ g.get('/:slug/templates', async (c) => c.json(await listTemplates(gr(c).id)));
 g.post('/:slug/templates', async (c) => {
   const parsed = TemplateInput.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if (parsed.data.format === 'reel') {
+    const bad = reelThemeError(parsed.data.html);
+    if (bad) return c.json({ error: bad }, 400);
+  }
   await createTemplate(gr(c).id, parsed.data);
   return c.json({ ok: true }, 201);
 });
@@ -720,6 +742,10 @@ g.patch('/:slug/templates/:id', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   const parsed = TemplateEdit.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  if ((await getTemplate(gr(c).id, id))?.format === 'reel') {
+    const bad = reelThemeError(parsed.data.html);
+    if (bad) return c.json({ error: bad }, 400);
+  }
   const ok = await updateTemplate(gr(c).id, id, parsed.data);
   if (!ok) return c.json({ error: 'template not found' }, 404);
   return c.json({ ok: true });

@@ -1,0 +1,28 @@
+{
+  "name": "@workspace/reels",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.tsx",
+    "./entry": "./src/entry.tsx",
+    "./theme": "./src/theme.ts",
+    "./timeline": "./src/timeline.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/google-fonts": "^4.0.534",
+    "@remotion/transitions": "^4.0.534",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "remotion": "^4.0.534",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.8",
+    "typescript": "~6"
+  },
+  "license": "MIT"
+}

@@ -197,6 +197,8 @@ async function runGenerate(
   });
   postRef(r.postId);
   await addEvent(r.postId, cfg.id, 'generated');
+  // pin survives the awaiting_cover pause — resume renders from posts.template_id
+  if (renderOpts.templateId) await sql`update posts set template_id = ${renderOpts.templateId} where id = ${r.postId}`;
   try {
     // manual cover (no image model, cover part in template, no stored cover yet):
     // pause BEFORE render — the cover image must exist before slide 1 can use it.
@@ -249,25 +251,27 @@ async function parkAwaitingCover(
     and status in ('draft','rendered','awaiting_approval') returning id`;
   if (upd.length === 0) throw new Error(`post ${postId} not in a cover-pausable state`);
   await addEvent(postId, cfg.id, 'awaiting_cover');
-  runStage('awaiting', `cover image — ${topic.slice(0, 50)}`); // human input needed (photo / skip)
-  console.log(`[queue] post #${postId} awaiting cover image (${cfg.slug})${genError ? ' — generation failed' : ''}`);
+  const mediaName = slot.format === 'reels' ? 'background image/video' : 'cover image';
+  runStage('awaiting', `${mediaName} — ${topic.slice(0, 50)}`); // human input needed (upload / skip)
+  console.log(`[queue] post #${postId} awaiting ${mediaName} (${cfg.slug})${genError ? ' — generation failed' : ''}`);
   try {
+    const uploadHint = slot.format === 'reels' ? 'upload foto atau video langsung di chat ini —' : 'upload fotonya langsung di chat ini —';
     const lines = genError
       ? [
           `Generate cover gagal — ${cfg.slug}`,
           `Topik: ${topic}`,
-          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          `${slot.platform}/${slot.format} · awal: ${firstHeadline}`,
           `Error: ${genError.message.slice(0, 200)}`,
           '',
-          'Kalau tetap mau gambar cover, upload fotonya langsung di chat ini —',
+          `Kalau tetap mau ${mediaName}, ${uploadHint}`,
           'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
         ]
       : [
-          `Cover image dibutuhkan — ${cfg.slug}`,
+          `${mediaName} dibutuhkan — ${cfg.slug}`,
           `Topik: ${topic}`,
-          `${slot.platform}/${slot.format} · slide 1: ${firstHeadline}`,
+          `${slot.platform}/${slot.format} · awal: ${firstHeadline}`,
           '',
-          'Sudah menyiapkan gambar cover? Upload fotonya langsung di chat ini —',
+          `Sudah menyiapkan ${mediaName}? ${uploadHint}`,
           'aku simpan ke MinIO, render, lalu kirim hasilnya ke sini.',
         ];
     await withRetry(() => sendMessageWithButtons(cfg, lines.join('\n'), [
@@ -285,6 +289,10 @@ async function needsManualCover(
   postId: string,
   slot: Slot,
 ): Promise<boolean> {
+  if (slot.format === 'reels') {
+    const base = `${cfg.slug}/posts/${postId}/`;
+    return !(await artifactExists(`${base}cover.mp4`)) && !(await artifactExists(`${base}cover.png`));
+  }
   if (slot.format !== 'carousel' && slot.format !== 'pdf') return false;
   if (!isManualCoverMode(cfg.image.model)) return false;
   if (!(await anyActiveCoverTemplate(slot.platform, cfg.id))) return false; // no cover page anywhere → nothing to ask for
@@ -292,6 +300,7 @@ async function needsManualCover(
 }
 
 function firstHeadline(draft: CarouselOut | ReelsOut | TextOut): string {
+  if ('scenes' in draft) return draft.scenes[0]?.overlay_text ?? '';
   return 'slides' in draft ? (draft.slides[0]?.headline ?? '') : '';
 }
 
@@ -318,12 +327,13 @@ async function runCoverContinue(cfg: Awaited<ReturnType<typeof getGroupCfg>>, po
     // model was (re)configured between ask and resume → generation can fail here too
     // (never on the skip path — skipCover never reaches generateImage)
     if (e instanceof CoverGenerationError) {
-      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut), e.cause);
+      await parkAwaitingCover(cfg, postId, post.topic, slot, firstHeadline(JSON.parse(post.body) as CarouselOut | ReelsOut), e.cause);
       return;
     }
     throw e;
   }
 }
+
 
 // Render (if needed) + park the post at awaiting_approval + request approval in Telegram.
 // Render happens BEFORE approval so approve→deliver is instant (no CPU wait on the button tap).
@@ -340,7 +350,7 @@ async function prepareForApproval(
   runStage('render', post.format === 'reels' ? 'rendering reel' : 'rendering slides');
   if (post.format !== 'text' && post.status !== 'rendered') {
     if (slot.format === 'reels') {
-      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg, coverOpts.templateId);
     } else {
       const ra = await renderAndSave(postId, slot.platform, JSON.parse(post.body) as CarouselOut, cfg, coverOpts);
       await attachCoverCost(postId, ra.coverCost, ra.coverModel);
@@ -498,7 +508,7 @@ async function deliver(
     // not rendered yet → render first per format
     runStage('render', post.topic.slice(0, 60));
     if (slot.format === 'reels') {
-      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg);
+      await renderReelsAndSave(postId, JSON.parse(post.body) as ReelsOut, cfg, coverOpts.templateId);
     } else {
       const draft = JSON.parse(post.body) as CarouselOut;
       const ra = await renderAndSave(postId, slot.platform, draft, cfg, coverOpts);

@@ -12,11 +12,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@remotion/player": "^4.0.534",
+    "@workspace/reels": "*",
     "@workspace/shared": "*",
     "@workspace/ui": "*",
     "lucide-react": "^1.47.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "remotion": "^4.0.534"
   },
   "devDependencies": {
     "@eslint/js": "^10",

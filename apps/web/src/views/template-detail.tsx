@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ArrowLeft, Trash2 } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
@@ -10,6 +10,8 @@ import { api, ApiError } from "@/lib/api"
 import { useTemplate } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import { TEMPLATE_TOKENS, type TemplateFormat } from "@workspace/shared"
+import { ReelThemeForm, ReelPreview } from "@/components/reel-theme"
+import { themeFromJson } from "@/lib/reel-theme"
 
 // ——— preview: token fill, mirroring render/template.ts (esc + {{token}}) ———
 
@@ -71,6 +73,7 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
   }, [html, htmlFirst, htmlLast, tab, data])
 
   const isReel = data?.format === "reel"
+  const reelTheme = useMemo(() => themeFromJson(html), [html])
 
   const save = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -166,6 +169,16 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
                 format is immutable · updated {new Date(data.updated_at).toLocaleString("en-US")}
               </p>
 
+              {isReel ? (
+                <>
+                  <ReelThemeForm theme={reelTheme} onChange={(t) => { setHtml(JSON.stringify(t, null, 2)); setTouched(true) }} />
+                  <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer">Theme JSON</summary>
+                    <Textarea className="mt-2 min-h-48 font-mono text-xs" spellCheck={false} value={html}
+                      onChange={(e) => { setHtml(e.target.value); setTouched(true) }} />
+                  </details>
+                </>
+              ) : (<>
               <div className="flex gap-1 rounded-md bg-muted p-1">
                 {tabs.filter((t) => t.has).map((t) => (
                   <button key={t.id} type="button"
@@ -198,6 +211,7 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
                     setTouched(true)
                   }} />
               </div>
+              </>)}
 
               <div className="flex gap-2">
                 <Button type="submit" disabled={busy || !dirty}>
@@ -216,8 +230,9 @@ export function TemplateDetailView({ slug, id }: { slug: string; id: string }) {
           </CardContent>
         </Card>
 
-        {previewHtml && <TemplatePreview html={previewHtml} format={data.format} label={tab} />}
-        {!previewHtml && tab !== "body" && (
+        {isReel && <ReelPreview theme={reelTheme} />}
+        {!isReel && previewHtml && <TemplatePreview html={previewHtml} format={data.format} label={tab} />}
+        {!isReel && !previewHtml && tab !== "body" && (
           <div className="flex w-90 items-center justify-center rounded-lg border border-dashed p-6 text-xs text-muted-foreground">
             empty {tab === "first" ? "cover" : "CTA"} — falls back to the body template
           </div>

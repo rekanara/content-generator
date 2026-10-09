@@ -18,6 +18,7 @@ export async function getPost(groupId: string, id: string): Promise<PostDetail |
     caption: (p.caption as string) ?? '',
     error: (p.error as string) ?? null,
     body_text: flattenBody(JSON.parse(p.body ?? 'null')),
+    tts_script: p.format === 'reels' ? ttsScript(JSON.parse(p.body ?? 'null')) : null,
     artifacts: artifactNames(p.format as string, p.body),
   };
 }
@@ -62,6 +63,11 @@ export async function toggleStar(groupId: string, id: string): Promise<boolean |
 }
 
 // Flatten stored JSON body (per format) into plain display text. Pure — unit-testable.
+// Narration only, one scene per paragraph — paste-ready for an external TTS tool.
+export function ttsScript(body: any): string {
+  return (body?.scenes ?? []).map((s: { narration: string }) => s.narration.trim()).filter(Boolean).join('\n\n');
+}
+
 export function flattenBody(body: any): string {
   if (!body) return '';
   if (body.body) return body.body;

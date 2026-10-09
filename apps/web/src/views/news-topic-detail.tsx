@@ -30,6 +30,7 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   const [generating, setGenerating] = useState(false)
   const [generateItemId, setGenerateItemId] = useState<string | null | undefined>(undefined)
   const [language, setLanguage] = useState("id")
+  const [format, setFormat] = useState<"carousel" | "reels">("carousel")
   const [urlOpen, setUrlOpen] = useState(false)
 
   const autofill = async () => {
@@ -87,11 +88,12 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   const openGenerate = (itemId?: string) => {
     setGenerateItemId(itemId ?? null)
     setLanguage("id")
+    setFormat("carousel")
   }
   const confirmGenerate = async () => {
     setGenerating(true); setMsg(null)
     try {
-      await api.generateNews(slug, id, { item_id: generateItemId ?? undefined, language })
+      await api.generateNews(slug, id, { item_id: generateItemId ?? undefined, language, format })
       setMsg("generation queued")
       setGenerateItemId(undefined)
       reload()
@@ -106,6 +108,9 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   if (error) return <p className="text-sm text-destructive">{error}</p>
   if (!topic) return null
   const newsTemplates = (templates ?? []).filter((t) => t.type === "regular" && ["ig-news-card", "ig-carousel"].includes(t.format))
+  const reelTemplates = (templates ?? []).filter((t) => t.type === "regular" && t.format === "reel")
+  const saveTemplates = (t: { template_id: string | null; template_reel_id: string | null }) =>
+    api.saveNewsTemplate(slug, id, t).then(() => { setMsg("template saved"); reload() }).catch((err) => setMsg(err instanceof ApiError ? err.message : "template save failed"))
   const validCount = topic.items.filter((i) => i.status === "valid").length
 
   return (
@@ -116,9 +121,13 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
           <p className="text-sm text-muted-foreground">{topic.description || "no description"}</p>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <select className="h-8 rounded-md border bg-background px-2 text-sm" value={topic.template_id ?? ""} onChange={(e) => api.saveNewsTemplate(slug, id, e.target.value || null).then(() => { setMsg("template saved"); reload() }).catch((err) => setMsg(err instanceof ApiError ? err.message : "template save failed"))}>
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" aria-label="Carousel template" value={topic.template_id ?? ""} onChange={(e) => saveTemplates({ template_id: e.target.value || null, template_reel_id: topic.template_reel_id })}>
             <option value="">Auto template</option>
             {newsTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · {t.format}{t.is_active ? "" : " · inactive"}</option>)}
+          </select>
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" aria-label="Reel template" value={topic.template_reel_id ?? ""} onChange={(e) => saveTemplates({ template_id: topic.template_id, template_reel_id: e.target.value || null })}>
+            <option value="">No reel template</option>
+            {reelTemplates.map((t) => <option key={t.id} value={t.id}>{t.name} · reel{t.is_active ? "" : " · inactive"}</option>)}
           </select>
           <Button variant="outline" size="sm" disabled={autofilling} onClick={autofill}>{autofilling ? "Autofilling…" : "AI autofill"}</Button>
           <Button variant="outline" size="sm" disabled={ingesting} onClick={ingest}>{ingesting ? "Fetching…" : "Fetch latest"}</Button>
@@ -143,6 +152,14 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
                   {LANGUAGES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                 </select>
               </Field>
+              {topic.template_reel_id && (
+                <Field label="Format">
+                  <select className="h-9 w-full rounded-md border bg-background px-2 text-sm" value={format} onChange={(e) => setFormat(e.target.value as "carousel" | "reels")}>
+                    <option value="carousel">Carousel (default)</option>
+                    <option value="reels">Reels</option>
+                  </select>
+                </Field>
+              )}
               <div className="flex justify-end gap-2">
                 <Button variant="outline" disabled={generating} onClick={() => setGenerateItemId(undefined)}>Cancel</Button>
                 <Button disabled={generating} onClick={confirmGenerate}>{generating ? "Generating…" : "Generate"}</Button>

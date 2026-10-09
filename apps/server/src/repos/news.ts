@@ -18,7 +18,7 @@ function itemOut(r: Record<string, unknown>): NewsItem {
 }
 
 export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
-  const rows = await sql`select t.id, t.name, t.description, t.active, t.template_id, t.caption_cta, t.caption_footer, t.created_at, count(s.id)::int as source_count
+  const rows = await sql`select t.id, t.name, t.description, t.active, t.template_id, t.template_reel_id, t.caption_cta, t.caption_footer, t.created_at, count(s.id)::int as source_count
     from news_topics t
     left join news_sources s on s.topic_id = t.id
     where t.group_id = ${groupId}
@@ -30,6 +30,7 @@ export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
     description: r.description as string,
     active: r.active as boolean,
     template_id: (r.template_id as string | null) ?? null,
+    template_reel_id: (r.template_reel_id as string | null) ?? null,
     caption_cta: (r.caption_cta as string | null) ?? null,
     caption_footer: (r.caption_footer as string | null) ?? null,
     source_count: r.source_count as number,
@@ -40,13 +41,14 @@ export async function listNewsTopics(groupId: string): Promise<NewsTopic[]> {
 export async function createNewsTopic(groupId: string, d: { name: string; description: string }): Promise<NewsTopic> {
   const [r] = await sql`insert into news_topics (group_id, name, description)
     values (${groupId}, ${d.name}, ${d.description})
-    returning id, name, description, active, template_id, caption_cta, caption_footer, created_at`;
+    returning id, name, description, active, template_id, template_reel_id, caption_cta, caption_footer, created_at`;
   return {
     id: r!.id as string,
     name: r!.name as string,
     description: r!.description as string,
     active: r!.active as boolean,
     template_id: (r!.template_id as string | null) ?? null,
+    template_reel_id: (r!.template_reel_id as string | null) ?? null,
     caption_cta: null,
     caption_footer: null,
     source_count: 0,
@@ -60,7 +62,7 @@ export async function deleteNewsTopic(groupId: string, id: string): Promise<bool
 }
 
 export async function getNewsTopic(groupId: string, id: string): Promise<NewsTopicDetail | null> {
-  const [topic] = await sql`select id, name, description, active, template_id, caption_cta, caption_footer, created_at
+  const [topic] = await sql`select id, name, description, active, template_id, template_reel_id, caption_cta, caption_footer, created_at
     from news_topics where id = ${id} and group_id = ${groupId}`;
   if (!topic) return null;
   const sources = await sql`select id, name, url, active, created_at
@@ -76,6 +78,7 @@ export async function getNewsTopic(groupId: string, id: string): Promise<NewsTop
     description: topic.description as string,
     active: topic.active as boolean,
     template_id: (topic.template_id as string | null) ?? null,
+    template_reel_id: (topic.template_reel_id as string | null) ?? null,
     caption_cta: (topic.caption_cta as string | null) ?? null,
     caption_footer: (topic.caption_footer as string | null) ?? null,
     source_count: sources.length,
@@ -219,8 +222,8 @@ export async function listActiveNewsTopicIds(groupId: string): Promise<string[]>
   return rows.map((r) => r.id as string);
 }
 
-export async function setNewsTopicTemplate(groupId: string, topicId: string, templateId: string | null): Promise<boolean> {
-  const rows = await sql`update news_topics set template_id = ${templateId}
+export async function setNewsTopicTemplate(groupId: string, topicId: string, templateId: string | null, templateReelId: string | null): Promise<boolean> {
+  const rows = await sql`update news_topics set template_id = ${templateId}, template_reel_id = ${templateReelId}
     where id = ${topicId} and group_id = ${groupId} returning id`;
   return rows.length > 0;
 }
@@ -248,9 +251,14 @@ export async function getNewsItemTopic(itemId: string): Promise<{ name: string; 
 }
 
 export async function getNewsTopicTemplate(groupId: string, topicId: string): Promise<string | null | undefined> {
-  const [r] = await sql`select template_id from news_topics where id = ${topicId} and group_id = ${groupId}`;
+  const t = await getNewsTopicTemplates(groupId, topicId);
+  return t === undefined ? undefined : t.templateId;
+}
+
+export async function getNewsTopicTemplates(groupId: string, topicId: string): Promise<{ templateId: string | null; templateReelId: string | null } | undefined> {
+  const [r] = await sql`select template_id, template_reel_id from news_topics where id = ${topicId} and group_id = ${groupId}`;
   if (!r) return undefined;
-  return (r.template_id as string | null) ?? null;
+  return { templateId: (r.template_id as string | null) ?? null, templateReelId: (r.template_reel_id as string | null) ?? null };
 }
 
 export async function listNewsTopicsWithValidItems(groupId: string): Promise<{ id: string; name: string; n: number }[]> {
@@ -279,15 +287,15 @@ export async function listValidNewsItemsForTopic(topicId: string): Promise<{ id:
   }));
 }
 
-export async function getNewsItemGenerateContext(itemId: string): Promise<{ slug: string; groupId: string; topicId: string; templateId: string | null; title: string } | null> {
-  const [r] = await sql`select g.slug, g.id as group_id, t.id as topic_id, t.template_id, i.title
+export async function getNewsItemGenerateContext(itemId: string): Promise<{ slug: string; groupId: string; topicId: string; templateId: string | null; templateReelId: string | null; title: string } | null> {
+  const [r] = await sql`select g.slug, g.id as group_id, t.id as topic_id, t.template_id, t.template_reel_id, i.title
     from news_items i
     join news_topics t on t.id = i.topic_id
     join groups g on g.id = t.group_id
     where i.id = ${itemId} and i.status = 'valid' and i.post_id is null and t.active
     limit 1`;
   if (!r) return null;
-  return { slug: r.slug as string, groupId: r.group_id as string, topicId: r.topic_id as string, templateId: (r.template_id as string | null) ?? null, title: r.title as string };
+  return { slug: r.slug as string, groupId: r.group_id as string, topicId: r.topic_id as string, templateId: (r.template_id as string | null) ?? null, templateReelId: (r.template_reel_id as string | null) ?? null, title: r.title as string };
 }
 
 export async function claimValidNewsItem(groupId: string, p?: { topicId?: string; itemId?: string }): Promise<NewsItem | null> {

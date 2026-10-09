@@ -104,6 +104,7 @@ export type Callback =
   | { t: 'newsfetchlatest'; topicId: string }
   | { t: 'newsfetchurl'; topicId: string }
   | { t: 'newsitem'; itemId: string }
+  | { t: 'newsitemformat'; itemId: string; asReel: boolean }
   | { t: 'buatpick'; slug: string; platform?: string; format?: string }
   | { t: 'ovtype'; value: 'mix' | 'image_only' | 'text_only' }
   | { t: 'ovdone' };
@@ -126,6 +127,8 @@ export function parseCallback(data: string): Callback | null {
   }
   const nt = data.match(/^nt:([0-9a-f-]{36})$/i);
   if (nt && UUID_RE.test(nt[1]!)) return { t: 'newstopic', topicId: nt[1]!.toLowerCase() };
+  const nif = data.match(/^nif:([0-9a-f-]{36}):(c|r)$/i);
+  if (nif && UUID_RE.test(nif[1]!)) return { t: 'newsitemformat', itemId: nif[1]!.toLowerCase(), asReel: nif[2]! === 'r' };
   const nfl = data.match(/^nfl:([0-9a-f-]{36})$/i);
   if (nfl && UUID_RE.test(nfl[1]!)) return { t: 'newsfetchlatest', topicId: nfl[1]!.toLowerCase() };
   const nfu = data.match(/^nfu:([0-9a-f-]{36})$/i);
@@ -485,6 +488,8 @@ export async function startBot(): Promise<void> {
               } else {
                 await handlePhoto(chatId, photo);
               }
+            } else if (u.message?.video?.file_id) {
+              await handleVideo(chatId, u.message.video);
             }
             continue;
           }
@@ -624,9 +629,36 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
     return;
   }
 
+  if (cb.t === 'newsitemformat') {
+    const ctx = await getNewsItemGenerateContext(cb.itemId);
+    if (!ctx) { await replyGlobal(chatId, 'News ini sudah tidak valid / sudah pernah digenerate.'); return; }
+    enqueue({
+      kind: 'generate',
+      slug: ctx.slug,
+      forced: { platform: 'instagram', format: cb.asReel ? 'reels' : 'carousel' },
+      notifyChat: true,
+      source: 'telegram',
+      newsTopicId: ctx.topicId,
+      newsItemId: cb.itemId,
+      newsLanguage: 'id',
+      templateId: (cb.asReel ? ctx.templateReelId : ctx.templateId) ?? undefined,
+    });
+    const msgId = currentCallbackMessageId(chatId);
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${cb.asReel ? 'reel' : 'carousel'} ${ctx.title.slice(0, 38)}`, callback_data: `noop:${cb.itemId}` }]]).catch(() => {});
+    await replyGlobal(chatId, `Queued news (${ctx.slug}) — ${ctx.title.slice(0, 80)}. Hasilnya menyusul.`);
+    return;
+  }
+
   if (cb.t === 'newsitem') {
     const ctx = await getNewsItemGenerateContext(cb.itemId);
     if (!ctx) { await replyGlobal(chatId, 'News ini sudah tidak valid / sudah pernah digenerate.'); return; }
+    if (ctx.templateReelId) {
+      await sendMessageWithButtonsRaw(chatId, `Format untuk "${ctx.title.slice(0, 60)}"?`, [
+        [{ text: 'Carousel (default)', callback_data: `nif:${cb.itemId}:c` }],
+        [{ text: 'Reels', callback_data: `nif:${cb.itemId}:r` }],
+      ]);
+      return;
+    }
     enqueue({
       kind: 'generate',
       slug: ctx.slug,
@@ -639,7 +671,7 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
       templateId: ctx.templateId ?? undefined,
     });
     const msgId = currentCallbackMessageId(chatId);
-    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ ${ctx.title.slice(0, 45)}`, callback_data: `noop:${cb.itemId}` }]]).catch(() => {});
+    if (msgId) await editMessageButtons(chatId, msgId, [[{ text: `▶ carousel ${ctx.title.slice(0, 38)}`, callback_data: `noop:${cb.itemId}` }]]).catch(() => {});
     await replyGlobal(chatId, `Queued news (${ctx.slug}) — ${ctx.title.slice(0, 80)}. Hasilnya menyusul.`);
     return;
   }
@@ -774,11 +806,17 @@ async function handleCallback(data: string, chatId: string): Promise<void> {
 // → resume the pipeline (render + gate/deliver). Status-driven: matches the latest
 // awaiting_cover post. ponytail: photo replies scoped to a specific ask-message when
 // multiple groups ever wait at once.
+async function awaitingCoverRow(chatId: string): Promise<{ id: string; group_id: string; slug: string; topic: string; format: string } | null> {
+  const [row] = await sql<{ id: string; group_id: string; slug: string; topic: string; format: string }[]>`
+    select p.id, p.group_id, g.slug, p.topic, p.format from posts p join groups g on g.id = p.group_id
+    where p.status = 'awaiting_cover' and coalesce(nullif(g.telegram_chat_id, ''), ${config.telegram.chatId}) = ${chatId}
+    order by p.created_at desc limit 1`;
+  return row ?? null;
+}
+
 async function handlePhoto(chatId: string, photo: { file_id: string; width: number; height: number }[]): Promise<void> {
   const best = [...photo].sort((a, b) => b.width * b.height - a.width * a.height)[0]!;
-  const [row] = await sql<{ id: string; group_id: string; slug: string; topic: string }[]>`
-    select p.id, p.group_id, g.slug, p.topic from posts p join groups g on g.id = p.group_id
-    where p.status = 'awaiting_cover' order by p.created_at desc limit 1`;
+  const row = await awaitingCoverRow(chatId);
   if (!row) {
     await replyGlobal(chatId, 'Tidak ada post yang menunggu cover — foto diabaikan.');
     return;
@@ -794,6 +832,31 @@ async function handlePhoto(chatId: string, photo: { file_id: string; width: numb
   enqueue({ kind: 'coverContinue', slug: row.slug, postId: row.id });
   await replyGlobal(chatId, [
     `Cover diterima (${Math.round(buf.length / 1024)}KB) — "${String(row.topic).slice(0, 60)}"`,
+    'Disimpan ke MinIO, rendering…',
+  ].join('\n'));
+}
+
+async function handleVideo(chatId: string, video: { file_id: string; file_size?: number; duration?: number }): Promise<void> {
+  const row = await awaitingCoverRow(chatId);
+  if (!row || row.format !== 'reels') {
+    await replyGlobal(chatId, 'Tidak ada reels yang menunggu background video — video diabaikan.');
+    return;
+  }
+  if ((video.file_size ?? 0) > 45 * 1024 * 1024) {
+    await replyGlobal(chatId, 'Video terlalu besar. Kirim video ≤45MB atau tekan Lewati.');
+    return;
+  }
+  const buf = await downloadTelegramFile(config.telegram.botToken, video.file_id);
+  const dir = `out/${row.id}`;
+  mkdirSync(dir, { recursive: true });
+  const tmp = `${dir}/cover.mp4`;
+  writeFileSync(tmp, buf);
+  await uploadPostArtifact(row.slug, row.id, tmp, 'cover.mp4');
+  await addEvent(row.id, row.group_id, 'cover_received').catch(() => {});
+  console.log(`[bot] cover video received → ${row.slug}/posts/${row.id}/cover.mp4 (${buf.length}B)`);
+  enqueue({ kind: 'coverContinue', slug: row.slug, postId: row.id });
+  await replyGlobal(chatId, [
+    `Background video diterima (${Math.round(buf.length / 1024 / 1024)}MB) — "${String(row.topic).slice(0, 60)}"`,
     'Disimpan ke MinIO, rendering…',
   ].join('\n'));
 }

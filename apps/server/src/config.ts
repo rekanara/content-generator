@@ -52,6 +52,8 @@ export const config = {
     botToken: process.env.TELEGRAM_BOT_TOKEN || '',
     chatId: process.env.TELEGRAM_CHAT_ID || '',
   },
+  // remotion = animated reels (falls back to legacy on failure); legacy = static PNG + ffmpeg
+  reels: { renderer: (process.env.REELS_RENDERER === 'legacy' ? 'legacy' : 'remotion') as 'remotion' | 'legacy' },
   port: Number(process.env.PORT ?? 8787),
 };
 

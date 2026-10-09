@@ -266,3 +266,9 @@ test('parseCallback: news fetch buttons', () => {
   assert.deepEqual(parseCallback(`nfu:${id}`), { t: 'newsfetchurl', topicId: id });
   assert.equal(parseCallback('nfu:not-a-uuid'), null);
 });
+
+test('parseCallback: nif:<uuid>:c|r news format confirm', () => {
+  assert.deepEqual(parseCallback(`nif:${UUID}:r`), { t: 'newsitemformat', itemId: UUID, asReel: true });
+  assert.deepEqual(parseCallback(`nif:${UUID}:c`), { t: 'newsitemformat', itemId: UUID, asReel: false });
+  assert.equal(parseCallback(`nif:${UUID}:x`), null);
+});

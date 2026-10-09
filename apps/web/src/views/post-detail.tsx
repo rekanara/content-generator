@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ArrowLeft, Check, Download, ImageOff, RefreshCw, Send, X } from "lucide-react"
+import { ArrowLeft, Check, Copy, Download, ImageOff, RefreshCw, Send, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -121,6 +121,8 @@ export function PostDetailView({ slug, id }: { slug: string; id: string }) {
         </Card>
       )}
 
+      {data.tts_script && <TtsScript text={data.tts_script} />}
+
       <PostContent slug={slug} id={id} format={data.format} status={data.status}
         artifacts={data.artifacts} bodyText={data.body_text} />
 
@@ -216,4 +218,20 @@ function PostContent({ slug, id, format, status, artifacts, bodyText }: {
     )
   }
   return null
+}
+
+function TtsScript({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  const copy = () => navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500) })
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <div className="mb-1 flex items-center justify-between">
+          <h3 className="text-xs font-medium text-muted-foreground">TTS script</h3>
+          <Button size="sm" variant="outline" onClick={copy}><Copy className="size-4" /> {copied ? "Copied" : "Copy"}</Button>
+        </div>
+        <pre className="text-sm whitespace-pre-wrap break-words">{text}</pre>
+      </CardContent>
+    </Card>
+  )
 }

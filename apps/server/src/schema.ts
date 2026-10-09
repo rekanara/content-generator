@@ -7,7 +7,8 @@ export type NewsScoreOut = { score: number; reason: string };
 export type NewsResearchOut = { facts: string[]; reader_scenario: string; open_questions: string[] };
 export type NewsAutofillOut = { allowed_domains: string[]; keywords: string[]; sources: { name: string; url: string }[] };
 export type Slide = { headline: string; body: string };
-export type Scene = { overlay_text: string; narration: string };
+export type SceneVisual = 'hook' | 'point' | 'stat' | 'quote' | 'cta';
+export type Scene = { overlay_text: string; narration: string; visual?: SceneVisual };
 
 // Structured caption (writer output): title required, subtitle/cta optional,
 // tags 0-8 (with or without '#', normalized at assembly).
@@ -93,11 +94,19 @@ function isSlide(x: unknown): x is Slide {
   return obj(x) && str(x.headline) && str(x.body) && x.headline.length > 0 && x.body.length > 0;
 }
 
+const VISUALS = ['hook', 'point', 'stat', 'quote', 'cta'];
+
 function isScene(x: unknown): x is Scene {
   return (
     obj(x) && str(x.overlay_text) && str(x.narration) &&
-    x.overlay_text.length > 0 && x.narration.length > 0
+    x.overlay_text.length > 0 && x.narration.length > 0 &&
+    // optional; an unknown value is tolerated here and dropped at render (falls back to auto)
+    (x.visual === undefined || str(x.visual))
   );
+}
+
+export function sceneVisual(v: unknown): SceneVisual | undefined {
+  return typeof v === 'string' && VISUALS.includes(v) ? v as SceneVisual : undefined;
 }
 
 export function isCarouselOut(x: unknown): x is CarouselOut {

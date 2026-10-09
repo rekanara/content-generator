@@ -18,6 +18,8 @@ import { api, ApiError } from "@/lib/api"
 import { useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import { TEMPLATE_TOKENS, type TemplateFormat, type TemplateType } from "@workspace/shared"
+import { ReelThemeForm, ReelPreview } from "@/components/reel-theme"
+import { DEFAULT_REEL_THEME_JSON, themeFromJson } from "@/lib/reel-theme"
 
 const FORMATS: TemplateFormat[] = ["ig-carousel", "ig-news-card", "li-carousel", "reel", "ig-carousel-promo", "li-carousel-promo"]
 const isPromoFormat = (f: TemplateFormat) => f.endsWith("-promo")
@@ -70,7 +72,7 @@ export function TemplatesView({ slug }: { slug: string }) {
               </div>
               <div className="space-y-1.5">
                 <Label>Format</Label>
-                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat })}>
+                <Select value={form.format} onValueChange={(v) => setForm({ ...form, format: v as TemplateFormat, html: v === "reel" ? DEFAULT_REEL_THEME_JSON : form.format === "reel" ? "" : form.html })}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -97,6 +99,12 @@ export function TemplatesView({ slug }: { slug: string }) {
               </div>
             </div>
 
+            {isReel ? (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <ReelThemeForm theme={themeFromJson(form.html)} onChange={(t) => setForm({ ...form, html: JSON.stringify(t, null, 2) })} />
+                <ReelPreview theme={themeFromJson(form.html)} />
+              </div>
+            ) : (<>
             <p className="text-xs text-muted-foreground">
               body token: {TEMPLATE_TOKENS[form.format].body.join(" ")}
               {!isReel && !isPromoFormat(form.format) && form.html_first !== "" && <> · cover: {TEMPLATE_TOKENS[form.format].first?.join(" ")}</>}
@@ -132,6 +140,8 @@ export function TemplatesView({ slug }: { slug: string }) {
                 </div>
               </div>
             )}
+
+            </>)}
 
             <Button type="submit" form="template-form" className="justify-self-start">Add</Button>
           </form>

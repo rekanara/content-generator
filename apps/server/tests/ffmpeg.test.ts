@@ -26,3 +26,20 @@ test('concatArgs: demuxer concat, stream copy', () => {
   assert.ok(s.includes('-c copy'));
   assert.equal(a[a.length - 1], 'out.mp4');
 });
+
+import { audioConcatArgs, muxArgs } from '../src/render/ffmpeg.ts';
+
+test('audioConcatArgs: concat demuxer → aac', () => {
+  const a = audioConcatArgs('a.txt', 'n.m4a');
+  assert.ok(a.join(' ').includes('-f concat'));
+  assert.ok(a.includes('aac'));
+  assert.equal(a.at(-1), 'n.m4a');
+});
+
+test('muxArgs: copies video, maps narration, shortest + faststart', () => {
+  const a = muxArgs('v.mp4', 'n.m4a', 'o.mp4');
+  const s = a.join(' ');
+  assert.ok(s.includes('-map 0:v:0') && s.includes('-map 1:a:0'));
+  assert.ok(s.includes('-c:v copy') && s.includes('-shortest') && s.includes('+faststart'));
+  assert.equal(a.at(-1), 'o.mp4');
+});
