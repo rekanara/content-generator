@@ -12,14 +12,17 @@ import { sceneVisual, type ReelsOut } from '../schema.ts';
 import { tutorialSceneVisual, type TutorialReelsOut } from '../tutorial.ts';
 import { ttsToFile, type WordTiming } from '../tts.ts';
 import type { GroupCfg } from '../groups.ts';
-import { ffprobeDurationArgs, segmentArgs, concatArgs, audioConcatArgs, muxArgs } from './ffmpeg.ts';
+import { ffprobeDurationArgs, segmentArgs, concatArgs, audioConcatArgs, muxArgs, sfxMixArgs } from './ffmpeg.ts';
+import { sfxPlan } from '@workspace/reels/sfx';
 import { config } from '../config.ts';
 import { buildTimeline } from '@workspace/reels/timeline';
 import { parseTheme } from '@workspace/reels/theme';
-import { renderRemotionVideo, type BackgroundFile } from './remotion.ts';
-import { uploadPostArtifact, artifactExists, getArtifactBuffer } from '../storage.ts';
+import { renderRemotionVideo, type BackgroundFile, type PublicAsset } from './remotion.ts';
+import { uploadPostArtifact, uploadPostArtifactBuffer, artifactExists, getArtifactBuffer } from '../storage.ts';
+import { findLicensedImage } from '../image-search.ts';
 
-const exec = promisify(execFile);
+export const exec = promisify(execFile);
+export const SFX_DIR = resolve(import.meta.dirname, '../../assets/sfx');
 const REEL_W = 1080, REEL_H = 1920;
 
 // Default reel template — dark dev theme 1080x1920. Tokens: {{overlay}} {{index}} {{total}}.
@@ -47,7 +50,7 @@ async function getReelTemplate(groupId: string): Promise<string> {
   return rows.length > 0 ? (rows[0]!.html as string) : DEFAULT_REEL;
 }
 
-async function ffprobeDuration(file: string): Promise<number> {
+export async function ffprobeDuration(file: string): Promise<number> {
   const { stdout } = await exec('ffprobe', ffprobeDurationArgs(file));
   const d = Number.parseFloat(stdout.trim());
   if (!Number.isFinite(d) || d <= 0) throw new Error(`invalid duration for ${file}: "${stdout.trim()}"`);
@@ -58,7 +61,7 @@ type Audio = { mp3: string; dur: number; words: WordTiming[] };
 
 // Theme JSON lives in the reel template row's html. Pinned id (news topic / post's own) wins,
 // even if inactive; dangling/absent → latest active reel template → defaults.
-async function getReelTheme(groupId: string, pinnedId: string | null): Promise<{ id: string | null; theme: ReturnType<typeof parseTheme> }> {
+export async function getReelTheme(groupId: string, pinnedId: string | null): Promise<{ id: string | null; theme: ReturnType<typeof parseTheme> }> {
   const pinned = pinnedId ? await sql`select id, html from templates
     where id = ${pinnedId} and format = 'reel' and group_id = ${groupId}` : [];
   const rows = pinned.length ? pinned : await sql`select id, html from templates
@@ -82,10 +85,42 @@ async function getBackground(cfg: GroupCfg, postId: string, outDir: string): Pro
   return undefined;
 }
 
+// Per-scene licensed photo from the writer's image_query. Stored in MinIO (scene-NN.jpg + .txt credit) so a
+// rerender reuses the same photo instead of re-searching. Best-effort: any miss = scene renders without photo.
+// ponytail: skips stat/cta scenes; add a per-scene upload UI if auto-search quality isn't enough.
+async function getSceneImages(cfg: GroupCfg, postId: string, draft: ReelsOut, outDir: string): Promise<(PublicAsset & { credit: string } | null)[]> {
+  return Promise.all(draft.scenes.map(async (sc, i) => {
+    const q = sc.image_query?.trim();
+    if (!q || sc.visual === 'stat' || sc.visual === 'cta') return null;
+    try {
+      const n = String(i + 1).padStart(2, '0');
+      const base = `${cfg.slug}/posts/${postId}/scene-${n}`;
+      let buf: Buffer; let credit: string;
+      if (await artifactExists(`${base}.jpg`) && await artifactExists(`${base}.txt`)) {
+        buf = await getArtifactBuffer(`${base}.jpg`);
+        credit = (await getArtifactBuffer(`${base}.txt`)).toString('utf8');
+      } else {
+        const found = await findLicensedImage(q);
+        if (!found) return null;
+        buf = found.buf; credit = found.credit;
+        await uploadPostArtifactBuffer(cfg.slug, postId, buf, `scene-${n}.jpg`);
+        await uploadPostArtifactBuffer(cfg.slug, postId, Buffer.from(credit), `scene-${n}.txt`);
+      }
+      const path = `${outDir}/scene-${n}.jpg`;
+      await writeFile(path, buf);
+      return { path, name: `reel-${postId.slice(0, 8)}-scene-${n}.jpg`, credit };
+    } catch (e) {
+      console.warn(`[reels] scene ${i + 1} image skipped: ${(e as Error).message.slice(0, 160)}`);
+      return null;
+    }
+  }));
+}
+
 async function renderWithRemotion(
-  draft: ReelsOut, audios: Audio[], outDir: string, finalMp4: string, theme: ReturnType<typeof parseTheme>,
+  cfg: GroupCfg, draft: ReelsOut, audios: Audio[], outDir: string, finalMp4: string, theme: ReturnType<typeof parseTheme>,
   bg: BackgroundFile | undefined, postId: string,
 ): Promise<void> {
+  const imgs = await getSceneImages(cfg, postId, draft, outDir);
   const isTutorial = draft.scenes.some((sc) => 'step' in sc || 'code' in sc || 'note' in sc);
   const timeline = buildTimeline(draft.scenes.map((sc, i) => ({
     overlay_text: sc.overlay_text, narration: sc.narration, durationSec: audios[i]!.dur,
@@ -93,14 +128,25 @@ async function renderWithRemotion(
     step: (sc as TutorialReelsOut['scenes'][number]).step,
     code: (sc as TutorialReelsOut['scenes'][number]).code,
     note: (sc as TutorialReelsOut['scenes'][number]).note,
+    image: imgs[i]?.name,
+    image_credit: imgs[i]?.credit,
   })));
   const silent = `${outDir}/video-silent.mp4`;
-  await renderRemotionVideo(timeline, theme, silent, bg, postId);
+  await renderRemotionVideo(timeline, theme, silent, bg, postId, imgs.filter((x): x is NonNullable<typeof x> => !!x));
   const listFile = `${outDir}/audio-concat.txt`;
   await writeFile(listFile, audios.map((a) => `file '${resolve(a.mp3)}'`).join('\n'), 'utf8');
   const narration = `${outDir}/narration.m4a`;
   await exec('ffmpeg', audioConcatArgs(listFile, narration));
-  await exec('ffmpeg', muxArgs(silent, narration, finalMp4));
+  let track = narration;
+  try {
+    const mixed = `${outDir}/narration-sfx.m4a`;
+    const cues = sfxPlan(timeline).map((c) => ({ ...c, file: resolve(SFX_DIR, c.file) }));
+    await exec('ffmpeg', sfxMixArgs(narration, cues, mixed));
+    track = mixed;
+  } catch (e) {
+    console.warn(`[reels] sfx mix skipped: ${(e as Error).message.slice(0, 160)}`);
+  }
+  await exec('ffmpeg', muxArgs(silent, track, finalMp4));
 }
 
 async function renderLegacy(
@@ -168,7 +214,7 @@ export async function renderReels(postId: string, draft: ReelsOut, cfg: GroupCfg
   let done = false;
   if (config.reels.renderer === 'remotion') {
     try {
-      await renderWithRemotion(draft, audios, outDir, finalMp4, picked.theme, await getBackground(cfg, postId, outDir), postId);
+      await renderWithRemotion(cfg, draft, audios, outDir, finalMp4, picked.theme, await getBackground(cfg, postId, outDir), postId);
       done = true;
     } catch (e) {
       console.warn(`[reels] remotion failed — falling back to legacy renderer: ${(e as Error).message.slice(0, 200)}`);

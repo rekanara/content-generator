@@ -8,7 +8,7 @@ export type NewsResearchOut = { facts: string[]; reader_scenario: string; open_q
 export type NewsAutofillOut = { allowed_domains: string[]; keywords: string[]; sources: { name: string; url: string }[] };
 export type Slide = { headline: string; body: string };
 export type SceneVisual = 'hook' | 'point' | 'stat' | 'quote' | 'cta';
-export type Scene = { overlay_text: string; narration: string; visual?: SceneVisual };
+export type Scene = { overlay_text: string; narration: string; visual?: SceneVisual; image_query?: string };
 
 // Structured caption (writer output): title required, subtitle/cta optional,
 // tags 0-8 (with or without '#', normalized at assembly).
@@ -100,6 +100,7 @@ function isScene(x: unknown): x is Scene {
   return (
     obj(x) && str(x.overlay_text) && str(x.narration) &&
     x.overlay_text.length > 0 && x.narration.length > 0 &&
+    (x.image_query === undefined || str(x.image_query)) &&
     // optional; an unknown value is tolerated here and dropped at render (falls back to auto)
     (x.visual === undefined || str(x.visual))
   );
@@ -332,6 +333,8 @@ export function withNewsSource<T extends object>(d: T, src: { url: string; domai
 // ——— promotion content (AI-authored slides) ———
 export type PromoSlideOut = { html: string; image_prompt: string };
 export type PromoContentOut = { slides: PromoSlideOut[] };
+export type PromoVideoSceneOut = { overlay_text: string; narration: string; visual?: 'hook' | 'point' | 'stat' | 'quote' | 'cta'; image_query?: string };
+export type PromoVideoOut = { scenes: PromoVideoSceneOut[] };
 
 export function isPromoContentOut(x: unknown): x is PromoContentOut {
   if (!obj(x) || !Array.isArray(x.slides) || x.slides.length < 4 || x.slides.length > 10) return false;
@@ -340,6 +343,11 @@ export function isPromoContentOut(x: unknown): x is PromoContentOut {
     const ip = s.image_prompt;
     return ip === undefined || str(ip);
   });
+}
+
+export function isPromoVideoOut(x: unknown): x is PromoVideoOut {
+  if (!obj(x) || !Array.isArray(x.scenes) || x.scenes.length < 4 || x.scenes.length > 7) return false;
+  return x.scenes.every((s: unknown) => obj(s) && str(s.overlay_text) && str(s.narration) && (s.image_query === undefined || str(s.image_query)) && (s.visual === undefined || ['hook', 'point', 'stat', 'quote', 'cta'].includes(s.visual as string)));
 }
 
 // ——— promotion brief (AI drafts the promo DATA from a rough brief) ———

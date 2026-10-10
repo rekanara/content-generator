@@ -15,7 +15,7 @@ import { getGroupCfg, getGroupCfgById } from './groups.ts';
 import { addEvent } from './repos/events.ts';
 import { getOverride, markOverrideSent } from './repos/overrides.ts';
 import { getPromotion } from './repos/promotions.ts';
-import { deliverPromotion } from './usecases/promotions.ts';
+import { deliverPromotion, deliverPromotionVideo, generatePromotionVideoScript } from './usecases/promotions.ts';
 import { getTemplate } from './repos/templates.ts';
 import { getPlanByDate } from './repos/plans.ts';
 import { getTutorial, markTutorialQueued, markTutorialGenerated, markTutorialFailed, failOrphanTutorials } from './repos/tutorials.ts';
@@ -33,6 +33,7 @@ type Job =
   | { kind: 'rerender'; slug: string; postId: string }
   | { kind: 'coverContinue'; slug: string; postId: string; skipCover?: boolean }
   | { kind: 'promoSend'; slug: string; promoId: string; platform: 'instagram' | 'linkedin' }
+  | { kind: 'promoVideo'; slug: string; promoId: string; audio: 'silent' | 'voice'; send: boolean }
   | { kind: 'overrideSend'; slug: string; overrideId: string };
 
 const jobs: Job[] = [];
@@ -73,6 +74,7 @@ async function drain(): Promise<void> {
         else if (job.kind === 'rerender') await runRerender(cfg, job.postId);
         else if (job.kind === 'coverContinue') await runCoverContinue(cfg, job.postId, !!job.skipCover);
         else if (job.kind === 'promoSend') await runPromoSend(cfg, job.promoId, job.platform);
+        else if (job.kind === 'promoVideo') await runPromoVideo(cfg, job.promoId, job.audio, job.send);
         else if (job.kind === 'overrideSend') await runOverrideSend(cfg, job.overrideId);
         else await runResend(cfg, job.postId);
         endRun();
@@ -675,6 +677,23 @@ async function runPromoSend(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoI
     await deliverPromotion(cfg, promoId, platform);
   } catch (e) {
     await sendMessage(cfg, `Promo delivery failed — ${cfg.slug}: ${(e as Error).message}`).catch(() => {});
+    throw e;
+  }
+}
+
+// Promo video: (re)write the script when audio mode changed / none yet, then render + send.
+async function runPromoVideo(cfg: Awaited<ReturnType<typeof getGroupCfg>>, promoId: string, audio: 'silent' | 'voice', send: boolean): Promise<void> {
+  runStage('writer', `promo video ${promoId.slice(0, 8)} (${audio})`);
+  try {
+    const promo = await getPromotion(cfg.id, promoId);
+    if (!promo) throw new Error(`promotion ${promoId} not found`);
+    if (!promo.video_content || promo.video_audio_mode !== audio || !send) await generatePromotionVideoScript(cfg, promoId, audio);
+    if (send) {
+      runStage('render', `promo video ${promoId.slice(0, 8)}`);
+      await deliverPromotionVideo(cfg, promoId);
+    }
+  } catch (e) {
+    await sendMessage(cfg, `Promo video failed — ${cfg.slug}: ${(e as Error).message.slice(0, 300)}`).catch(() => {});
     throw e;
   }
 }

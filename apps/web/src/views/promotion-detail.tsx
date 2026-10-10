@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ArrowLeft, CalendarClock, Check, RefreshCw, RotateCcw, Send, Sparkles, Trash2, Upload } from "lucide-react"
+import { ArrowLeft, CalendarClock, Check, Clapperboard, Mic, RefreshCw, RotateCcw, Send, Sparkles, Trash2, Upload } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -140,9 +140,15 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
         )}
         {data.content && data.status !== "sent" && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.sendPromotion(slug, id), "send")}>
-            <Send className="size-4" /> Send now
+            <Send className="size-4" /> Send slides
           </Button>
         )}
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.promoVideo(slug, id, "silent"), "promo video") }>
+          <Clapperboard className="size-4" /> Video: SFX+BGM
+        </Button>
+        <Button size="sm" variant="outline" disabled={busy} onClick={() => act(() => api.promoVideo(slug, id, "voice"), "promo video voice") }>
+          <Mic className="size-4" /> Video: TTS
+        </Button>
         {data.content && data.status !== "sent" && (
           <div className="flex items-center gap-2">
             <Input type="date" className="w-40" value={scheduleDate} onChange={(e) => setScheduleDate(e.target.value)} />
@@ -218,6 +224,26 @@ export function PromotionDetailView({ slug, id }: { slug: string; id: string }) 
             </Button>
             <Button size="sm" variant="ghost" onClick={() => setRerenderTemplate(null)}>Cancel</Button>
           </div>
+        </CardContent></Card>
+      )}
+
+      {data.video_artifact_prefix && (
+        <Card><CardContent className="space-y-2 p-4">
+          <h3 className="text-xs font-medium text-muted-foreground">
+            Video ({data.video_audio_mode === "voice" ? "TTS narration" : "SFX + BGM"}, {data.video_duration_sec?.toFixed(1)}s)
+          </h3>
+          <video key={data.video_artifact_prefix} controls className="w-full max-w-xs rounded-md" src={`/api/g/${slug}/promotions/${id}/video`} />
+        </CardContent></Card>
+      )}
+
+      {data.video_content && (
+        <Card><CardContent className="space-y-2 p-4">
+          <h3 className="text-xs font-medium text-muted-foreground">Video script — {data.video_content.length} scenes</h3>
+          <ol className="list-decimal space-y-1 pl-5 text-xs">
+            {data.video_content.map((s, i) => (
+              <li key={i}><span className="font-medium">{s.overlay_text}</span>{s.narration && <span className="text-muted-foreground"> — {s.narration}</span>} <span className="text-muted-foreground">· {s.visual}</span></li>
+            ))}
+          </ol>
         </CardContent></Card>
       )}
 

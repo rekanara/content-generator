@@ -1,7 +1,7 @@
 // Promo content prompt — creative arc pool + builder contract.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { promoContentPrompt, PROMO_ARCS, type PromoData } from '../src/prompts.ts';
+import { promoCriticPrompt, promoContentPrompt, PROMO_ARCS, type PromoData } from '../src/prompts.ts';
 
 const DATA: PromoData = {
   name: 'Audit Code', topic: 'jasa audit & refactor', features: ['audit cepat', 'laporan jelas'],
@@ -48,4 +48,16 @@ test('builder: system prompt bans the generic cover phrasing', () => {
   const sys = promoContentPrompt(DATA, '.a', PROMO_ARCS[1]!)[0]!.content;
   assert.match(sys, /Introducing X/); // the ban references it explicitly
   assert.match(sys, /scroll-stopper/);
+});
+
+test('critic prompt: carries data, draft, score contract and the no-invention rule', () => {
+  const msgs = promoCriticPrompt(DATA, '.a', { slides: [{ html: '<h1>x</h1>', image_prompt: '' }] });
+  assert.ok(msgs[1]!.content.includes('"Audit Code"') && msgs[1]!.content.includes('<h1>x</h1>'));
+  assert.match(msgs[1]!.content, /"score"/);
+  assert.match(msgs[0]!.content, /Never invent facts/);
+});
+
+test('writer prompt: feedback is injected on retry, absent otherwise', () => {
+  assert.ok(!promoContentPrompt(DATA, '.a', PROMO_ARCS[0]!)[1]!.content.includes('PREVIOUS ATTEMPT REJECTED'));
+  assert.ok(promoContentPrompt(DATA, '.a', PROMO_ARCS[0]!, 'weak hook')[1]!.content.includes('weak hook'));
 });

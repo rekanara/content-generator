@@ -85,3 +85,31 @@ test('reels scene guard: visual optional; sceneVisual drops unknown values', () 
   assert.equal(sceneVisual('bogus'), undefined);
   assert.equal(sceneVisual(undefined), undefined);
 });
+
+import { sfxPlan } from '@workspace/reels/sfx';
+import { statParts, odoLockFrame } from '../../../packages/reels/src/odometer.ts';
+
+test('statParts: number-led overlay → digit chars + label; no number / >6 digits → null', () => {
+  const p = statParts('99,98% uptime')!;
+  assert.equal(p.digits, 4);
+  assert.equal(p.label, '% uptime');
+  assert.equal(statParts('Cek kontrakmu'), null);
+  assert.equal(statParts('1234567 user'), null);
+  assert.ok(odoLockFrame(1) > odoLockFrame(0));
+});
+
+test('sfxPlan: scene cuts get whoosh, hook gets impact, one stat gets ticks, all within the video', () => {
+  const t = buildTimeline([
+    { overlay_text: 'Hook', narration: 'a b c', durationSec: 3 },
+    { overlay_text: '6 bulan cuti', narration: 'd e f', durationSec: 4, visual: 'point' },
+    { overlay_text: '12 pengguna', narration: 'g h', durationSec: 4, visual: 'stat' },
+    { overlay_text: 'Cek hari ini', narration: 'i j', durationSec: 3 },
+  ], 30);
+  const cues = sfxPlan(t);
+  assert.ok(cues.some((c) => c.file === 'impact-zoom-quick.mp3'));
+  assert.equal(cues.filter((c) => c.file === 'whoosh-fast.mp3').length, 3);
+  assert.equal(cues.filter((c) => c.file === 'bass-hit-short.mp3').length, 1);
+  assert.equal(cues.filter((c) => c.file === 'clock-tick-single.mp3').length, 2);
+  assert.ok(cues.every((c) => c.atSec >= 0 && c.atSec < t.durationInFrames / t.fps));
+  assert.deepEqual(cues, [...cues].sort((a, b) => a.atSec - b.atSec));
+});

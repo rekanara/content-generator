@@ -210,9 +210,10 @@ export function writerPrompt(
 JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}
 headline: scroll-stopper, short and punchy. body: one idea per slide, short sentences. Every slide must connect to the previous slide.`,
     reels: `Reels 15-30 seconds, 4-6 scenes, total narration MAX 55 words (speech pace ±2 words/second — more than that the duration explodes). Each narration MAX 12 words. Scene 1 = 5-second hook. Last scene = CTA.
-JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>", "visual": "hook|point|stat|quote|cta"}]}
+JSON: {"caption": {"title": "<max 10 words, punchy>", "subtitle": "<1-2 sentences, what this is about>", "cta": "<short action, e.g. save/share/follow — may be empty>", "tags": ["<3-5 hashtags WITH #, lowercase, no spaces — see HASHTAG RULES>"]}, "scenes": [{"overlay_text": "<max 10 words, large on-screen text>", "narration": "<1-2 spoken sentences, conversational>", "visual": "hook|point|stat|quote|cta", "image_query": "<optional concrete English photo search, e.g. 'rocket launch night sky' — empty for most scenes>"}]}
 narration: natural spoken language, not written prose. overlay_text: short phrase, not a full sentence.
-visual (how the scene is animated): first scene "hook", last scene "cta"; "stat" ONLY when overlay_text STARTS with the number (e.g. "3 bulan cuti penuh") — the number counts up on screen; "quote" for a direct quote from a named person; otherwise "point".`,
+visual (how the scene is animated): first scene "hook", last scene "cta"; "stat" ONLY when overlay_text STARTS with the number (e.g. "3 bulan cuti penuh") — the number counts up on screen; "quote" for a direct quote from a named person; otherwise "point".
+image_query: empty on almost every scene — only the hook or one standout scene may use a real-world photo when it genuinely strengthens that moment. Never on "stat" or "cta" scenes.`,
     pdf: `LinkedIn carousel as PDF, 6-10 pages. Page 1 = hook. Last page = CTA/discussion prompt.
 JSON: {"caption": string, "slides": [{"headline": "<max 8 words>", "body": "<max 25 words"}]}`,
     text: `LinkedIn text post. 150-250 words. First 2 lines must stop the thumb. Structure: hook → story/insight → reflection → closing question for discussion.
@@ -285,7 +286,9 @@ Fix the caption tags too: replace any tag that fails the rules above with one th
 Draft:
 ${back(format)}
 
-Return JSON with the EXACT same structure (keys and slide/scene counts may change if it improves the result), final revised version ready to publish.
+Return JSON with the EXACT same structure (keys and slide/scene counts may change if it improves the result), final revised version ready to publish.${
+        format === 'reels' ? '\nKEEP scene image_query if present; do not add or remove images unless the scene itself is dropped.' : ''
+      }
 Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid publish, below 7 = still weak) and "notes" (one short sentence, the weakest aspect of the ORIGINAL draft).`,
     },
   ];
@@ -549,10 +552,122 @@ export const PROMO_ARCS: string[] = [
   'BEHIND-THE-SCENES: open with a process detail nobody shares (how the work actually gets done). Build credibility through craft slides — specifics, trade-offs, lessons. Reveal the offer late, as "kalau mau hasil yang sama tanpa trial-error-nya".',
 ];
 
+export function promoVideoPrompt(
+  p: PromoData,
+  arcOverride: string,
+  audioMode: 'silent' | 'voice',
+  feedback?: string,
+): { role: 'system' | 'user'; content: string }[] {
+  const arc = arcOverride;
+  return [
+    {
+      role: 'system',
+      content: [
+        'You write the scene script for a 9:16 animated product promo video (Instagram/TikTok style, Indonesian, developer audience).',
+        'Output scenes only — overlay text + narration. The renderer handles all animation, camera, timing and sound.',
+        '',
+        'HARD RULES:',
+        '- 4-7 scenes. Scene 1 = hook (max 8 words on screen). Last scene = CTA (clear next step, price at most once).',
+        `- overlay_text: max 10 words, large on-screen text, not a full sentence.`,
+        audioMode === 'voice'
+          ? '- narration: natural spoken Indonesian, 1-2 short sentences, MAX 14 words. This IS read aloud by TTS.'
+          : '- narration: empty string "" for every scene — this video has NO voiceover, overlay_text carries the message alone.',
+        '- visual: "hook" for scene 1, "cta" for the last scene, "stat" ONLY when overlay_text STARTS with a number',
+        '  (e.g. "3 hari live") — it animates as a counting digit roll, "quote" for a direct quote, otherwise "point".',
+        '- Use ONLY facts in the promo data below — never invent a number, deadline, or guarantee.',
+        '- CONTINUITY: scenes must read as one argument, same as a good carousel — never unrelated taglines.',
+        '- image_query: empty for most scenes. Use 1-2 scenes max when a real-world photo would improve the point.',
+        '  Keep it concrete and searchable in English (e.g. "developer laptop code desk", "rocket launch night sky").',
+        '- No emoji, no ALL-CAPS spam, no fake urgency unless the data says so.',
+        'Reply ONLY with valid JSON.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Promo data (use only this — a palette, not every field needs a scene):
+${JSON.stringify(p, null, 1)}
+
+Story arc for THIS video (follow it; adapt only if the data truly contradicts it):
+${arc}
+${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
+Return JSON: {"scenes": [{"overlay_text": "<text>", "narration": "<spoken text or empty>", "visual": "hook|point|stat|quote|cta", "image_query": "<search query or empty>"}, ... 4-7 scenes]}`,
+    },
+  ];
+}
+
+export function promoVideoCriticPrompt(
+  p: PromoData,
+  audioMode: 'silent' | 'voice',
+  draft: { scenes: { overlay_text: string; narration: string; visual?: string }[] },
+): { role: 'system' | 'user'; content: string }[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a ruthless editor for a short vertical product promo video script (Indonesian, developer audience).',
+        'Fix: weak or generic hook, scenes that repeat the same idea, missing continuity between scenes, invented facts/numbers,',
+        'price shown more than once or not near the end, a weak or missing CTA, overlay_text longer than 10 words,',
+        audioMode === 'voice' ? 'narration longer than 14 words or not natural spoken Indonesian.' : 'any non-empty narration (this video has no voiceover — narration must stay "").',
+        'too many image_query fields (max 2), vague image_query values, or a visual that does not fit the scene.',
+        'Never invent facts beyond the promo data. Reply ONLY with valid JSON.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Promo data (source of truth):
+${JSON.stringify(p, null, 1)}
+
+Draft:
+${JSON.stringify(draft)}
+
+Return JSON with the EXACT same structure: {"scenes": [{"overlay_text": "...", "narration": "...", "visual": "..."}, ...]}, final revised version ready to publish.
+Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid publish, below 7 = still weak) and "notes" (one short sentence, the weakest aspect of the ORIGINAL draft).`,
+    },
+  ];
+}
+
+export function promoCriticPrompt(
+  p: PromoData,
+  cssVocab: string,
+  draft: { slides: { html: string; image_prompt?: string }[] },
+): { role: 'system' | 'user'; content: string }[] {
+  return [
+    {
+      role: 'system',
+      content: [
+        'You are a ruthless editor + slide art director for product promotion carousels (Indonesian, developer audience).',
+        'Revise the deck until it is publish-worthy. Keep every hard rule: no root background, no font-family, no <style>/<script>,',
+        'template classes + palette only, big phone-readable type, 5-9 slides.',
+        'Fix: generic or vague hook, slides that restate the same idea, a pile of separate cards instead of one argument,',
+        'repeated layouts on consecutive slides, text that is too long for its slide (max ~25 words of body per slide),',
+        'invented claims or numbers that are not in the promo data, fake urgency, price shown more than once or on slide 1,',
+        'copy that sounds like a marketplace banner instead of a developer sharing something they built,',
+        'a weak or missing closing call to action, and images ({{image}}) without a concrete image_prompt.',
+        'Never invent facts, prices, deadlines or guarantees. Reply ONLY with valid JSON.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: `Promo data (source of truth — do not add facts beyond it):
+${JSON.stringify(p, null, 1)}
+
+Template CSS classes + palette you may use:
+${cssVocab}
+
+Draft:
+${JSON.stringify(draft)}
+
+Return JSON with the EXACT same structure: {"slides": [{"html": "<fragment>", "image_prompt": "<text or empty>"}, ...]}, final revised version ready to publish.
+Add TWO extra top-level fields: "score" (integer 0-10, honest — 7-8 = solid publish, below 7 = still weak) and "notes" (one short sentence, the weakest aspect of the ORIGINAL draft).`,
+    },
+  ];
+}
+
 export function promoContentPrompt(
   p: PromoData,
   cssVocab: string,
   arcOverride?: string,
+  feedback?: string,
 ): { role: 'system' | 'user'; content: string }[] {
   const arc = arcOverride ?? PROMO_ARCS[Math.floor(Math.random() * PROMO_ARCS.length)]!;
   return [
@@ -588,6 +703,13 @@ export function promoContentPrompt(
         '- Price appears at most once, near the end, only as the deal (price_sale when present).',
         '- Where a slide needs a photo/illustration, place {{image}} inside an <img src="{{image}}">',
         '  or as a background, and describe the image in that slide\'s image_prompt (Indonesian, concrete: subject + style + mood).',
+        '- Use {{image}} on 2-3 slides at most (the human must supply each image) — pick the slides where a visual',
+        '  actually carries the story (the product in use, the before/after, the result). Every other slide has an empty image_prompt.',
+        '- Every slide needs a clear visual hierarchy: ONE dominant element (headline or number, 56-120px),',
+        '  ONE supporting line (28-40px), nothing else competing. Max ~25 words of body text per slide.',
+        '- Keep content inside the safe area: roughly 80px from each edge; leave room for the template header and footer.',
+        '- Use the promo data\'s real specifics (numbers, timeframes, tools, price) — never invent a claim, number, deadline or guarantee.',
+        '- The LAST slide is the call to action: one concrete next step (what to do, where), the deal price once, nothing else.',
         '',
         'ANTI-SLOP RULES (these make a deck scream "AI-generated" — all banned):',
         '- Purple/violet gradient defaults, #7c5cff-style accents — use the TEMPLATE palette, not your habits.',
@@ -605,6 +727,7 @@ ${JSON.stringify(p, null, 1)}
 
 Story arc for THIS deck (follow it; adapt only if the data truly contradicts it — do NOT fall back to the generic formula):
 ${arc}
+${feedback ? `\nPREVIOUS ATTEMPT REJECTED — do not repeat its mistakes:\n${feedback}\n` : ''}
 
 Template CSS classes + palette you may use:
 ${cssVocab}

@@ -1,16 +1,52 @@
 // Promotion usecases: AI content generation, brief drafting, image-slot reporting.
-import { chatJson, writerModel } from '../llm.ts';
+import { chatJson, writerModel, criticModel } from '../llm.ts';
 import { recordLlmRun } from '../repos/llm-runs.ts';
-import { isPromoContentOut, isPromoBriefOut, type PromoContentOut, type PromoBriefOut } from '../schema.ts';
-import { promoContentPrompt, promoBriefPrompt, type PromoData } from '../prompts.ts';
-import { getPromotion, setContent, setContentWithTemplate, imageSlots, markPromotionSent } from '../repos/promotions.ts';
+import { isPromoContentOut, isPromoVideoOut, isPromoBriefOut, criticScore, criticFeedback, stripCriticMeta, type PromoContentOut, type PromoVideoOut, type PromoBriefOut } from '../schema.ts';
+import { promoContentPrompt, promoCriticPrompt, promoVideoPrompt, promoVideoCriticPrompt, promoBriefPrompt, PROMO_ARCS, type PromoData } from '../prompts.ts';
+import { getPromotion, setContent, setContentWithTemplate, setVideoContent, setVideoArtifact, imageSlots, markPromotionSent } from '../repos/promotions.ts';
 import { getTemplate } from '../repos/templates.ts';
 import { cssVocabOf, promoVocabOf, sanitizePromoFragment, defaultTemplate, renderPromotion } from '../render/promotion.ts';
 import { artifactExists, uploadPromotionImage } from '../storage.ts';
+import { renderPromotionVideo } from '../render/promotion-video.ts';
 import { sendMessage } from '../telegram.ts';
 import { resolveCaptionParts, appendCaptionParts } from '../schema.ts';
 import type { GroupCfg } from '../groups.ts';
-import type { Promotion } from '@workspace/shared';
+import type { Promotion, PromoVideoScene } from '@workspace/shared';
+
+const PROMO_THRESHOLD = 7;
+
+async function writePromoSlides(cfg: GroupCfg, data: PromoData, cssVocab: string): Promise<{ html: string; image_prompt: string }[]> {
+  const first = promoContentPrompt(data, cssVocab);
+  const w = await chatJson<PromoContentOut>(cfg, writerModel(cfg), first, isPromoContentOut, 8000);
+  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), w.usage.prompt, w.usage.completion).catch(() => {});
+  const critique = async (d: PromoContentOut) => {
+    const c = await chatJson<PromoContentOut>(cfg, criticModel(cfg), promoCriticPrompt(data, cssVocab, d), isPromoContentOut, 8000);
+    await recordLlmRun(cfg.id, 'promo', criticModel(cfg), c.usage.prompt, c.usage.completion).catch(() => {});
+    return c.data;
+  };
+  let final: PromoContentOut;
+  try {
+    final = await critique(w.data);
+  } catch (e) {
+    console.warn(`[promo] critic failed — shipping writer draft: ${(e as Error).message.slice(0, 160)}`);
+    final = w.data;
+  }
+  let score = criticScore(final);
+  if (score !== null && score < PROMO_THRESHOLD) {
+    console.log(`[promo] score ${score} < ${PROMO_THRESHOLD} — one regeneration`);
+    try {
+      const w2 = await chatJson<PromoContentOut>(cfg, writerModel(cfg), promoContentPrompt(data, cssVocab, undefined, criticFeedback(final, score)), isPromoContentOut, 8000);
+      await recordLlmRun(cfg.id, 'promo', writerModel(cfg), w2.usage.prompt, w2.usage.completion).catch(() => {});
+      const c2 = await critique(w2.data);
+      const score2 = criticScore(c2);
+      if (score2 === null || score2 > score) { final = c2; score = score2; }
+    } catch (e) {
+      console.warn(`[promo] retry failed — keeping first revision: ${(e as Error).message.slice(0, 160)}`);
+    }
+  }
+  console.log(`[promo] editor score=${score ?? 'n/a'}`);
+  return stripCriticMeta(final).slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
+}
 
 // AI writes the slides for a stored promotion (template css drives the layout).
 // Image slots ({{image}}) reported back; status flips to awaiting_images/ready.
@@ -23,14 +59,69 @@ export async function generatePromotionContent(cfg: GroupCfg, promoId: string): 
     name: promo.name, topic: promo.topic, features: promo.features, stacks: promo.stacks,
     stats: promo.stats, price: promo.price, price_sale: promo.price_sale,
   };
-  const out = await chatJson<PromoContentOut>(
-    cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
-  );
-  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
-  const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
+  const slides = await writePromoSlides(cfg, data, cssVocab);
   await setContent(promoId, slides);
   console.log(`[promo] #${promoId} content generated — ${slides.length} slides`);
   return { slides: slides.length, imageSlots: imageSlots({ ...promo, content: slides }) };
+}
+
+
+const promoData = (p: Promotion): PromoData => ({
+  name: p.name, topic: p.topic, features: p.features, stacks: p.stacks, stats: p.stats, price: p.price, price_sale: p.price_sale,
+});
+
+// AI writes the VIDEO script (scenes) for a promotion — no template/css involved, the Remotion
+// renderer owns all motion. Same writer → editor → one retry gate as the slide flow.
+export async function generatePromotionVideoScript(cfg: GroupCfg, promoId: string, audioMode: 'silent' | 'voice'): Promise<{ scenes: number }> {
+  const promo = await getPromotion(cfg.id, promoId);
+  if (!promo) throw new Error(`promotion ${promoId} not found`);
+  const data = promoData(promo);
+  const arc = PROMO_ARCS[Math.floor(Math.random() * PROMO_ARCS.length)]!;
+  const run = async (model: string, msgs: ReturnType<typeof promoVideoPrompt>) => {
+    const r = await chatJson<PromoVideoOut>(cfg, model, msgs, isPromoVideoOut, 4000);
+    await recordLlmRun(cfg.id, 'promo', model, r.usage.prompt, r.usage.completion).catch(() => {});
+    return r.data;
+  };
+  const w = await run(writerModel(cfg), promoVideoPrompt(data, arc, audioMode));
+  let final: PromoVideoOut;
+  try { final = await run(criticModel(cfg), promoVideoCriticPrompt(data, audioMode, w)); }
+  catch (e) { console.warn(`[promo-video] editor failed — shipping writer draft: ${(e as Error).message.slice(0, 160)}`); final = w; }
+  let score = criticScore(final);
+  if (score !== null && score < PROMO_THRESHOLD) {
+    console.log(`[promo-video] score ${score} < ${PROMO_THRESHOLD} — one regeneration`);
+    try {
+      const w2 = await run(writerModel(cfg), promoVideoPrompt(data, arc, audioMode, criticFeedback(final, score)));
+      const c2 = await run(criticModel(cfg), promoVideoCriticPrompt(data, audioMode, w2));
+      const score2 = criticScore(c2);
+      if (score2 === null || score2 > score) { final = c2; score = score2; }
+    } catch (e) {
+      console.warn(`[promo-video] retry failed — keeping first revision: ${(e as Error).message.slice(0, 160)}`);
+    }
+  }
+  console.log(`[promo-video] editor score=${score ?? 'n/a'}`);
+  const clean = stripCriticMeta(final);
+  const scenes: PromoVideoScene[] = clean.scenes.map((sc, i, all) => ({
+    overlay_text: sc.overlay_text.trim(),
+    narration: audioMode === 'voice' ? sc.narration.trim() : '',
+    visual: i === 0 ? 'hook' : i === all.length - 1 ? 'cta' : (sc.visual === 'hook' || sc.visual === 'cta' ? 'point' : sc.visual ?? 'point'),
+    image_query: sc.image_query?.trim() ?? '',
+    image_credit: '',
+  }));
+  await setVideoContent(promoId, scenes, audioMode);
+  console.log(`[promo-video] #${promoId} script generated — ${scenes.length} scenes (${audioMode})`);
+  return { scenes: scenes.length };
+}
+
+export async function deliverPromotionVideo(cfg: GroupCfg, promoId: string): Promise<void> {
+  const promo = await getPromotion(cfg.id, promoId);
+  if (!promo?.video_content) throw new Error(`promotion ${promoId} has no video script`);
+  const r = await renderPromotionVideo(promo, cfg);
+  await setVideoArtifact(promoId, r.prefix, r.durationSec);
+  const { sendVideo } = await import('../telegram.ts');
+  const caption = appendCaptionParts(promoCaption(promo), resolveCaptionParts(promo, cfg));
+  await sendVideo(cfg, r.key, `promo-${promoId}.mp4`, caption);
+  await markPromotionSent(promoId);
+  console.log(`[promo-video] #${promoId} delivered — rotation untouched`);
 }
 
 // AI drafts promo DATA from a rough brief (dashboard flow).
@@ -62,11 +153,7 @@ export async function regeneratePromotionContent(
     name: promo.name, topic: promo.topic, features: promo.features, stacks: promo.stacks,
     stats: promo.stats, price: promo.price, price_sale: promo.price_sale,
   };
-  const out = await chatJson<PromoContentOut>(
-    cfg, writerModel(cfg), promoContentPrompt(data, cssVocab), isPromoContentOut, 8000,
-  );
-  await recordLlmRun(cfg.id, 'promo', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
-  const slides = out.data.slides.map((s) => ({ html: sanitizePromoFragment(s.html), image_prompt: s.image_prompt ?? '' }));
+  const slides = await writePromoSlides(cfg, data, cssVocab);
   await setContentWithTemplate(promoId, slides, chosenId);
   const templateChanged = (chosenId ?? null) !== (promo.template_id ?? null);
   console.log(`[promo] #${promoId} content re-generated — ${slides.length} slides (template ${templateChanged ? 'switched' : 'kept'})`);

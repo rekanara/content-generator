@@ -1,12 +1,13 @@
 // Promotions repository (group-scoped). Content slides + image slots derived from {{image}} usage.
 import { sql } from '../db/pool.ts';
-import type { Promotion, PromotionInput, PromoSlide, PromoImageSlot } from '@workspace/shared';
+import type { Promotion, PromotionInput, PromoSlide, PromoImageSlot, PromoVideoScene } from '@workspace/shared';
 
 type Row = {
   id: string; group_id: string; name: string; topic: string;
   features: string[]; stacks: string[]; stats: string[];
   price: string; price_sale: string; template_id: string | null;
   content: PromoSlide[] | string | null; status: Promotion['status'];
+  video_content: PromoVideoScene[] | string | null; video_audio_mode: 'silent' | 'voice'; video_duration_sec: number | null; video_artifact_prefix: string | null;
   caption_cta: string | null; caption_footer: string | null;
   created_at: Date; sent_at: Date | null;
 };
@@ -25,6 +26,10 @@ function toOut(r: Row): Promotion {
     stats: Array.isArray(r.stats) ? r.stats : [],
     price: r.price, price_sale: r.price_sale, template_id: r.template_id ?? null,
     content: parseJson<PromoSlide[]>(r.content),
+    video_content: parseJson<PromoVideoScene[]>(r.video_content),
+    video_audio_mode: r.video_audio_mode ?? 'silent',
+    video_duration_sec: r.video_duration_sec ?? null,
+    video_artifact_prefix: r.video_artifact_prefix ?? null,
     caption_cta: r.caption_cta ?? null,
     caption_footer: r.caption_footer ?? null,
     status: r.status,
@@ -32,16 +37,16 @@ function toOut(r: Row): Promotion {
   };
 }
 
-const COLS = 'id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at';
+const COLS = 'id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, video_content, video_audio_mode, video_duration_sec, video_artifact_prefix, caption_cta, caption_footer, status, created_at, sent_at';
 
 export async function listPromotions(groupId: string): Promise<Promotion[]> {
-  const rows = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at
+  const rows = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, video_content, video_audio_mode, video_duration_sec, video_artifact_prefix, caption_cta, caption_footer, status, created_at, sent_at
     from promotions where group_id = ${groupId} order by id desc limit 100`;
   return rows.map(toOut);
 }
 
 export async function getPromotion(groupId: string, id: string): Promise<Promotion | null> {
-  const [r] = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at
+  const [r] = await sql<Row[]>`select id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, video_content, video_audio_mode, video_duration_sec, video_artifact_prefix, caption_cta, caption_footer, status, created_at, sent_at
     from promotions where id = ${id} and group_id = ${groupId}`;
   return r ? toOut(r) : null;
 }
@@ -51,7 +56,7 @@ export async function createPromotion(groupId: string, d: PromotionInput): Promi
   const [r] = await sql<Row[]>`insert into promotions (group_id, name, topic, features, stacks, stats, price, price_sale, template_id, caption_cta, caption_footer)
     values (${groupId}, ${d.name}, ${d.topic}, ${j(d.features)}, ${j(d.stacks)}, ${j(d.stats)},
       ${d.price}, ${d.price_sale}, ${d.template_id}, ${d.caption_cta ?? null}, ${d.caption_footer ?? null})
-    returning id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, caption_cta, caption_footer, status, created_at, sent_at`;
+    returning id, group_id, name, topic, features, stacks, stats, price, price_sale, template_id, content, video_content, video_audio_mode, video_duration_sec, video_artifact_prefix, caption_cta, caption_footer, status, created_at, sent_at`;
   if (!r) throw new Error('insert promotion failed');
   return toOut(r);
 }
@@ -87,6 +92,15 @@ export async function setContentWithTemplate(id: string, slides: PromoSlide[], t
 // its CURRENT visual identity.
 export async function setPromotionTemplate(id: string, templateId: string | null): Promise<void> {
   await sql`update promotions set template_id = ${templateId} where id = ${id}`;
+}
+
+export async function setVideoContent(id: string, scenes: PromoVideoScene[], mode: 'silent' | 'voice'): Promise<void> {
+  await sql`update promotions set video_content = ${sql.json(scenes as never)}, video_audio_mode = ${mode},
+    video_artifact_prefix = null, video_duration_sec = null where id = ${id}`;
+}
+
+export async function setVideoArtifact(id: string, prefix: string, durationSec: number): Promise<void> {
+  await sql`update promotions set video_artifact_prefix = ${prefix}, video_duration_sec = ${durationSec} where id = ${id}`;
 }
 
 export async function markPromotionSent(id: string): Promise<void> {

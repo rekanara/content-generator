@@ -20,7 +20,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, PillarSuggestInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput, TutorialInput, TutorialGenerateInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput, TutorialInput, TutorialGenerateInput, PromotionVideoInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -1146,6 +1146,32 @@ g.post('/:slug/promotions/:id/regenerate', async (c) => {
   } catch (e) {
     return c.json({ error: (e as Error).message }, 400);
   }
+});
+
+// Remotion video: write the script (silent = overlay text + SFX + BGM, voice = TTS narration) and
+// render+send it. Slides untouched. body { audio: 'silent'|'voice', send?: boolean (default true) }.
+g.post('/:slug/promotions/:id/video', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = PromotionVideoInput.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const p = await getPromotion(gr(c).id, id);
+  if (!p) return c.json({ error: 'promotion not found' }, 404);
+  enqueue({ kind: 'promoVideo', slug: gr(c).slug, promoId: id, audio: parsed.data.audio, send: parsed.data.send });
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+g.get('/:slug/promotions/:id/video', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const p = await getPromotion(gr(c).id, id);
+  if (!p?.video_artifact_prefix) return c.json({ error: 'video not rendered yet' }, 404);
+  const key = `${p.video_artifact_prefix}promo.mp4`;
+  const size = await statArtifact(key).catch(() => null);
+  if (size === null) return c.json({ error: 'video not found' }, 404);
+  return new Response(Readable.toWeb(Readable.from(await getArtifactStream(key))) as unknown as ReadableStream, {
+    headers: { 'content-type': 'video/mp4', 'content-length': String(size), 'cache-control': 'private, no-store' },
+  });
 });
 
 // re-render + resend a SENT promo with the current template row (template edits

@@ -137,12 +137,12 @@ const MIN_IMG_W = 600;
 
 // SSRF-safe image download (same hop checks as pages). Rejects non-images, oversized files,
 // and anything narrower than 600px (would look blurry on a 1080px slide).
-export async function downloadImage(url: string): Promise<Buffer | null> {
+export async function downloadImage(url: string, ua = 'Mozilla/5.0 (content-generator research bot)'): Promise<Buffer | null> {
   try {
     let u = await safeUrl(url);
     let res: Response | null = null;
     for (let hop = 0; u && hop < 4; hop++) {
-      res = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'user-agent': 'Mozilla/5.0 (content-generator research bot)', accept: 'image/jpeg,image/png,image/webp' } });
+      res = await fetch(u, { redirect: 'manual', signal: AbortSignal.timeout(15_000), headers: { 'user-agent': ua, accept: 'image/jpeg,image/png,image/webp' } });
       const loc = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
       if (!loc) break;
       u = await safeUrl(loc, u);

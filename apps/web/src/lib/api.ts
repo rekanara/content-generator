@@ -138,6 +138,8 @@ export const api = {
     return req<{ ok: true; allImagesPresent: boolean }>(`${g(slug)}/promotions/${id}/images`, { method: 'POST', body: fd });
   },
   sendPromotion: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/promotions/${id}/send`, { method: 'POST' }),
+  promoVideo: (slug: string, id: string, audio: 'silent' | 'voice', send = true) =>
+    req<{ ok: true }>(`${g(slug)}/promotions/${id}/video`, { method: 'POST', body: JSON.stringify({ audio, send }) }),
   schedulePromotion: (slug: string, id: string, for_date: string) => req<Plan>(`${g(slug)}/promotions/${id}/schedule`, { method: 'POST', body: JSON.stringify({ for_date }) }),
   addPlan: (slug: string, p: PlanInput) => req<Plan>(`${g(slug)}/plans`, { method: 'POST', body: JSON.stringify(p) }),
   cancelPlan: (slug: string, id: string) => req<{ ok: true }>(`${g(slug)}/plans/${id}/cancel`, { method: 'POST' }),

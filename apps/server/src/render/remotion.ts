@@ -24,12 +24,15 @@ function getServeUrl(): Promise<string> {
 export type BackgroundFile = { type: 'image' | 'video'; path: string };
 
 // Silent MP4 for the timeline. Throws on any Remotion/Chrome failure — caller falls back.
+export type PublicAsset = { path: string; name: string };
+
 export async function renderRemotionVideo(
-  timeline: ReelsTimeline, theme: ReelsTheme, outputLocation: string, bg?: BackgroundFile, key = 'reel',
+  timeline: ReelsTimeline, theme: ReelsTheme, outputLocation: string, bg?: BackgroundFile, key = 'reel', assets: PublicAsset[] = [],
 ): Promise<void> {
   const url = await getServeUrl();
   const name = bg ? `${key}-bg${extname(bg.path) || (bg.type === 'video' ? '.mp4' : '.png')}` : null;
   if (bg && name) copyFileSync(bg.path, resolve(PUBLIC_DIR, name));
+  for (const a of assets) copyFileSync(a.path, resolve(PUBLIC_DIR, a.name));
   try {
     const inputProps = { timeline, theme, ...(bg && name ? { background: { type: bg.type, src: name } } : {}) };
     const composition = await selectComposition({ serveUrl: url, id: 'Reel', inputProps, ...CHROME });
@@ -39,5 +42,6 @@ export async function renderRemotionVideo(
     });
   } finally {
     if (name) rmSync(resolve(PUBLIC_DIR, name), { force: true });
+    for (const a of assets) rmSync(resolve(PUBLIC_DIR, a.name), { force: true });
   }
 }

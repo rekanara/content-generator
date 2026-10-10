@@ -604,6 +604,15 @@ export const PromoSlide = z.object({
 });
 export type PromoSlide = z.infer<typeof PromoSlide>;
 
+export const PromoVideoScene = z.object({
+  overlay_text: z.string(),
+  narration: z.string().default(''),
+  visual: z.enum(['hook', 'point', 'stat', 'quote', 'cta']).default('point'),
+  image_query: z.string().default(''),
+  image_credit: z.string().default(''),
+});
+export type PromoVideoScene = z.infer<typeof PromoVideoScene>;
+
 export const Promotion = z.object({
   id: z.string().uuid(),
   name: z.string(),
@@ -615,6 +624,10 @@ export const Promotion = z.object({
   price_sale: z.string(),
   template_id: z.string().uuid().nullable(),
   content: z.array(PromoSlide).nullable(),
+  video_content: z.array(PromoVideoScene).nullable(),
+  video_audio_mode: z.enum(['silent', 'voice']).default('silent'),
+  video_duration_sec: z.number().nullable().default(null),
+  video_artifact_prefix: z.string().nullable().default(null),
   caption_cta: z.string().nullable(),       // null = group setting
   caption_footer: z.string().nullable(),    // null = group setting
   status: z.enum(['draft', 'content_ready', 'awaiting_images', 'ready', 'sent']),
@@ -639,3 +652,9 @@ export type PromotionInput = z.infer<typeof PromotionInput>;
 // image slots a promotion's content needs (derived: slides whose html embeds {{image}})
 export const PromoImageSlot = z.object({ slide: z.number(), prompt: z.string(), file: z.string().nullable() });
 export type PromoImageSlot = z.infer<typeof PromoImageSlot>;
+
+export const PromotionVideoInput = z.object({
+  audio: z.enum(['silent', 'voice']).default('silent'),
+  send: z.boolean().default(true),
+});
+export type PromotionVideoInput = z.infer<typeof PromotionVideoInput>;

@@ -7,6 +7,8 @@ export type TimelineSceneInput = {
   durationSec: number;
   visual?: SceneVisual;
   words?: SpokenWord[]; // seconds from scene start (TTS WordBoundary); absent → spread evenly
+  image?: string;
+  image_credit?: string;
   step?: number;  // tutorial: step number badge
   code?: string;  // tutorial: shown on screen, never narrated
   note?: string;  // tutorial: warning line under the code panel

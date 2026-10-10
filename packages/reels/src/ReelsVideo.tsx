@@ -3,6 +3,11 @@ import { AbsoluteFill, Easing, Img, interpolate, Loop, OffthreadVideo, spring, s
 import { sceneAtFrame, type ReelsTimeline, type TimelineScene } from './timeline.ts';
 import { DEFAULT_THEME, type ReelsTheme } from './theme.ts';
 import { fontStack, loadReelFont } from './fonts.ts';
+import { Odometer } from './Odometer.tsx';
+import { statParts } from './odometer.ts';
+import { Dust, ImpactRing, impactShake } from './impact.tsx';
+import { slamHit, slamSceneIndex } from './sfx.ts';
+import { Marquee, SoftAurora, WordReveal, variant } from './motion-kit.tsx';
 
 export type ReelsBackground = { type: 'image' | 'video'; src: string };
 export type ReelsVideoProps = { timeline: ReelsTimeline; theme?: ReelsTheme; background?: ReelsBackground };
@@ -13,7 +18,6 @@ const up = (t: ReelsTheme, s: string) => (t.captions.case === 'upper' ? s.toUppe
 const clamp = { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' } as const;
 const easeOut = Easing.out(Easing.cubic);
 const easeInOut = Easing.inOut(Easing.cubic);
-const easeOutExpo = Easing.bezier(0.16, 1, 0.3, 1);
 // 9:16 safe area (IG/TikTok/Shorts UI): top 120, right rail 120, bottom 320 kept clear.
 const SAFE = { l: 90, r: 140, t: 140, b: 330 } as const;
 const PUNCH_AT = [0.45, 0.6, 0.5, 0.55] as const;
@@ -80,52 +84,29 @@ function breakLines(text: string, maxChars = 32): string[] {
   return lines.length > 0 ? lines : [text];
 }
 
-function Headline({ theme, local, fps, scene }: Ctx, size: number, top: number, align: 'left' | 'center' = 'left') {
+function Headline({ theme, local, scene }: Ctx, size: number, top: number, align: 'left' | 'center' = 'left') {
   const text = up(theme, scene.overlay_text);
   const lines = breakLines(text, 32);
-  const allWords = text.split(/\s+/);
-  const key = allWords.reduce((best, w, i) => (w.length > allWords[best]!.length ? i : best), 0);
-  const keyWord = allWords[key];
-  const dur = Math.round(fps * 0.5);
-  const totalWords = allWords.length;
-  const step = totalWords > 1 ? Math.max(1, Math.min(2, Math.floor((fps * 0.8 - dur) / (totalWords - 1)))) : 0;
-  let wordIdx = 0;
+  const mode = scene.index === 0 ? 0 : variant(scene.index, text.length);
   return (
-    <div aria-label={text} style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top, textAlign: align }}>
-      {lines.map((ln, li) => {
-        const words = ln.split(/\s+/);
-        const lineEl = (
-          <div key={li} style={{ fontSize: size * theme.font.scale, lineHeight: 1.05, fontWeight: theme.font.weight, letterSpacing: '-0.03em', color: theme.palette.text, marginBottom: li < lines.length - 1 ? 12 : 0 }}>
-            {words.map((w, wi) => {
-              const idx = wordIdx++;
-              const p = scene.index === 0 ? 1 : interpolate(local - idx * step, [0, dur], [0, 1], { ...clamp, easing: easeOutExpo });
-              return (
-                <span key={wi} aria-hidden style={{ display: 'inline-block', overflow: 'hidden', verticalAlign: 'top', marginRight: '0.22em', paddingBottom: '0.06em' }}>
-                  <span style={{ display: 'inline-block', transform: `translateY(${(1 - p) * 110}%)`, color: w === keyWord && totalWords > 2 ? theme.palette.accent : undefined }}>{w}</span>
-                </span>
-              );
-            })}
-          </div>
-        );
-        return lineEl;
-      })}
+    <div aria-label={text} style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top, textAlign: align, fontSize: size * theme.font.scale, lineHeight: 1.05, fontWeight: theme.font.weight, letterSpacing: '-0.03em', color: theme.palette.text }}>
+      {lines.map((ln, li) => (
+        <div key={li} style={{ marginBottom: li < lines.length - 1 ? 12 : 0 }}>
+          <WordReveal text={ln} local={local - li * 4} theme={theme} size={size * theme.font.scale} align={align} mode={mode} />
+        </div>
+      ))}
     </div>
   );
 }
 
 function Stat(ctx: Ctx) {
   const { theme, local, fps, scene } = ctx;
-  const m = scene.overlay_text.match(/^\s*([\d.,]+)(.*)$/);
-  const target = m ? Number(m[1]!.replace(/\./g, '').replace(',', '.')) : NaN;
-  if (!Number.isFinite(target)) return Headline(ctx, 96, 420);
-  const p = interpolate(local, [0, fps * 0.95], [0, 1], { ...clamp, easing: easeOut });
-  const shown = Number.isInteger(target) ? Math.round(target * p).toLocaleString('id-ID') : (target * p).toFixed(1);
+  const parts = statParts(scene.overlay_text);
+  if (parts) return <Odometer parts={parts} theme={theme} local={local} left={SAFE.l} right={SAFE.r} sceneLen={scene.endFrame - scene.startFrame} />;
   const s = spring({ frame: local, fps, config: { damping: 11, stiffness: 150 } });
   return (
     <div style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top: 330, textAlign: 'left', transform: `translateY(${(1 - s) * 40}px)`, opacity: s }}>
-      <div style={{ fontSize: 260 * theme.font.scale, fontWeight: theme.font.weight, color: theme.palette.accent, letterSpacing: -12, lineHeight: 0.88 }}>{shown}</div>
-      <div style={{ width: 260, height: 18, marginTop: 28, background: theme.palette.text }} />
-      <div style={{ fontSize: 66, fontWeight: theme.font.weight, color: theme.palette.text, marginTop: 34, lineHeight: 1.02 }}>{up(theme, (m![2] ?? '').trim())}</div>
+      <div style={{ fontSize: 170 * theme.font.scale, fontWeight: theme.font.weight, color: theme.palette.accent, letterSpacing: -6, lineHeight: 0.95 }}>{up(theme, scene.overlay_text)}</div>
     </div>
   );
 }
@@ -182,6 +163,18 @@ function TutorialCode(ctx: Ctx) {
   );
 }
 
+function SceneImage({ scene, theme, local }: Ctx) {
+  if (!scene.image) return null;
+  const p = interpolate(local, [0, 18], [0, 1], { ...clamp, easing: easeOut });
+  return (
+    <div style={{ position: 'absolute', left: SAFE.l, right: SAFE.r, top: 180, height: 560, borderRadius: 28, overflow: 'hidden', boxShadow: `0 28px 70px ${theme.palette.bg}99`, transform: `translateY(${(1 - p) * 34}px) scale(${0.98 + p * 0.02})`, opacity: p }}>
+      <Img src={staticFile(scene.image)} style={{ width: '100%', height: '100%', objectFit: 'cover', filter: 'saturate(.92) contrast(1.08)' }} />
+      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg, transparent 55%, rgba(0,0,0,.48))' }} />
+      {scene.image_credit && <div style={{ position: 'absolute', right: 16, bottom: 14, padding: '6px 9px', borderRadius: 6, background: 'rgba(0,0,0,.56)', color: '#fff', fontSize: 18, fontWeight: 700 }}>{scene.image_credit}</div>}
+    </div>
+  );
+}
+
 function SceneBody(ctx: Ctx) {
   const v = ctx.scene.visual;
   if (v === 'code') return TutorialCode(ctx);
@@ -189,7 +182,7 @@ function SceneBody(ctx: Ctx) {
   if (v === 'stat') return Stat(ctx);
   if (v === 'quote') return Quote(ctx);
   if (v === 'cta') return Cta(ctx);
-  return Headline(ctx, v === 'hook' ? 122 : 96, v === 'hook' ? 330 : 410, ctx.theme.layout === 'minimal' ? 'center' : 'left');
+  return Headline(ctx, v === 'hook' ? 122 : 96, ctx.scene.image ? 830 : v === 'hook' ? 330 : 410, ctx.theme.layout === 'minimal' ? 'center' : 'left');
 }
 
 // Media treatment: pan/zoom, blur edge, vignette, subject-safe overlay.
@@ -248,6 +241,8 @@ function Background({ theme, frame, total, scene, local, fps, background }: Ctx)
     <AbsoluteFill style={{ background: bg }}>
       {media}
       <div style={{ position: 'absolute', inset: -220, opacity: background ? 0.38 : 1, background: `linear-gradient(120deg, ${bg}, ${bg2} 56%, ${bg})`, transform: `translateX(${(drift - 0.5) * 90}px) rotate(${(d - 0.5) * 3}deg) scale(1.08)` }} />
+      <SoftAurora frame={frame} theme={theme} />
+      <Marquee text={scene.overlay_text.split(/\s+/).slice(0, 2).join(' ') || 'PROMO'} local={local} theme={theme} />
       <div style={{ position: 'absolute', left: -120 + drift * 120, top: 210, width: 820, height: 820, border: `28px solid ${accent}`, opacity: 0.3, transform: `rotate(${local * 0.12}deg)` }} />
       <div style={{ position: 'absolute', right: -180, bottom: 180 - drift * 110, width: 560, height: 560, background: accent, opacity: 0.18, transform: `rotate(${-12 - local * 0.08}deg)` }} />
       <div style={{ position: 'absolute', inset: 0, background: grain, opacity: 0.22 }} />
@@ -273,18 +268,32 @@ export function ReelsVideo({ timeline, theme = DEFAULT_THEME, background }: Reel
   const fadeOut = theme.transition.durationFrames === 0 || scene.index === timeline.scenes.length - 1 ? 1 : interpolate(local, [len - tf, len], [1, 0.05], clamp);
   const wipe = interpolate(local, [0, tf * 1.4], [0, 1], { ...clamp, easing: easeOut });
   const punchAt = Math.round(len * PUNCH_AT[scene.index % PUNCH_AT.length]!);
-  const punch = len < fps * 2 ? 1 : interpolate(spring({ frame: local - punchAt, fps, config: { damping: 12, stiffness: 200 } }), [0, 1], [1, 1.05]);
+  const punch = len < fps * 2 ? 1 : interpolate(spring({ frame: local - punchAt, fps, config: { damping: 12, stiffness: 200 } }), [0, 1], [1, scene.visual === 'stat' ? 1.025 : 1.035]);
+  const firstStat = slamSceneIndex(timeline.scenes);
+  const slam = scene.index === 0 || scene.index === firstStat;
+  const hit = slamHit(len);
+  const enter = slam ? interpolate(local, [0, hit], [1.45, 1], { ...clamp, easing: Easing.in(Easing.quad) }) : 1;
+  const shake = slam ? impactShake(local, hit, scene.visual === 'stat' ? 9 : 6) : { x: 0, y: 0 };
 
   return (
     <AbsoluteFill style={{ overflow: 'hidden', fontFamily: fontStack(theme.font.family), color: theme.palette.text }}>
       <Background {...ctx} />
-      <AbsoluteFill style={{ opacity: Math.min(fadeIn, fadeOut), transform: `translate3d(${(1 - fadeIn) * 86}px, 0, 0) scale(${(1 + (1 - fadeIn) * 0.025) * punch})`, transformOrigin: '50% 40%' }}>
+      <AbsoluteFill style={{ opacity: Math.min(fadeIn, fadeOut), transform: `translate3d(${(1 - fadeIn) * 86 + shake.x}px, ${shake.y}px, 0) scale(${(1 + (1 - fadeIn) * 0.025) * punch * enter})`, transformOrigin: '50% 40%' }}>
         {scene.visual !== 'cta' && theme.layout !== 'minimal' && theme.layout !== 'news' && <div style={{ position: 'absolute', left: SAFE.l, top: 284, width: 116, height: 14, background: theme.palette.accent, transform: `scaleX(${wipe})`, transformOrigin: 'left' }} />}
+        <SceneImage {...ctx} />
         <SceneBody {...ctx} />
       </AbsoluteFill>
+      {slam && <ImpactRing local={local} at={hit} color={theme.palette.accent} cy={scene.visual === 'stat' ? 700 : 760} />}
+      {slam && scene.visual === 'stat' && <Dust local={local} at={hit} color={theme.palette.text} cy={760} />}
       <Captions {...ctx} />
-      {scene.index > 0 && local < 8 && (
-        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '100%', background: theme.palette.accent, transform: `translateX(${interpolate(local, [0, 8], [-100, 100], { ...clamp, easing: easeInOut })}%) skewX(-12deg)`, opacity: 0.9 }} />
+      {scene.index > 0 && local < 10 && variant(scene.index, 44) % 3 === 0 && (
+        <div style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '100%', background: theme.palette.accent, transform: `translateX(${interpolate(local, [0, 10], [-100, 100], { ...clamp, easing: easeInOut })}%) skewX(-12deg)`, opacity: 0.9 }} />
+      )}
+      {scene.index > 0 && local < 12 && variant(scene.index, 44) % 3 === 1 && (
+        <div style={{ position: 'absolute', inset: 0, background: `radial-gradient(circle at 50% 50%, ${theme.palette.accent} 0 ${interpolate(local, [0, 12], [0, 120], clamp)}%, transparent ${interpolate(local, [0, 12], [8, 128], clamp)}%)`, opacity: 0.85 }} />
+      )}
+      {scene.index > 0 && local < 8 && variant(scene.index, 44) % 3 === 2 && (
+        <div style={{ position: 'absolute', inset: 0, background: theme.palette.text, opacity: interpolate(local, [0, 2, 8], [0.95, 0.55, 0], clamp) }} />
       )}
       <div style={{ position: 'absolute', top: theme.layout === 'news' ? 290 : SAFE.t, right: SAFE.r, fontSize: 32, fontWeight: theme.font.weight, color: theme.palette.muted, fontVariantNumeric: 'tabular-nums', letterSpacing: 1 }}>{String(scene.index + 1).padStart(2, '0')}/{String(timeline.scenes.length).padStart(2, '0')}</div>
       {theme.brand.handle && scene.visual !== 'cta' && <div style={{ position: 'absolute', left: SAFE.l, [theme.brand.position === 'top' ? 'top' : 'bottom']: theme.brand.position === 'top' ? (theme.layout === 'news' ? 290 : SAFE.t) : SAFE.b, fontSize: 34, fontWeight: theme.font.weight, color: theme.palette.muted }}>{theme.brand.handle}</div>}
