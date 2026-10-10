@@ -131,7 +131,9 @@ async function runGenerate(
   templateId?: string,
 ): Promise<void> {
   const today = jakartaToday();
-  const plan = await getPlanByDate(cfg.id, today);
+  // manual news generate = explicit topic + format pick → the date's plan must not hijack it
+  // (plan stays active for the natural run). ponytail: /buat briefs still defer to the plan.
+  const plan = news ? null : await getPlanByDate(cfg.id, today);
 
   // ——— override content plan: manual content replaces the pipeline ———
   if (plan?.type === 'override_content') {
