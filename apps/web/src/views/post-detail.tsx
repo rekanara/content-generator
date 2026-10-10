@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { ArrowLeft, Check, Copy, Download, ImageOff, RefreshCw, Send, X } from "lucide-react"
+import { ArrowLeft, Check, Copy, Download, ImageOff, RefreshCw, RotateCcw, Send, X } from "lucide-react"
 import { Button } from "@workspace/ui/components/button"
 import { Badge } from "@workspace/ui/components/badge"
 import { Card, CardContent } from "@workspace/ui/components/card"
@@ -100,6 +100,9 @@ export function PostDetailView({ slug, id }: { slug: string; id: string }) {
             <Send className="size-4" /> Resend
           </Button>
         )}
+        {data.is_news && ["awaiting_approval", "rejected", "failed", "sent"].includes(data.status) && (
+          <RegenAs slug={slug} id={id} busy={busy} act={act} />
+        )}
         {HAS_ARTIFACTS.includes(data.status) && data.format !== "text" && (
           <Button size="sm" variant="outline" disabled={busy}
             onClick={() => act(() => api.rerender(slug, id), "rerender with current template")}>
@@ -142,6 +145,29 @@ export function PostDetailView({ slug, id }: { slug: string; id: string }) {
           </CardContent>
         </Card>
       )}
+    </div>
+  )
+}
+
+const REGEN_OPTIONS = [
+  ["instagram/carousel", "IG carousel"],
+  ["instagram/reels", "IG reels"],
+  ["linkedin/pdf", "LinkedIn pdf"],
+  ["linkedin/text", "LinkedIn text"],
+] as const
+
+// News posts only: same news item, new format (a plan can hijack the slot — this is the fix).
+function RegenAs({ slug, id, busy, act }: { slug: string; id: string; busy: boolean; act: (fn: () => Promise<unknown>, label: string) => void }) {
+  const [pick, setPick] = useState<string>(REGEN_OPTIONS[0][0])
+  return (
+    <div className="flex items-center gap-1">
+      <select className="h-8 rounded-md border bg-background px-2 text-sm" aria-label="Regenerate format" value={pick} onChange={(e) => setPick(e.target.value)}>
+        {REGEN_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+      <Button size="sm" variant="outline" disabled={busy}
+        onClick={() => { const [p, f] = pick.split("/"); act(() => api.regenPostFormat(slug, id, p!, f!), "regenerate as " + pick) }}>
+        <RotateCcw className="size-4" /> Regenerate as
+      </Button>
     </div>
   )
 }

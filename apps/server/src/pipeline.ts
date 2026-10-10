@@ -4,15 +4,15 @@ import { recordLlmRun } from './repos/llm-runs.ts';
 import { sql } from './db/pool.ts';
 import { getRotation, getActivePillars, commitSent } from './repos/rotation.ts';
 import { claimIdea, markIdeaUsed } from './repos/ideas.ts';
-import { claimValidNewsItem, markNewsItemUsed, getNewsItemTopic } from './repos/news.ts';
+import { claimValidNewsItem, markNewsItemUsed, getNewsItemTopic, listNewsItemSources, type ExtraSource } from './repos/news.ts';
 import { ingestNewsGroup } from './usecases/news.ts';
 import { stage as runStage, postRef } from './progress.ts';
 import { nextSlot, forcedSlot, plannedSlot, nextState, type Slot, type Platform, type Format } from './state.ts';
 import { chatJson, writerModel, criticModel } from './llm.ts';
 import { isIdeationOut, writerGuard, writerGuardName, assembleCaption, toCaptionOut, criticScore, stripCriticMeta, criticFeedback, withNewsSource, resolveCaptionParts, isNewsResearchOut, type CaptionOut, type NewsResearchOut } from './schema.ts';
 import { stepUsage, postUsage, type StepUsage } from './llm-costs.ts';
-import { ideationPrompt, writerPrompt, criticPrompt, newsResearchPrompt, type ContentBrief } from './prompts.ts';
-import { fetchArticleWithImages, downloadImage } from './article.ts';
+import { ideationPrompt, writerPrompt, criticPrompt, newsResearchPrompt, type ContentBrief, type ExtraArticle } from './prompts.ts';
+import { fetchArticleWithImages, fetchArticleText, downloadImage } from './article.ts';
 import { uploadPostArtifactBuffer } from './storage.ts';
 import type { StyleSample, PillarFull } from './prompts.ts';
 import type { CarouselOut, ReelsOut, TextOut } from './schema.ts';
@@ -87,10 +87,17 @@ export async function resolvePlannedSlot(
 
 // Research step (news only): fetch the article → LLM extracts concrete facts.
 // Fail-safe: article fetch or research failure → falls back to title + RSS summary.
-async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typeof claimValidNewsItem>>>, usage: UsageAcc, audience: string, wantPhotos: boolean): Promise<{ research: NewsResearchOut | null; photos: Buffer[] }> {
+async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typeof claimValidNewsItem>>>, usage: UsageAcc, audience: string, wantPhotos: boolean, extraSources: ExtraSource[] = []): Promise<{ research: NewsResearchOut | null; photos: Buffer[] }> {
   runStage('ideation', `research: ${n.domain}`);
   const { text, images } = await fetchArticleWithImages(n.url);
   console.log(`[research] article ${text ? `${text.length} chars` : 'unavailable — RSS summary only'} (${n.domain})`);
+  // extra sources (multi-link "Fetch article(s)"): sequential + capped, a dead link just drops out (fail-safe)
+  const extra: ExtraArticle[] = [];
+  for (const e of extraSources) {
+    const t = (await fetchArticleText(e.url)).slice(0, 8000);
+    if (t) extra.push({ url: e.url, title: e.title, text: t });
+    console.log(`[research] extra source ${e.domain}: ${t ? `${t.length} chars` : 'unavailable'}`);
+  }
   // photos: sequential, first 5 candidates; any failure just drops that photo (fail-safe)
   const photos: Buffer[] = [];
   if (wantPhotos) {
@@ -102,7 +109,7 @@ async function researchNews(cfg: GroupCfg, n: NonNullable<Awaited<ReturnType<typ
     console.log(`[research] source photos ${photos.length}/${images.length} usable`);
   }
   try {
-    const r = await chatJson(cfg, writerModel(cfg), newsResearchPrompt(n, text, audience), isNewsResearchOut, 4000);
+    const r = await chatJson(cfg, writerModel(cfg), newsResearchPrompt(n, text, audience, extra), isNewsResearchOut, 4000);
     addUsage(usage, 'research', writerModel(cfg), r.usage);
     console.log(`[research] ${r.data.facts.length} facts, ${r.data.open_questions.length} open questions`);
     return { research: r.data, photos };
@@ -246,7 +253,8 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
   // audience = the news topic's own definition (e.g. "Berita Indonesia: pemerintahan, korupsi…"),
   // so a politics item is written for that audience — not bent into a developer angle
   const audience = newsTopic ? `people following "${newsTopic.name}"${newsTopic.description ? ` — ${newsTopic.description}` : ''}` : undefined;
-  const researched = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? (cfg.brief || 'people following this topic'), !!newsTopic?.use_source_images) : null;
+  const extraSources = newsItem ? await listNewsItemSources(newsItem.id) : [];
+  const researched = newsItem ? await researchNews(cfg, newsItem, usage, audience ?? (cfg.brief || 'people following this topic'), !!newsTopic?.use_source_images, extraSources) : null;
   const research = researched?.research ?? null;
   const photos = researched?.photos ?? [];
   const contentBrief = makeContentBrief(newsItem ? 'news' : brief ? 'brief' : 'pillar', topic, angle, effPillar.name, newsItem, research, audience, cfg.brief, effPillar.description);
@@ -303,7 +311,7 @@ async function generateDraftInner(cfg: GroupCfg, slot: Slot, source: string, usa
     (final as { caption: CaptionOut }).caption = toCaptionOut((final as { caption: unknown }).caption);
   }
   // news: source attribution enforced in code, never left to the LLM
-  if (newsItem) final = withNewsSource(final, newsItem, languageHint && languageHint !== 'id' ? 'Source' : 'Sumber');
+  if (newsItem) final = withNewsSource(final, { url: newsItem.url, domain: newsItem.domain, extra: extraSources }, languageHint && languageHint !== 'id' ? 'Source' : 'Sumber');
 
   // news topic may override the group's CTA/footer (blank = group Settings)
   const parts = resolveCaptionParts(newsTopic, cfg);

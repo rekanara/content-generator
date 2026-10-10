@@ -13,6 +13,7 @@ export async function getPost(groupId: string, id: string): Promise<PostDetail |
   const [p] = await sql`select id, platform, format, topic, caption, body, status, error, source, created_at, pillar_id, starred
     from posts where id = ${id} and group_id = ${groupId}`;
   if (!p) return null;
+  const [n] = await sql`select 1 as ok from news_items where post_id = ${id}`;
   return {
     ...toSummary(p),
     caption: (p.caption as string) ?? '',
@@ -20,6 +21,7 @@ export async function getPost(groupId: string, id: string): Promise<PostDetail |
     body_text: flattenBody(JSON.parse(p.body ?? 'null')),
     tts_script: p.format === 'reels' ? ttsScript(JSON.parse(p.body ?? 'null')) : null,
     artifacts: artifactNames(p.format as string, p.body),
+    is_news: !!n,
   };
 }
 

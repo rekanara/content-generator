@@ -6,7 +6,7 @@ import { newsUrlAnalysisPrompt } from '../prompts.ts';
 import type { GroupCfg } from '../groups.ts';
 import { isNewsAutofillOut, isNewsScoreOut, isNewsUrlAnalysisOut, sameStory } from '../schema.ts';
 import type { NewsItem } from '@workspace/shared';
-import { getNewsRules, getNewsTopicBrief, existingNewsItems, listActiveNewsSources, listActiveNewsTopicIds, upsertNewsItem, getNewsItemByUrl } from '../repos/news.ts';
+import { getNewsRules, getNewsTopicBrief, existingNewsItems, listActiveNewsSources, listActiveNewsTopicIds, upsertNewsItem, getNewsItemByUrl, setNewsItemSources, listNewsItemSources } from '../repos/news.ts';
 
 const parser = new Parser({ timeout: 8000 });
 
@@ -153,26 +153,57 @@ export async function ingestNewsTopic(groupId: string, topicId: string, cfg?: Gr
   return { fetched, saved, valid, rejected, skipped, feedsFailed: feeds.failed };
 }
 
-export type FetchUrlResult = { item: NewsItem; matchedSource: string | null; analysis: { angle: string; key_points: string[] } | null; known: boolean };
+export type FetchUrlResult = {
+  item: NewsItem;
+  matchedSource: string | null;
+  analysis: { angle: string; key_points: string[] } | null;
+  known: boolean;
+  extra: { url: string; domain: string; title: string }[]; // extra sources kept with the item
+  skipped: { url: string; reason: string }[];              // links that could not be used (unreadable / other story / duplicate)
+};
 
-// One human-picked story: crawl the URL, look for the same story in the topic's RSS feeds
-// (source_id when found), then a deeper AI analysis against the topic. The article URL +
-// domain are ALWAYS stored — that is the content's source line, RSS match or not.
-export async function fetchNewsUrl(cfg: GroupCfg, topicId: string, rawUrl: string): Promise<FetchUrlResult> {
+export const MAX_FETCH_URLS = 5;
+
+// One human-picked story from 1..MAX_FETCH_URLS links: crawl every URL, look for the same story in the topic's
+// RSS feeds (source_id when found), then ONE AI analysis across all readable articles. Link 1 is the anchor
+// (item url/title/dedup); the rest are stored as extra sources and later feed the research step. The anchor
+// URL + domain are ALWAYS stored — that is the content's source line, RSS match or not.
+export async function fetchNewsUrls(cfg: GroupCfg, topicId: string, rawUrls: string[]): Promise<FetchUrlResult> {
+  const urls = [...new Set(rawUrls.map((u) => u.trim()).filter(Boolean))].slice(0, MAX_FETCH_URLS);
+  if (urls.length === 0) throw new Error('no URL given');
   const [sources, topic, known] = await Promise.all([
     listActiveNewsSources(cfg.id, topicId), getNewsTopicBrief(cfg.id, topicId), existingNewsItems(topicId),
   ]);
   if (!sources || !topic) throw new Error('news topic not found');
-  const article = await fetchArticle(rawUrl);
-  if (!article) throw new Error('could not read that URL (not an HTML page, blocked, or private address)');
-  if (!article.title) throw new Error('page has no readable title — is this a news article URL?');
-  const url = normalizeUrl(article.canonical && sameHost(article.canonical, article.url) ? article.canonical : article.url) ?? article.url;
+
+  const skipped: FetchUrlResult['skipped'] = [];
+  const read = (await Promise.all(urls.map(async (raw) => ({ raw, article: await fetchArticle(raw) }))));
+  const articles: { article: NonNullable<(typeof read)[number]['article']>; url: string; domain: string }[] = [];
+  for (const r of read) {
+    if (!r.article) { skipped.push({ url: r.raw, reason: 'could not read (not an HTML page, blocked, or private address)' }); continue; }
+    if (!r.article.title) { skipped.push({ url: r.raw, reason: 'page has no readable title' }); continue; }
+    const url = normalizeUrl(r.article.canonical && sameHost(r.article.canonical, r.article.url) ? r.article.canonical : r.article.url) ?? r.article.url;
+    if (articles.some((a) => sameStory(a.url, url))) { skipped.push({ url: r.raw, reason: 'duplicate of another link' }); continue; }
+    articles.push({ article: r.article, url, domain: new URL(url).hostname.replace(/^www\./, '').toLowerCase() });
+  }
+  if (articles.length === 0) throw new Error(urls.length === 1 ? 'could not read that URL (not an HTML page, blocked, or private address, or no readable title)' : 'could not read any of the URLs');
+  // the first link the user typed stays the anchor if it was readable; else the first readable one
+  const anchor = articles[0]!;
 
   // already stored and finished (used/valid) → never overwrite its status
-  const prev = [...known.keys()].find((k) => sameStory(k, url));
+  const prev = [...known.keys()].find((k) => sameStory(k, anchor.url));
   if (prev && ['used', 'valid'].includes(known.get(prev)!.status)) {
     const row = await getNewsItemByUrl(topicId, prev);
-    if (row) return { item: row, matchedSource: null, analysis: null, known: true };
+    if (row) {
+      // still attach newly given links to a VALID, ungenerated item — that is the point of re-adding sources
+      if (row.status === 'valid' && !row.post_id && articles.length > 1) {
+        const old = await listNewsItemSources(row.id);
+        const merged = new Map(old.map((e) => [e.url, e]));
+        for (const a of articles.slice(1)) merged.set(a.url, { url: a.url, domain: a.domain, title: a.article.title });
+        await setNewsItemSources(row.id, [...merged.values()].slice(0, MAX_FETCH_URLS - 1));
+      }
+      return { item: row, matchedSource: null, analysis: null, known: true, extra: await listNewsItemSources(row.id), skipped };
+    }
   }
 
   // same story in any of the topic's feeds → source_id + feed date/summary fill gaps
@@ -180,23 +211,37 @@ export async function fetchNewsUrl(cfg: GroupCfg, topicId: string, rawUrl: strin
   const feeds = await Promise.allSettled(sources.map(async (s) => ({ s, items: await fetchFeed(s.url) })));
   for (const f of feeds) {
     if (f.status !== 'fulfilled') continue;
-    const it = f.value.items.find((i) => sameStory(i.url, url) || sameStory(i.url, article.url));
+    const it = f.value.items.find((i) => sameStory(i.url, anchor.url) || sameStory(i.url, anchor.article.url));
     if (it) { match = { sourceId: f.value.s.id, name: f.value.s.name, item: it }; break; }
   }
 
-  const domain = new URL(url).hostname.replace(/^www\./, '').toLowerCase();
-  const summary = (article.summary || match?.item.summary || article.text.slice(0, 600)).slice(0, 600);
-  const publishedAt = article.publishedAt ?? match?.item.publishedAt ?? null;
-  const out = await chatJson(cfg, writerModel(cfg), newsUrlAnalysisPrompt(topic, { title: article.title, url, domain, summary }, article.text), isNewsUrlAnalysisOut, 2000, 120_000);
+  const summaryOf = (a: (typeof articles)[number]) => (a.article.summary || a.article.text.slice(0, 600)).slice(0, 600);
+  const anchorSummary = (anchor.article.summary || match?.item.summary || anchor.article.text.slice(0, 600)).slice(0, 600);
+  const publishedAt = anchor.article.publishedAt ?? match?.item.publishedAt ?? null;
+  const forAi = articles.map((a, i) => ({
+    title: a.article.title, url: a.url, domain: a.domain, summary: i === 0 ? anchorSummary : summaryOf(a), text: a.article.text.slice(0, articles.length > 1 ? 8000 : 12000),
+  }));
+  const out = await chatJson(cfg, writerModel(cfg), newsUrlAnalysisPrompt(topic, forAi), isNewsUrlAnalysisOut, 2000, 120_000);
   await recordLlmRun(cfg.id, 'news_score', writerModel(cfg), out.usage.prompt, out.usage.completion).catch(() => {});
   const score = Math.round(out.data.score);
+
+  // articles the AI flagged as a different story are dropped (article numbers are 1-based; 1 = anchor, never dropped)
+  const unrelated = new Set((out.data.unrelated ?? []).filter((n) => n >= 2 && n <= articles.length));
+  const kept = articles.filter((_, i) => !unrelated.has(i + 1));
+  for (const n of unrelated) skipped.push({ url: articles[n - 1]!.url, reason: 'looks like a different story than link 1' });
+  const extra = kept.slice(1).map((a) => ({ url: a.url, domain: a.domain, title: a.article.title }));
+
   const item = await upsertNewsItem(topicId, match?.sourceId ?? null, {
-    title: article.title, url, domain, summary, published_at: publishedAt,
+    title: anchor.article.title, url: anchor.url, domain: anchor.domain, summary: anchorSummary, published_at: publishedAt,
     status: score >= 50 ? 'valid' : 'rejected', score,
-    reason: `AI URL: ${out.data.reason}${out.data.angle ? ` · angle: ${out.data.angle}` : ''}`.slice(0, 1000),
+    reason: `AI URL${kept.length > 1 ? ` (${kept.length} sources)` : ''}: ${out.data.reason}${out.data.angle ? ` · angle: ${out.data.angle}` : ''}`.slice(0, 1000),
   });
-  return { item, matchedSource: match?.name ?? null, analysis: { angle: out.data.angle, key_points: out.data.key_points }, known: false };
+  await setNewsItemSources(item.id, extra);
+  return { item, matchedSource: match?.name ?? null, analysis: { angle: out.data.angle, key_points: out.data.key_points }, known: false, extra, skipped };
 }
+
+// Single-link convenience (Telegram flow).
+export const fetchNewsUrl = (cfg: GroupCfg, topicId: string, rawUrl: string): Promise<FetchUrlResult> => fetchNewsUrls(cfg, topicId, [rawUrl]);
 
 function sameHost(a: string, b: string): boolean {
   try { return new URL(a).hostname.replace(/^www\./, '') === new URL(b).hostname.replace(/^www\./, ''); } catch { return false; }

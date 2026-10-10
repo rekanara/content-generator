@@ -9,6 +9,7 @@ export type Route =
   | { name: 'postDetail'; slug: string; id: string }      // /app/:slug/posts/:id
   | { name: 'promoDetail'; slug: string; id: string }     // /app/:slug/promotions/:id
   | { name: 'newsTopicDetail'; slug: string; id: string } // /app/:slug/news/:id
+  | { name: 'newsFetch'; slug: string; id: string }        // /app/:slug/news/:id/fetch
   | { name: 'newsItemDetail'; slug: string; topicId: string; itemId: string } // /app/:slug/news/:topicId/items/:itemId
   | { name: 'groupView'; slug: string; view: string };    // /app/:slug/:view
 
@@ -28,6 +29,8 @@ export function parseRoute(pathname: string): Route {
   if (pm) return { name: 'postDetail', slug: pm[1]!, id: pm[2]! };
   const prm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/promotions\/([0-9a-f-]{36})\/?$/);
   if (prm) return { name: 'promoDetail', slug: prm[1]!, id: prm[2]! };
+  const nfm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/news\/([0-9a-f-]{36})\/fetch\/?$/);
+  if (nfm) return { name: 'newsFetch', slug: nfm[1]!, id: nfm[2]! };
   const nim = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/news\/([0-9a-f-]{36})\/items\/([0-9a-f-]{36})\/?$/);
   if (nim) return { name: 'newsItemDetail', slug: nim[1]!, topicId: nim[2]!, itemId: nim[3]! };
   const nm = pathname.match(/^\/app\/([a-z0-9][a-z0-9-]*)\/news\/([0-9a-f-]{36})\/?$/);

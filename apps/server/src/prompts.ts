@@ -57,7 +57,10 @@ ${b.must_not_do.map((x) => `- ${x}`).join('\n') || '- none'}`;
 
 // Research BEFORE writing: pull concrete facts out of the article so the writer
 // never has to fill gaps with "read the source for details" filler.
-export function newsResearchPrompt(n: { title: string; url: string; summary: string }, articleText: string, audience = 'developers'): Msg[] {
+export type ExtraArticle = { url: string; title: string; text: string };
+
+export function newsResearchPrompt(n: { title: string; url: string; summary: string }, articleText: string, audience = 'developers', extra: ExtraArticle[] = []): Msg[] {
+  const multi = extra.length > 0;
   return [
     {
       role: 'system',
@@ -71,9 +74,9 @@ RSS summary: ${n.summary || '(none)'}
 
 Article text:
 ${articleText || '(article could not be fetched — use only the title and RSS summary)'}
-
+${multi ? `\nADDITIONAL SOURCES on the same story (${extra.length}):\n${extra.map((e, i) => `--- Source ${i + 2}: ${e.title} (${e.url})\n${e.text || '(could not be fetched)'}`).join('\n\n')}\n\nMULTI-SOURCE RULES: the first article is the main source. Merge the sources into ONE picture — prefer details confirmed by 2+ sources and prefer the most specific number. When sources DISAGREE (numbers, dates, who/what), do NOT pick silently: keep the safer claim in facts and put the disagreement in open_questions. A fact seen in only one extra source is fine if concrete.\n` : ''}
 Extract:
-- facts: 4-8 concrete, verifiable facts FROM THE TEXT ABOVE — specific features, numbers, versions, how it works, limits, availability, who gets it, dates. One fact per item, specific enough that it could not describe any other news. No opinions, no fluff. If the text only supports fewer facts, return fewer — NEVER invent.
+- facts: ${multi ? '5-10' : '4-8'} concrete, verifiable facts FROM THE TEXT ABOVE — specific features, numbers, versions, how it works, limits, availability, who gets it, dates. One fact per item, specific enough that it could not describe any other news. No opinions, no fluff. If the text only supports fewer facts, return fewer — NEVER invent.
 - reader_scenario: one concrete, believable everyday moment where someone in the audience above runs into this news. Must be specific to THIS news — if it could be pasted onto another topic unchanged, rewrite it. Do NOT force a technical/developer angle the news does not have.
 - open_questions: things the article does NOT confirm (0-3 items).
 
@@ -82,13 +85,14 @@ Output JSON: {"facts": ["..."], "reader_scenario": "...", "open_questions": ["..
   ];
 }
 
-// Manual "fetch one URL": the human chose this story — judge fit against the topic and
-// find the angle, from the real article text (not just the headline).
+// Manual "fetch article(s)": the human chose this story (1..5 links on the same story) — judge fit against
+// the topic and find the angle from the real article texts (not just the headlines).
+export type UrlArticle = { title: string; url: string; domain: string; summary: string; text: string };
 export function newsUrlAnalysisPrompt(
   topic: { name: string; description: string },
-  n: { title: string; url: string; domain: string; summary: string },
-  articleText: string,
+  articles: UrlArticle[],
 ): Msg[] {
+  const multi = articles.length > 1;
   return [
     {
       role: 'system',
@@ -99,21 +103,22 @@ export function newsUrlAnalysisPrompt(
       content: `Topic: ${topic.name}
 Topic description: ${topic.description || '(none)'}
 
-Article (${n.domain})
-Title: ${n.title}
-URL: ${n.url}
-Summary: ${n.summary || '(none)'}
+${articles.map((a, i) => `=== Article ${i + 1} (${a.domain})
+Title: ${a.title}
+URL: ${a.url}
+Summary: ${a.summary || '(none)'}
 
 Article text:
-${articleText || '(article text could not be extracted — judge from title and summary only, and say so in reason)'}
+${a.text || '(article text could not be extracted — judge from title and summary only, and say so in reason)'}`).join('\n\n')}
 
-Analyze this ONE article:
-- score 0-100: fit to THIS topic + newsworthiness + how much concrete material it has for a post. Below 50 = not usable.
-- reason: 1-2 sentences, specific to this article.
+Analyze ${multi ? `these ${articles.length} articles together. Article 1 is the anchor story; the others are meant to be the SAME story from other sources` : 'this ONE article'}:
+- score 0-100: fit to THIS topic + newsworthiness + how much concrete material ${multi ? 'the sources give together' : 'it gives'} for a post. Below 50 = not usable.
+- reason: 1-2 sentences, specific to ${multi ? 'this story' : 'this article'}.
 - angle: the single most interesting angle for a post about it, for the topic's audience (one sentence).
-- key_points: 3-6 concrete facts FROM THE TEXT (numbers, names, what changed). Never invent; fewer is fine.
+- key_points: 3-6 concrete facts FROM THE TEXT${multi ? ' (prefer ones confirmed by more than one source; if sources disagree, say so in the point)' : ''} (numbers, names, what changed). Never invent; fewer is fine.${multi ? `
+- unrelated: numbers of articles (2..${articles.length}) that are about a DIFFERENT story than article 1 — they will be dropped. Empty list if all match. Same company/topic but a different event counts as different.` : ''}
 
-Output JSON: {"score": 0, "reason": "...", "angle": "...", "key_points": ["..."]}`,
+Output JSON: {"score": 0, "reason": "...", "angle": "...", "key_points": ["..."]${multi ? ', "unrelated": []' : ''}}`,
     },
   ];
 }

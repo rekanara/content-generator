@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@workspace/ui/componen
 import { Input } from "@workspace/ui/components/input"
 import { Label } from "@workspace/ui/components/label"
 import { api, ApiError, type IngestProgress } from "@/lib/api"
-import { useNewsTopic, useTemplates } from "@/lib/hooks"
+import { useApi, useNewsTopic, useTemplates } from "@/lib/hooks"
 import { navigate } from "@/lib/router"
 import { CaptionOverrideCard } from "@/components/caption-override-fields"
 
@@ -31,7 +31,7 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   const [generateItemId, setGenerateItemId] = useState<string | null | undefined>(undefined)
   const [language, setLanguage] = useState("id")
   const [format, setFormat] = useState<"carousel" | "reels">("carousel")
-  const [urlOpen, setUrlOpen] = useState(false)
+  const [validCount, setValidCount] = useState(0)
 
   const autofill = async () => {
     setAutofilling(true); setMsg(null)
@@ -111,7 +111,6 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
   const reelTemplates = (templates ?? []).filter((t) => t.type === "regular" && t.format === "reel")
   const saveTemplates = (t: { template_id: string | null; template_reel_id: string | null; use_source_images?: boolean }) =>
     api.saveNewsTemplate(slug, id, { use_source_images: topic.use_source_images, ...t }).then(() => { setMsg("template saved"); reload() }).catch((err) => setMsg(err instanceof ApiError ? err.message : "template save failed"))
-  const validCount = topic.items.filter((i) => i.status === "valid").length
 
   return (
     <div className="space-y-6">
@@ -135,17 +134,13 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
           </label>
           <Button variant="outline" size="sm" disabled={autofilling} onClick={autofill}>{autofilling ? "Autofilling…" : "AI autofill"}</Button>
           <Button variant="outline" size="sm" disabled={ingesting} onClick={ingest}>{ingesting ? "Fetching…" : "Fetch latest"}</Button>
-          <Button variant="outline" size="sm" onClick={() => setUrlOpen(true)}>Fetch one URL</Button>
+          <Button variant="outline" size="sm" onClick={() => navigate(`/app/${slug}/news/${id}/fetch`)}>Fetch article(s)</Button>
           <Button variant="default" size="sm" disabled={generating || validCount === 0} onClick={() => openGenerate()}>{generating ? "Generating…" : "Generate latest valid"}</Button>
           <Button variant="outline" size="sm" onClick={() => navigate(`/app/${slug}/news`)}>Back</Button>
         </div>
       </div>
       {ingesting && progress && <IngestPanel p={progress} />}
       {msg && <p className="text-sm text-amber-500">{msg}</p>}
-      {urlOpen && (
-        <FetchUrlDialog slug={slug} topicId={id} onClose={() => setUrlOpen(false)}
-          onFetched={reload} onGenerate={(itemId) => { setUrlOpen(false); openGenerate(itemId) }} />
-      )}
       {generateItemId !== undefined && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4">
           <Card className="w-full max-w-md">
@@ -177,74 +172,7 @@ export function NewsTopicDetailView({ slug, id }: { slug: string; id: string }) 
         save={(v) => api.saveNewsCaption(slug, id, v).then(reload)} />
       <RulesCard slug={slug} topicId={id} rules={topic.rules} onSaved={() => { setMsg("rules saved"); reload() }} />
       <SourcesCard slug={slug} topicId={id} sources={topic.sources} reload={reload} setMsg={setMsg} />
-      <ItemsCard slug={slug} topicId={id} items={topic.items} reload={reload} setMsg={setMsg} onGenerate={openGenerate} />
-    </div>
-  )
-}
-
-type FetchUrlResult = Awaited<ReturnType<typeof api.fetchNewsUrl>>
-
-function FetchUrlDialog({ slug, topicId, onClose, onFetched, onGenerate }: {
-  slug: string; topicId: string; onClose: () => void; onFetched: () => void; onGenerate: (itemId: string) => void
-}) {
-  const [url, setUrl] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [res, setRes] = useState<FetchUrlResult | null>(null)
-
-  const run = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setBusy(true); setErr(null); setRes(null)
-    try {
-      setRes(await api.fetchNewsUrl(slug, topicId, url.trim()))
-      onFetched()
-    } catch (e2) {
-      setErr(e2 instanceof ApiError ? e2.message : "fetch failed")
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const item = res?.item
-  return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4">
-      <Card className="max-h-[90vh] w-full max-w-lg overflow-y-auto">
-        <CardHeader><CardTitle className="text-base">Fetch one article</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <form onSubmit={run} className="space-y-3">
-            <Field label="Article URL">
-              <Input required type="url" autoFocus placeholder="https://…" value={url} disabled={busy} onChange={(e) => setUrl(e.target.value)} />
-            </Field>
-            <p className="text-xs text-muted-foreground">The article is read, matched against this topic's RSS sources, and analyzed by AI. The URL is kept as the post's source line.</p>
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={onClose}>{res ? "Close" : "Cancel"}</Button>
-              <Button type="submit" disabled={busy || !url.trim()}>{busy ? "Analyzing…" : "Fetch & analyze"}</Button>
-            </div>
-          </form>
-          {busy && <p className="text-sm text-muted-foreground" aria-live="polite">Reading the article and analyzing it — up to a minute.</p>}
-          {err && <p className="text-sm text-destructive">{err}</p>}
-          {item && (
-            <div className="space-y-2 rounded-lg border p-3 text-sm">
-              <p className="font-medium">{item.title}</p>
-              <p className="break-all text-xs text-muted-foreground">
-                <a className="underline" href={item.url} target="_blank" rel="noreferrer">{item.domain}</a> · {item.published_at ?? "no date"}
-                {res.matchedSource ? ` · found in RSS: ${res.matchedSource}` : " · not in your RSS sources"}
-              </p>
-              <p className="text-xs"><span className={item.status === "valid" ? "text-emerald-500" : "text-amber-500"}>{item.status}</span> · score {item.score ?? "—"}</p>
-              {item.reason && <p className="text-xs text-muted-foreground">{item.reason}</p>}
-              {res.known && <p className="text-xs text-amber-500">Already in this topic ({item.status}) — kept as is.</p>}
-              {res.analysis && res.analysis.key_points.length > 0 && (
-                <ul className="list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
-                  {res.analysis.key_points.map((k, i) => <li key={i}>{k}</li>)}
-                </ul>
-              )}
-              {item.status === "valid" && !item.post_id && (
-                <div className="flex justify-end"><Button size="sm" onClick={() => onGenerate(item.id)}>Generate</Button></div>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <ItemsCard slug={slug} topicId={id} version={topic} reload={reload} setMsg={setMsg} onGenerate={openGenerate} onValidCount={setValidCount} />
     </div>
   )
 }
@@ -349,38 +277,88 @@ function SourcesCard({ slug, topicId, sources, reload, setMsg }: { slug: string;
   )
 }
 
-function ItemsCard({ slug, topicId, items, reload, setMsg, onGenerate }: { slug: string; topicId: string; items: { id: string; title: string; url: string; domain: string; status: string; score: number | null; published_at: string | null; reason: string | null; post_id: string | null }[]; reload: () => void; setMsg: (s: string | null) => void; onGenerate: (itemId?: string) => void }) {
-  const [status, setStatus] = useState("all")
+const STATUSES = ["all", "pending", "valid", "rejected", "used"] as const
+const SORTS = [["created", "Discovered"], ["published", "Published"], ["score", "Score"]] as const
+
+// Server-side filter/sort/search/pagination. `version` = parent's reloaded topic object → refetch after ingest/fetch-url/etc.
+function ItemsCard({ slug, topicId, version, reload, setMsg, onGenerate, onValidCount }: { slug: string; topicId: string; version: unknown; reload: () => void; setMsg: (s: string | null) => void; onGenerate: (itemId?: string) => void; onValidCount: (n: number) => void }) {
+  const [status, setStatus] = useState<(typeof STATUSES)[number]>("all")
+  const [sort, setSort] = useState<(typeof SORTS)[number][0]>("created")
+  const [dir, setDir] = useState<"asc" | "desc">("desc")
+  const [q, setQ] = useState("")
+  const [qDebounced, setQDebounced] = useState("")
+  const [page, setPage] = useState(1)
+  const [size, setSize] = useState(20)
   const [selected, setSelected] = useState<string[]>([])
-  const counts = items.reduce<Record<string, number>>((acc, item) => {
-    acc[item.status] = (acc[item.status] ?? 0) + 1
-    return acc
-  }, { all: items.length })
-  const filtered = status === "all" ? items : items.filter((i) => i.status === status)
+  const [confirm, setConfirm] = useState<"valid" | "used" | "rejected" | null>(null)
+
+  useEffect(() => { const t = window.setTimeout(() => { setQDebounced(q.trim()); setPage(1) }, 300); return () => window.clearTimeout(t) }, [q])
+
+  const { data, error, loading, reload: reloadItems } = useApi(
+    () => api.newsItems(slug, topicId, { status, sort, dir, q: qDebounced, page, size }),
+    [slug, topicId, status, sort, dir, qDebounced, page, size, version],
+  )
+  useEffect(() => { if (data) onValidCount(data.counts.valid ?? 0) }, [data, onValidCount])
+
+  const items = data?.items ?? []
+  const counts = data?.counts ?? {}
+  const total = data?.total ?? 0
+  const pages = Math.max(1, Math.ceil(total / size))
   const toggle = (id: string) => setSelected((xs) => xs.includes(id) ? xs.filter((x) => x !== id) : [...xs, id])
-  const del = async (p: { ids?: string[]; status?: 'pending' | 'valid' | 'rejected' | 'used' }) => {
+  const allOnPage = items.length > 0 && items.every((i) => selected.includes(i.id))
+  const del = async (p: { ids?: string[]; status?: "pending" | "valid" | "rejected" | "used" }) => {
     const r = await api.deleteNewsItems(slug, topicId, p)
-    setSelected([])
+    setSelected([]); setConfirm(null)
     setMsg(`deleted ${r.deleted} items`)
-    reload()
+    if (page > 1 && items.length <= r.deleted) setPage(page - 1)
+    reload(); reloadItems()
   }
+  const pick = (fn: () => void) => { fn(); setPage(1); setSelected([]) }
 
   return (
     <Card>
       <CardHeader className="space-y-3">
-        <CardTitle className="text-base">Latest items</CardTitle>
+        <CardTitle className="text-base">Items</CardTitle>
         <div className="flex flex-wrap gap-2">
-          {["all", "pending", "valid", "rejected", "used"].map((s) => (
-            <Button key={s} type="button" variant={status === s ? "default" : "outline"} size="sm" onClick={() => setStatus(s)}>
+          {STATUSES.map((s) => (
+            <Button key={s} type="button" variant={status === s ? "default" : "outline"} size="sm" onClick={() => pick(() => setStatus(s))}>
               {s} {counts[s] ?? 0}
             </Button>
           ))}
-          <Button type="button" variant="outline" size="sm" disabled={selected.length === 0} onClick={() => del({ ids: selected })}>Delete selected {selected.length}</Button>
-          <Button type="button" variant="destructive" size="sm" disabled={(counts.rejected ?? 0) === 0} onClick={() => del({ status: "rejected" })}>Delete rejected</Button>
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input className="h-8 w-56" placeholder="Search title or domain" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search items" />
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" aria-label="Sort by" value={sort} onChange={(e) => pick(() => setSort(e.target.value as typeof sort))}>
+            {SORTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+          <Button type="button" variant="outline" size="sm" aria-label="Toggle sort direction" onClick={() => pick(() => setDir(dir === "desc" ? "asc" : "desc"))}>{dir === "desc" ? "Newest / highest first" : "Oldest / lowest first"}</Button>
+          <select className="h-8 rounded-md border bg-background px-2 text-sm" aria-label="Page size" value={size} onChange={(e) => pick(() => setSize(Number(e.target.value)))}>
+            {[10, 20, 50, 100].map((n) => <option key={n} value={n}>{n} / page</option>)}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={selected.length === 0} onClick={() => del({ ids: selected })}>Delete selected {selected.length}</Button>
+          {(["rejected", "valid", "used"] as const).map((s) => (
+            <Button key={s} type="button" variant="destructive" size="sm" disabled={(counts[s] ?? 0) === 0} onClick={() => setConfirm(s)}>Delete {s} {counts[s] ?? 0}</Button>
+          ))}
+        </div>
+        {confirm && (
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm">
+            <span>Delete all {counts[confirm] ?? 0} {confirm} items in this topic{qDebounced ? " (ignores the search filter)" : ""}?{confirm === "used" ? " Their generated posts stay." : ""}{confirm === "valid" ? " They can be re-fetched, but you lose their scores." : ""}</span>
+            <Button type="button" variant="destructive" size="sm" onClick={() => del({ status: confirm })}>Yes, delete</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setConfirm(null)}>Cancel</Button>
+          </div>
+        )}
       </CardHeader>
       <CardContent className="divide-y p-0">
-        {filtered.map((i) => (
+        {error && <p className="p-4 text-sm text-destructive">{error}</p>}
+        {items.length > 0 && (
+          <label className="flex items-center gap-3 px-4 py-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={allOnPage} onChange={() => setSelected(allOnPage ? selected.filter((id) => !items.some((i) => i.id === id)) : [...new Set([...selected, ...items.map((i) => i.id)])])} aria-label="select all on page" />
+            Select page
+          </label>
+        )}
+        {items.map((i) => (
           <div key={i.id} className="flex gap-3 p-4 text-sm">
             <input type="checkbox" className="mt-1" checked={selected.includes(i.id)} onChange={() => toggle(i.id)} aria-label="select item" />
             <div className="min-w-0 flex-1">
@@ -390,12 +368,21 @@ function ItemsCard({ slug, topicId, items, reload, setMsg, onGenerate }: { slug:
                 {i.post_id && <Button type="button" variant="ghost" size="sm" onClick={() => navigate(`/app/${slug}/news/${topicId}/items/${i.id}`)}><ExternalLink className="size-3" /> Detail</Button>}
                 <span className="text-xs text-muted-foreground">{i.status}{i.score === null ? "" : ` · ${i.score}`}</span>
               </div>
-              <p className="break-all text-xs text-muted-foreground">{i.domain} · {i.published_at ?? "no date"}</p>
+              <p className="break-all text-xs text-muted-foreground">{i.domain} · published {i.published_at ? new Date(i.published_at).toLocaleString("en-US") : "no date"} · found {new Date(i.created_at).toLocaleString("en-US")}</p>
               {i.reason && <p className="mt-1 text-xs text-muted-foreground">{i.reason}</p>}
             </div>
           </div>
         ))}
-        {filtered.length === 0 && <p className="p-4 text-sm text-muted-foreground">no items for this filter</p>}
+        {!loading && items.length === 0 && <p className="p-4 text-sm text-muted-foreground">no items for this filter</p>}
+        {loading && !data && <p className="p-4 text-sm text-muted-foreground">loading…</p>}
+        <div className="flex items-center justify-between gap-2 p-3 text-xs text-muted-foreground">
+          <span>{total === 0 ? "0 items" : `${(page - 1) * size + 1}–${Math.min(page * size, total)} of ${total}`}</span>
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" disabled={page <= 1} onClick={() => { setPage(page - 1); setSelected([]) }}>Prev</Button>
+            <span>{page} / {pages}</span>
+            <Button type="button" variant="outline" size="sm" disabled={page >= pages} onClick={() => { setPage(page + 1); setSelected([]) }}>Next</Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

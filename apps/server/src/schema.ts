@@ -37,11 +37,12 @@ export function isNewsResearchOut(x: unknown): x is NewsResearchOut {
 }
 
 // Manual "fetch one URL" analysis: deeper than the bulk score — the human picked this story.
-export type NewsUrlAnalysisOut = { score: number; reason: string; angle: string; key_points: string[] };
+export type NewsUrlAnalysisOut = { score: number; reason: string; angle: string; key_points: string[]; unrelated?: number[] };
 export function isNewsUrlAnalysisOut(x: unknown): x is NewsUrlAnalysisOut {
   return obj(x) && typeof x.score === 'number' && Number.isFinite(x.score) && x.score >= 0 && x.score <= 100 &&
     str(x.reason) && x.reason.trim().length > 0 && str(x.angle) &&
-    Array.isArray(x.key_points) && x.key_points.length <= 8 && x.key_points.every(str);
+    Array.isArray(x.key_points) && x.key_points.length <= 8 && x.key_points.every(str) &&
+    (x.unrelated === undefined || (Array.isArray(x.unrelated) && x.unrelated.every((n) => Number.isInteger(n))));
 }
 
 // Exact story match across feeds: same host + same path (query/hash/trailing slash/www ignored).
@@ -309,8 +310,10 @@ export function appendCaptionParts(text: string, parts: { cta: string; footer: s
 // full URL (Telegram/IG caption = where Jack copies it from), the last slide gets a
 // short "source: domain" credit appended (no dedicated "read the source" slide —
 // that is filler), reels name the publisher, text posts end with the link. Idempotent.
-export function withNewsSource<T extends object>(d: T, src: { url: string; domain: string }, label = 'Sumber'): T {
-  const line = `${label}: ${src.url}`;
+export function withNewsSource<T extends object>(d: T, src: { url: string; domain: string; extra?: { url: string; domain: string }[] }, label = 'Sumber'): T {
+  const extra = src.extra ?? [];
+  const line = [`${label}: ${src.url}`, ...extra.map((e) => e.url)].join('\n');
+  const domains = [...new Set([src.domain, ...extra.map((e) => e.domain)])];
   const out = structuredClone(d) as Record<string, unknown>;
   const cap = out.caption as CaptionOut | undefined;
   if (cap && typeof cap === 'object' && !`${cap.subtitle}`.includes(src.url)) {
@@ -319,7 +322,7 @@ export function withNewsSource<T extends object>(d: T, src: { url: string; domai
   const slides = out.slides as Slide[] | undefined;
   const last = slides?.[slides.length - 1];
   if (last && !`${last.headline} ${last.body}`.toLowerCase().includes(src.domain.toLowerCase())) {
-    last.body = `${last.body.trim()}\n\n${label.toLowerCase()}: ${src.domain}`;
+    last.body = `${last.body.trim()}\n\n${label.toLowerCase()}: ${domains.join(', ')}`;
   }
   const scenes = out.scenes as Scene[] | undefined;
   const lastScene = scenes?.[scenes.length - 1];

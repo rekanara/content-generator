@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writerPrompt, criticPrompt, ideationPrompt, imagePrompt, type ContentBrief } from '../src/prompts.ts';
-import { withNewsSource, isNewsResearchOut } from '../src/schema.ts';
+import { withNewsSource, isNewsResearchOut, isNewsUrlAnalysisOut } from '../src/schema.ts';
 import { htmlToText, isPrivateHost } from '../src/article.ts';
 
 test('isNewsResearchOut: shape guard', () => {
@@ -114,4 +114,36 @@ test('ideationPrompt and pillar writer do not hard-code developer audience', () 
   assert.doesNotMatch(sys, /developer content/);
   assert.match(sys, /Do not introduce developer\/IT\/workplace details/);
   assert.doesNotMatch(imagePrompt('Aturan cuti melahirkan'), /developer-audience|terminal|code brackets|git graphs/i);
+});
+
+test('withNewsSource: extra sources listed in caption + domains on last slide, idempotent', () => {
+  const src = { ...SRC, extra: [{ url: 'https://theverge.com/a', domain: 'theverge.com' }, { url: 'https://github.blog/x', domain: 'github.blog' }] };
+  const d = { caption: { title: 'T', subtitle: 'S', cta: '', tags: [] }, slides: [{ headline: 'a', body: 'b' }] };
+  const out = withNewsSource(d, src);
+  assert.match(out.caption.subtitle, /Sumber: https:\/\/github\.blog\/changelog\/haiku\nhttps:\/\/theverge\.com\/a/);
+  assert.match(out.slides[0]!.body, /sumber: github\.blog, theverge\.com$/);
+  const twice = withNewsSource(out, src);
+  assert.equal(twice.caption.subtitle.match(/Sumber:/g)!.length, 1);
+});
+
+test('isNewsUrlAnalysisOut: optional unrelated must be integers', () => {
+  const ok = { score: 80, reason: 'r', angle: 'a', key_points: ['k'] };
+  assert.ok(isNewsUrlAnalysisOut(ok));
+  assert.ok(isNewsUrlAnalysisOut({ ...ok, unrelated: [2, 3] }));
+  assert.ok(!isNewsUrlAnalysisOut({ ...ok, unrelated: ['2'] }));
+});
+
+test('newsUrlAnalysisPrompt / newsResearchPrompt: multi-source wording only with 2+ articles', async () => {
+  const { newsUrlAnalysisPrompt, newsResearchPrompt } = await import('../src/prompts.ts');
+  const a = (n: number) => ({ title: `T${n}`, url: `https://x.com/${n}`, domain: 'x.com', summary: '', text: `body ${n}` });
+  const one = newsUrlAnalysisPrompt({ name: 'n', description: '' }, [a(1)])[1]!.content;
+  const many = newsUrlAnalysisPrompt({ name: 'n', description: '' }, [a(1), a(2)])[1]!.content;
+  assert.ok(!one.includes('unrelated'));
+  assert.match(many, /Article 2/);
+  assert.match(many, /"unrelated": \[\]/);
+  const r1 = newsResearchPrompt({ title: 't', url: 'u', summary: '' }, 'txt')[1]!.content;
+  const r2 = newsResearchPrompt({ title: 't', url: 'u', summary: '' }, 'txt', 'devs', [{ url: 'https://y.com', title: 'Y', text: 'extra body' }])[1]!.content;
+  assert.ok(!r1.includes('MULTI-SOURCE'));
+  assert.match(r2, /MULTI-SOURCE RULES/);
+  assert.match(r2, /extra body/);
 });

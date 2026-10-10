@@ -177,6 +177,7 @@ export const PostDetail = PostSummary.extend({
   body_text: z.string(), // body flattened to text (slides/scenes → text)
   tts_script: z.string().nullable(), // reels: narration only, scene per paragraph (external TTS)
   artifacts: z.array(z.string()), // artifact file names per format (exist once rendered)
+  is_news: z.boolean(), // backed by a news item → "regenerate as another format" applies
 });
 export type PostDetail = z.infer<typeof PostDetail>;
 
@@ -540,6 +541,14 @@ export const NewsGenerateInput = z.object({
 });
 export type NewsGenerateInput = z.infer<typeof NewsGenerateInput>;
 
+// Regenerate a news post in another format (same news item). IG: carousel|reels, LinkedIn: pdf|text.
+export const RegenerateFormatInput = z.object({
+  platform: Platform,
+  format: Format,
+  language: z.enum(['original', 'id', 'en', 'ms', 'ja', 'ko', 'zh', 'es']).default('id'),
+}).refine((v) => (v.platform === 'instagram' ? IgFormat : LiFormat).safeParse(v.format).success, { message: 'format not valid for platform' });
+export type RegenerateFormatInput = z.infer<typeof RegenerateFormatInput>;
+
 export const NewsItem = z.object({
   id: z.string().uuid(),
   title: z.string(),
@@ -555,10 +564,49 @@ export const NewsItem = z.object({
 });
 export type NewsItem = z.infer<typeof NewsItem>;
 
+// Fetch article(s): 1..5 links about the SAME story. Link 1 = anchor (item title/url), the rest corroborate.
+export const FETCH_URLS_MAX = 5;
+export const NewsFetchUrlsInput = z.object({
+  urls: z.array(z.string().trim().url().max(2000).regex(/^https?:\/\//i, 'http(s) only')).min(1).max(FETCH_URLS_MAX),
+});
+export type NewsFetchUrlsInput = z.infer<typeof NewsFetchUrlsInput>;
+
+export const NewsFetchUrlsResult = z.object({
+  item: z.lazy(() => NewsItem),
+  matchedSource: z.string().nullable(),
+  analysis: z.object({ angle: z.string(), key_points: z.array(z.string()) }).nullable(),
+  known: z.boolean(),
+  extra: z.array(z.object({ url: z.string(), domain: z.string(), title: z.string() })),
+  skipped: z.array(z.object({ url: z.string(), reason: z.string() })),
+});
+export type NewsFetchUrlsResult = z.infer<typeof NewsFetchUrlsResult>;
+
+export const NewsItemDetail = NewsItem.extend({
+  extra_sources: z.array(z.object({ url: z.string(), domain: z.string(), title: z.string() })),
+});
+export type NewsItemDetail = z.infer<typeof NewsItemDetail>;
+
+export const NewsItemSort = z.enum(['created', 'published', 'score']);
+export const NewsItemsQuery = z.object({
+  status: z.enum(['all', 'pending', 'valid', 'rejected', 'used']).default('all'),
+  sort: NewsItemSort.default('created'),
+  dir: z.enum(['asc', 'desc']).default('desc'),
+  q: z.string().trim().max(200).default(''),
+  page: z.coerce.number().int().min(1).default(1),
+  size: z.coerce.number().int().min(5).max(100).default(20),
+});
+export type NewsItemsQuery = z.infer<typeof NewsItemsQuery>;
+
+export const NewsItemsPage = z.object({
+  items: z.array(NewsItem),
+  total: z.number(), // rows matching status+q
+  counts: z.record(z.string(), z.number()), // per status (ignores status filter, honors q) + all
+});
+export type NewsItemsPage = z.infer<typeof NewsItemsPage>;
+
 export const NewsTopicDetail = NewsTopic.extend({
   sources: z.array(NewsSource),
   rules: NewsRule,
-  items: z.array(NewsItem),
 });
 export type NewsTopicDetail = z.infer<typeof NewsTopicDetail>;
 

@@ -15,6 +15,7 @@ import { PromotionDetailView } from "@/views/promotion-detail.tsx"
 import { NewsView } from "@/views/news.tsx"
 import { NewsTopicDetailView } from "@/views/news-topic-detail.tsx"
 import { NewsItemDetailView } from "@/views/news-item-detail.tsx"
+import { NewsFetchView } from "@/views/news-fetch.tsx"
 import { TutorialsView } from "@/views/tutorials.tsx"
 import { SettingsView } from "@/views/settings.tsx"
 import { LoginView } from "@/views/login.tsx"
@@ -118,6 +119,7 @@ export function App() {
               {route.name === "postDetail" && <PostDetailView slug={route.slug} id={route.id} />}
               {route.name === "promoDetail" && <PromotionDetailView slug={route.slug} id={route.id} />}
               {route.name === "newsTopicDetail" && <NewsTopicDetailView slug={route.slug} id={route.id} />}
+              {route.name === "newsFetch" && <NewsFetchView slug={route.slug} id={route.id} />}
               {route.name === "newsItemDetail" && <NewsItemDetailView slug={route.slug} topicId={route.topicId} itemId={route.itemId} />}
               {route.name === "groupView" && (
                 <>
@@ -153,6 +155,7 @@ function viewOf(route: ReturnType<typeof parseRoute>): string {
     case "postDetail": return "Overview › Post"
     case "promoDetail": return "Manual content › Promotion"
     case "newsTopicDetail": return "News › Topic"
+    case "newsFetch": return "News › Fetch article(s)"
     case "newsItemDetail": return "News › Item"
     case "groupView": {
       // "Section › Page" — mirrors the sidebar sections so the user always knows which content source a page belongs to

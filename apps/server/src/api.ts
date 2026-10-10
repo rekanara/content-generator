@@ -20,7 +20,7 @@ import { getPostArtifact } from './usecases/artifacts.ts';
 import { getArtifactStream, statArtifact } from './storage.ts';
 import {
   PillarInput, PillarSuggestInput, CronInput, StyleInput, TemplateInput, GenerateInput,
-  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsCaptionInput, TutorialInput, TutorialGenerateInput, PromotionVideoInput,
+  GroupInput, GroupPatch, PillarEdit, StyleEdit, TemplateEdit, OverrideInput, PlanInput, PromotionInput, IdeaInput, NewsTopicInput, NewsSourceInput, NewsRuleInput, NewsTemplateInput, NewsGenerateInput, NewsFetchUrlsInput, FETCH_URLS_MAX, NewsItemsQuery, RegenerateFormatInput, NewsCaptionInput, TutorialInput, TutorialGenerateInput, PromotionVideoInput,
 } from '@workspace/shared';
 import {
   listGroups, listGroupsForUser, getGroupRow, getGroupCfg, createGroup, patchGroup, deleteGroup, groupOut,
@@ -31,14 +31,14 @@ import { listPosts, getPost, rejectPost, toggleStar } from './repos/posts.ts';
 import { listEvents, addEvent } from './repos/events.ts';
 import { listStyles, createStyle, deleteStyle, updateStyle } from './repos/styles.ts';
 import { listIdeas, addIdea, deleteIdea } from './repos/ideas.ts';
-import { listNewsTopics, createNewsTopic, deleteNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, getNewsTopicTemplates, claimValidNewsItem } from './repos/news.ts';
+import { listNewsTopics, createNewsTopic, deleteNewsTopic, getNewsTopic, addNewsSource, deleteNewsSource, upsertNewsRules, deleteNewsItems, setNewsTopicTemplate, setNewsTopicCaption, getNewsTopicTemplate, getNewsTopicTemplates, claimValidNewsItem, reopenNewsItemForPost, listNewsItems, getNewsItem, listNewsItemSources } from './repos/news.ts';
 import { listTemplates, createTemplate, activateTemplate, deleteTemplate, getTemplate, updateTemplate } from './repos/templates.ts';
 import { listOverrides, getOverride, createOverrideWithPlan, cancelOverride, deleteOverride, updateOverrideImages, updateOverrideDescription, updateOverrideCaptionParts } from './repos/overrides.ts';
 import { listPlans, getPlan, createPlan, cancelPlan, deletePlan } from './repos/plans.ts';
 import { listPromotions, getPromotion, createPromotion, updatePromotion, deletePromotion, setPromotionTemplate, setPromotionCaption } from './repos/promotions.ts';
 import { listTutorials, createTutorial, deleteTutorial, getTutorial } from './repos/tutorials.ts';
 import { generatePromotionContent, draftPromotionFromBrief, notifyImageSlots, deliverPromotion, storePromoImage, allImagesPresent, imageSlotStatus, regeneratePromotionContent } from './usecases/promotions.ts';
-import { autofillNewsTopic, startIngest, getIngestProgress, fetchNewsUrl } from './usecases/news.ts';
+import { autofillNewsTopic, startIngest, getIngestProgress, fetchNewsUrls } from './usecases/news.ts';
 import { uploadOverrideBuffer } from './storage.ts';
 import { recordLlmRun } from './repos/llm-runs.ts';
 import {
@@ -448,8 +448,46 @@ g.post('/:slug/posts/:id/regenerate', async (c) => {
     const ok = await requestTutorialRun(gr(c).slug, gr(c).id, row.tutorial_id, row.format === 'reels' ? 'reels' : 'carousel');
     if (!ok) return c.json({ error: 'tutorial is already queued or missing' }, 409);
   } else {
-    enqueue({ kind: 'generate', slug: gr(c).slug, notifyChat: true, source: 'regen' });
+    enqueue({ kind: 'generate', slug: gr(c).slug, notifyChat: true, source: 'web' });
   }
+  return c.json({ ok: true, queued: queueStatus() }, 202);
+});
+
+// regenerate a NEWS post in another platform/format with the SAME news item (e.g. a plan hijacked the
+// format). Same status contract as /regenerate; awaiting is rejected first (rotation-safe).
+g.post('/:slug/posts/:id/regenerate-format', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = RegenerateFormatInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: 'invalid input', issues: parsed.error.issues }, 400);
+  const post = await getPost(gr(c).id, id);
+  if (!post) return c.json({ error: 'post not found' }, 404);
+  // sent is allowed here (unlike /regenerate): the old post stays untouched, a NEW post is generated
+  // (its send advances rotation once more — the user asked for it explicitly).
+  if (!['awaiting_approval', 'rejected', 'failed', 'sent'].includes(post.status)) {
+    return c.json({ error: `post status ${post.status} — regenerate works on awaiting/rejected/failed/sent` }, 400);
+  }
+  const [link] = await sql`select 1 as ok from news_items where post_id = ${id}`;
+  if (!link) return c.json({ error: 'not a news post — use regenerate' }, 400);
+  if (post.status === 'awaiting_approval') {
+    const ok = await rejectPost(gr(c).id, id);
+    if (!ok) return c.json({ error: 'post left awaiting concurrently' }, 409);
+    await addEvent(id, gr(c).id, 'rejected', `regenerate as ${parsed.data.platform}/${parsed.data.format} via FE`).catch(() => {});
+  }
+  const item = await reopenNewsItemForPost(gr(c).id, id);
+  if (!item) return c.json({ error: 'news item or topic no longer available' }, 409);
+  const { platform, format, language } = parsed.data;
+  enqueue({
+    kind: 'generate',
+    slug: gr(c).slug,
+    forced: { platform, format },
+    notifyChat: true,
+    source: 'web',
+    newsTopicId: item.topicId,
+    newsItemId: item.itemId,
+    newsLanguage: language,
+    templateId: (format === 'reels' ? item.templateReelId : format === 'carousel' ? item.templateId : null) ?? undefined,
+  });
   return c.json({ ok: true, queued: queueStatus() }, 202);
 });
 
@@ -728,15 +766,18 @@ g.post('/:slug/news/topics/:id/ingest', async (c) => {
   return c.json({ ok: true, started, progress: getIngestProgress(id) }, 202);
 });
 
-// One human-picked article: crawl + RSS match + AI analysis → stored as one news item.
+// One human-picked story from 1..5 links: crawl + RSS match + ONE AI analysis across all → stored as one news item
+// (link 1 = anchor, the rest are extra sources the research step merges). Legacy body {url} still accepted.
 g.post('/:slug/news/topics/:id/items/fetch-url', async (c) => {
   const id = c.req.param('id');
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
-  const parsed = z.object({ url: z.string().trim().url().max(2000) }).safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success || !/^https?:\/\//i.test(parsed.data.url)) return c.json({ error: 'enter a valid http(s) article URL' }, 400);
+  const raw = await c.req.json().catch(() => null) as { url?: unknown; urls?: unknown } | null;
+  const body = raw && typeof raw.url === 'string' && raw.urls === undefined ? { urls: [raw.url] } : raw;
+  const parsed = NewsFetchUrlsInput.safeParse(body);
+  if (!parsed.success) return c.json({ error: `enter 1-${FETCH_URLS_MAX} valid http(s) article URLs` }, 400);
   if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
   try {
-    return c.json(await fetchNewsUrl(await getGroupCfg(gr(c).slug), id, parsed.data.url));
+    return c.json(await fetchNewsUrls(await getGroupCfg(gr(c).slug), id, parsed.data.urls));
   } catch (e) {
     const m = (e as Error).message;
     return c.json({ error: m }, /LLM|budget/i.test(m) ? 502 : 400);
@@ -748,6 +789,24 @@ g.get('/:slug/news/topics/:id/ingest/status', async (c) => {
   if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
   if ((await getNewsTopicTemplate(gr(c).id, id)) === undefined) return c.json({ error: 'news topic not found' }, 404);
   return c.json({ progress: getIngestProgress(id) });
+});
+
+g.get('/:slug/news/topics/:id/items', async (c) => {
+  const id = c.req.param('id');
+  if (!isUuid(id)) return c.json({ error: 'invalid id' }, 400);
+  const parsed = NewsItemsQuery.safeParse(c.req.query());
+  if (!parsed.success) return c.json({ error: 'invalid query', issues: parsed.error.issues }, 400);
+  const page = await listNewsItems(gr(c).id, id, parsed.data);
+  if (!page) return c.json({ error: 'news topic not found' }, 404);
+  return c.json(page);
+});
+
+g.get('/:slug/news/topics/:id/items/:itemId', async (c) => {
+  const id = c.req.param('id'); const itemId = c.req.param('itemId');
+  if (!isUuid(id) || !isUuid(itemId)) return c.json({ error: 'invalid id' }, 400);
+  const item = await getNewsItem(gr(c).id, id, itemId);
+  if (!item) return c.json({ error: 'news item not found' }, 404);
+  return c.json({ ...item, extra_sources: await listNewsItemSources(item.id) });
 });
 
 g.post('/:slug/news/topics/:id/items/delete', async (c) => {

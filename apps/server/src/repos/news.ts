@@ -1,5 +1,5 @@
 import { sql } from '../db/pool.ts';
-import type { NewsItem, NewsRule, NewsRuleInput, NewsSource, NewsSourceInput, NewsTopic, NewsTopicDetail } from '@workspace/shared';
+import type { NewsItem, NewsItemsPage, NewsItemsQuery, NewsRule, NewsRuleInput, NewsSource, NewsSourceInput, NewsTopic, NewsTopicDetail } from '@workspace/shared';
 
 function itemOut(r: Record<string, unknown>): NewsItem {
   return {
@@ -71,9 +71,6 @@ export async function getNewsTopic(groupId: string, id: string): Promise<NewsTop
     from news_sources where topic_id = ${id} order by created_at desc`;
   const [rules] = await sql`select freshness_hours, min_sources, allowed_domains, blocked_domains, keywords, updated_at
     from news_rules where topic_id = ${id}`;
-  const items = await sql`select id, title, url, domain, summary, published_at, status, score, reason, post_id, created_at
-    from news_items where topic_id = ${id}
-    order by published_at desc nulls last, created_at desc limit 50`;
   return {
     id: topic.id as string,
     name: topic.name as string,
@@ -92,7 +89,7 @@ export async function getNewsTopic(groupId: string, id: string): Promise<NewsTop
       url: s.url as string,
       active: s.active as boolean,
       created_at: s.created_at as string,
-    })),
+    })) as NewsSource[],
     rules: rules ? {
       freshness_hours: rules.freshness_hours as number,
       min_sources: rules.min_sources as number,
@@ -108,20 +105,14 @@ export async function getNewsTopic(groupId: string, id: string): Promise<NewsTop
       keywords: [],
       updated_at: topic.created_at as string,
     },
-    items: items.map((i) => ({
-      id: i.id as string,
-      title: i.title as string,
-      url: i.url as string,
-      domain: i.domain as string,
-      summary: i.summary as string,
-      published_at: (i.published_at as string | null) ?? null,
-      status: i.status as 'pending' | 'valid' | 'rejected' | 'used',
-      score: (i.score as number | null) ?? null,
-      reason: (i.reason as string | null) ?? null,
-      post_id: (i.post_id as string | null) ?? null,
-      created_at: i.created_at as string,
-    })),
   };
+}
+
+export async function getNewsItem(groupId: string, topicId: string, itemId: string): Promise<NewsItem | null> {
+  const [r] = await sql`select i.id, i.title, i.url, i.domain, i.summary, i.published_at, i.status, i.score, i.reason, i.post_id, i.created_at
+    from news_items i join news_topics t on t.id = i.topic_id
+    where i.id = ${itemId} and i.topic_id = ${topicId} and t.group_id = ${groupId}`;
+  return r ? itemOut(r) : null;
 }
 
 export async function addNewsSource(groupId: string, topicId: string, d: NewsSourceInput): Promise<NewsSource | null> {
@@ -218,6 +209,22 @@ export async function upsertNewsItem(topicId: string, sourceId: string | null, d
       reason = excluded.reason
     returning id, title, url, domain, summary, published_at, status, score, reason, post_id, created_at`;
   return itemOut(r!);
+}
+
+export type ExtraSource = { url: string; domain: string; title: string };
+
+// Corroborating sources for a multi-link item (primary stays on news_items).
+export async function setNewsItemSources(itemId: string, extra: ExtraSource[]): Promise<void> {
+  await sql`delete from news_item_sources where item_id = ${itemId}`;
+  for (const e of extra) {
+    await sql`insert into news_item_sources (item_id, url, domain, title) values (${itemId}, ${e.url}, ${e.domain}, ${e.title})
+      on conflict (item_id, url) do nothing`;
+  }
+}
+
+export async function listNewsItemSources(itemId: string): Promise<ExtraSource[]> {
+  const rows = await sql`select url, domain, title from news_item_sources where item_id = ${itemId} order by created_at, id`;
+  return rows.map((r) => ({ url: r.url as string, domain: r.domain as string, title: r.title as string }));
 }
 
 export async function listActiveNewsTopicIds(groupId: string): Promise<string[]> {
@@ -323,6 +330,37 @@ export async function claimValidNewsItem(groupId: string, p?: { topicId?: string
         order by i.score desc nulls last, i.published_at desc nulls last, i.created_at desc
         limit 1`;
   return r ? itemOut(r) : null;
+}
+
+// Regenerate-with-format: the news item behind a post is freed (used → valid) so the next run can claim it
+// again. post_id is kept: the old post stays linked (also if the new run fails); the new post overwrites it.
+// Null when the post is not a news post.
+export async function reopenNewsItemForPost(groupId: string, postId: string): Promise<{ itemId: string; topicId: string; templateId: string | null; templateReelId: string | null } | null> {
+  const [r] = await sql`update news_items i set status = 'valid'
+    from news_topics t
+    where i.post_id = ${postId} and i.topic_id = t.id and t.group_id = ${groupId} and t.active
+    returning i.id, i.topic_id, t.template_id, t.template_reel_id`;
+  return r ? { itemId: r.id as string, topicId: r.topic_id as string, templateId: (r.template_id as string | null) ?? null, templateReelId: (r.template_reel_id as string | null) ?? null } : null;
+}
+
+// Items table for the topic page: filter (status + title/domain search), sort, page.
+// ORDER BY comes from fixed branches — never interpolated. Manual fetch-one items sort by created_at by default.
+export async function listNewsItems(groupId: string, topicId: string, o: NewsItemsQuery): Promise<NewsItemsPage | null> {
+  const [t] = await sql`select 1 as ok from news_topics where id = ${topicId} and group_id = ${groupId}`;
+  if (!t) return null;
+  const like = `%${o.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+  const search = o.q ? sql`and (title ilike ${like} or domain ilike ${like})` : sql``;
+  const status = o.status === 'all' ? sql`` : sql`and status = ${o.status}`;
+  const col = o.sort === 'score' ? sql`score` : o.sort === 'published' ? sql`published_at` : sql`created_at`;
+  const dir = o.dir === 'asc' ? sql`asc` : sql`desc`;
+  const rows = await sql`select id, title, url, domain, summary, published_at, status, score, reason, post_id, created_at
+    from news_items where topic_id = ${topicId} ${search} ${status}
+    order by ${col} ${dir} nulls last, created_at desc
+    limit ${o.size} offset ${(o.page - 1) * o.size}`;
+  const cnt = await sql`select status, count(*)::int as n from news_items where topic_id = ${topicId} ${search} group by status`;
+  const counts: Record<string, number> = { all: 0, pending: 0, valid: 0, rejected: 0, used: 0 };
+  for (const c of cnt) { counts[c.status as string] = c.n as number; counts.all! += c.n as number; }
+  return { items: rows.map(itemOut), total: counts[o.status] ?? 0, counts };
 }
 
 export async function markNewsItemUsed(id: string, postId?: string): Promise<void> {
